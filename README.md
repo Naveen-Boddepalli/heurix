@@ -17,22 +17,52 @@
 
 ---
 
-## Quick Start & CLI Alias
+## Installation & Deployment
 
-The package is installed in the local environment and provides the `hx` and `heurix` command-line tools.
+### 1. Install via PyPI
+```bash
+pip install heurix
+# or with pipx for isolated global CLI access (recommended)
+pipx install heurix
+```
 
-### Set up Global Shell Alias
+### 2. Standalone One-Line Installer
+```bash
+curl -fsSL https://raw.githubusercontent.com/Naveen-Boddepalli/herurix/main/install.sh | bash
+```
 
-To use `hx` from any directory in your shell, add this to your `~/.zshrc` (or `~/.bashrc`):
+### 3. Docker Container (No Python installation required)
+```bash
+docker run --rm -v $(pwd):/workspace ghcr.io/naveen-boddepalli/heurix:latest generate
+```
 
+### 4. Local Development & Global Shell Alias
+Clone the repository and install in editable mode:
+```bash
+git clone https://github.com/Naveen-Boddepalli/herurix.git
+cd heurix
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e '.[dev,build]'
+```
+
+To run `hx` from anywhere in your shell, add this to your `~/.zshrc` or `~/.bashrc`:
 ```bash
 alias hx="/Users/boddepallinaveen/Desktop/heurix/.venv/bin/hx"
 ```
+Or execute directly from the repo using `./hx`.
 
-Or run directly from the workspace:
-```bash
-./hx --help
-```
+---
+
+## Deployment & CI/CD Pipelines
+
+The repository includes complete automated deployment files:
+- **PyPI Trusted Publishing (`.github/workflows/publish-pypi.yml`):** Automatically builds sdist and wheel packages and publishes to PyPI using secure GitHub Actions OIDC trusted publishing whenever a release is created or a version tag (`v*.*.*`) is pushed. Also supports manual TestPyPI/PyPI deployments via `workflow_dispatch`.
+- **Multi-Platform Docker Publishing (`.github/workflows/docker-publish.yml`):** Builds multi-arch (`linux/amd64`, `linux/arm64`) container images and publishes to GitHub Container Registry (`ghcr.io/naveen-boddepalli/heurix:latest`).
+- **Continuous Integration (`.github/workflows/ci.yml`):** Automatically runs test suites on every pull request and push to `main`.
+- **Production `Dockerfile` & `.dockerignore`:** Multi-stage minimal container runtime with non-root security user and `/workspace` mount point.
+- **Homebrew Formula (`packaging/homebrew/heurix.rb`):** Ready for tap-based distribution via `brew install`.
+- **`Makefile`:** Rapid developer tasks (`make test`, `make build`, `make docker-build`, `make check`).
 
 ---
 

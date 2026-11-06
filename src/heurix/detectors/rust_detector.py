@@ -5,7 +5,15 @@ Rust Language and Cargo Ecosystem Detector.
 from __future__ import annotations
 
 import re
-import tomllib
+import sys
+
+if sys.version_info >= (3, 11):
+    import tomllib
+else:
+    try:
+        import tomli as tomllib
+    except ImportError:
+        import tomllib  # type: ignore
 from heurix.core.context import LanguageContext, ProjectContext
 from heurix.core.indexer import RepoIndexer
 from heurix.detectors.base import BaseDetector

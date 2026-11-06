@@ -86,11 +86,26 @@ class PythonDetector(BaseDetector):
         elif indexer.has_file("requirements.txt"):
             package_manager = "pip"
             install_cmd = "pip install -r requirements.txt"
+            if indexer.has_file("requirements-dev.txt"):
+                install_cmd += " -r requirements-dev.txt"
             context.add_explain("Detected Package Manager: pip (via requirements.txt)")
         elif indexer.has_file("pyproject.toml"):
             package_manager = "pip"
-            install_cmd = "pip install ."
-            context.add_explain("Detected Package Manager: pip (via pyproject.toml)")
+            install_cmd = "pip install -e ."
+            pyproject_content = indexer.read_text("pyproject.toml") or ""
+            try:
+                data = tomllib.loads(pyproject_content)
+                opt_deps = data.get("project", {}).get("optional-dependencies", {})
+                if "dev" in opt_deps:
+                    install_cmd = "pip install -e '.[dev]'"
+                elif "test" in opt_deps:
+                    install_cmd = "pip install -e '.[test]'"
+                elif opt_deps:
+                    first_opt = next(iter(opt_deps.keys()))
+                    install_cmd = f"pip install -e '.[{first_opt}]'"
+            except Exception:
+                pass
+            context.add_explain(f"Detected Package Manager: pip (via pyproject.toml, cmd: {install_cmd})")
 
         # 3. Framework & Dependency Scanning
         framework: Optional[str] = None

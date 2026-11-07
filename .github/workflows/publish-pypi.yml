@@ -73,14 +73,18 @@ jobs:
           packages-dir: dist/
 
       - name: Publish to PyPI (API Token)
-        if: ${{ inputs.repository != 'testpypi' && secrets.PYPI_API_TOKEN != '' }}
+        env:
+          PYPI_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+        if: ${{ inputs.repository != 'testpypi' && env.PYPI_TOKEN != '' }}
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist/
           password: ${{ secrets.PYPI_API_TOKEN }}
 
       - name: Publish to PyPI (Trusted Publishing OIDC)
-        if: ${{ inputs.repository != 'testpypi' && secrets.PYPI_API_TOKEN == '' }}
+        env:
+          PYPI_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+        if: ${{ inputs.repository != 'testpypi' && env.PYPI_TOKEN == '' }}
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist/

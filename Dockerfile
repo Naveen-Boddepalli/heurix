@@ -22,8 +22,8 @@ FROM python:3.12-slim AS runner
 
 LABEL org.opencontainers.image.title="Heurix" \
       org.opencontainers.image.description="Deterministic Codebase Scanner & Automated YAML Synthesizer" \
-      org.opencontainers.image.url="https://github.com/Naveen-Boddepalli/herurix" \
-      org.opencontainers.image.source="https://github.com/Naveen-Boddepalli/herurix" \
+      org.opencontainers.image.url="https://github.com/Naveen-Boddepalli/heurix" \
+      org.opencontainers.image.source="https://github.com/Naveen-Boddepalli/heurix" \
       org.opencontainers.image.licenses="MIT"
 
 ENV PYTHONUNBUFFERED=1 \

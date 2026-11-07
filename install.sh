@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ==============================================================================
 # Heurix (hx) Official Installer
-# https://github.com/Naveen-Boddepalli/herurix
+# https://github.com/Naveen-Boddepalli/heurix
 # ==============================================================================
 
 set -euo pipefail

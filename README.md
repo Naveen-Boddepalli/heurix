@@ -28,7 +28,7 @@ pipx install heurix
 
 ### 2. Standalone One-Line Installer
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Naveen-Boddepalli/herurix/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Naveen-Boddepalli/heurix/main/install.sh | bash
 ```
 
 ### 3. Docker Container (No Python installation required)
@@ -39,7 +39,7 @@ docker run --rm -v $(pwd):/workspace ghcr.io/naveen-boddepalli/heurix:latest gen
 ### 4. Local Development & Global Shell Alias
 Clone the repository and install in editable mode:
 ```bash
-git clone https://github.com/Naveen-Boddepalli/herurix.git
+git clone https://github.com/Naveen-Boddepalli/heurix.git
 cd heurix
 python3 -m venv .venv
 source .venv/bin/activate

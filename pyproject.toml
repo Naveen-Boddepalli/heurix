@@ -57,9 +57,9 @@ build = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/Naveen-Boddepalli/herurix"
-Repository = "https://github.com/Naveen-Boddepalli/herurix"
-Issues = "https://github.com/Naveen-Boddepalli/herurix/issues"
+Homepage = "https://github.com/Naveen-Boddepalli/heurix"
+Repository = "https://github.com/Naveen-Boddepalli/heurix"
+Issues = "https://github.com/Naveen-Boddepalli/heurix/issues"
 
 [project.scripts]
 hx = "heurix.cli:app"

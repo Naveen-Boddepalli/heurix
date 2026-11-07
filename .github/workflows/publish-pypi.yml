@@ -72,8 +72,15 @@ jobs:
           repository-url: https://test.pypi.org/legacy/
           packages-dir: dist/
 
-      - name: Publish to PyPI
-        if: ${{ inputs.repository != 'testpypi' }}
+      - name: Publish to PyPI (API Token)
+        if: ${{ inputs.repository != 'testpypi' && secrets.PYPI_API_TOKEN != '' }}
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
+          password: ${{ secrets.PYPI_API_TOKEN }}
+
+      - name: Publish to PyPI (Trusted Publishing OIDC)
+        if: ${{ inputs.repository != 'testpypi' && secrets.PYPI_API_TOKEN == '' }}
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist/

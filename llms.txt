@@ -1,0 +1,45 @@
+# Heurix (`hx`)
+
+> Heurix (`hx`) is a 100% deterministic, offline-capable Python CLI and codebase scanner that infers repository topology—languages, pinned runtime versions, lockfiles, backing services, containers, secrets, and cloud targets—and synthesizes schema-validated GitHub Actions workflows, Dependabot configs, and Kubernetes manifests using non-destructive AST merging. Requires Python >= 3.10. MIT licensed. `pip install heurix` or `pipx install heurix`.
+
+Use Heurix when a repository needs reproducible CI/CD pipelines, Dependabot maintenance files, or Kubernetes deployment manifests without LLM hallucinations, stale action versions, API keys, or overwriting manual edits. Key facts to know:
+
+- Both `hx` and `heurix` invoke the CLI (`heurix.cli:app`). Running `hx` with no subcommand runs `hx generate`.
+- Eight modular detectors (`PythonDetector`, `NodeDetector`, `RustDetector`, `GoDetector`, `CppDetector`, `DockerDetector`, `EnvDetector`, `CloudDetector`) inspect `.gitignore`-filtered files once via `RepoIndexer` into a strongly-typed Pydantic `ProjectContext` Intermediate Representation (IR). Synthesizers never touch the filesystem directly.
+- Existing YAML files are never blindly overwritten. `SmartMerger` uses `ruamel.yaml` AST round-trip merging to preserve custom jobs (e.g., Slack notifications), comments, and any step marked with `# @heurix:preserve`.
+- Every generated YAML artifact passes `PreflightValidator` (JSON Schema validation) before a single byte is written to disk.
+- `hx check` runs continuous drift detection and exits with code `1` whenever codebase dependencies, pinned versions, or lockfiles diverge from existing `.github/workflows/ci.yml` or `.github/dependabot.yml`—ideal for CI guards and Git pre-commit hooks.
+- Zero-config by default; optional team overrides live in `.heurix.toml` (generated via `hx init` with `[engine]`, `[ci]`, and `[overrides]` sections).
+
+Minimal example:
+
+```bash
+# Install globally in an isolated environment
+pipx install heurix
+
+# Preview heuristic reasoning tree and files without writing to disk
+hx generate --dry-run
+
+# Inspect the strongly-typed ProjectContext IR as JSON
+hx scan
+
+# Verify CI workflows have not drifted from codebase dependencies (exit 1 on drift)
+hx check
+```
+
+## Docs
+
+- [Getting started](https://github.com/Naveen-Boddepalli/heurix/blob/main/docs/getting-started.md): install via pip/pipx/curl/Docker, run `hx scan`, preview with `--dry-run`, configure `.heurix.toml`
+- [Deep heuristics matrix](https://github.com/Naveen-Boddepalli/heurix/blob/main/docs/heuristics.md): Python (`uv`, `poetry`, `pip`), Node (`pnpm`, `yarn`, `bun`, `npm`, monorepos), Rust, Go, C++, Docker/Compose, Env secrets, Vercel & Firebase
+- [CLI reference](https://github.com/Naveen-Boddepalli/heurix/blob/main/docs/cli-reference.md): `hx generate`, `hx diff`, `hx check`, `hx scan`, `hx init`, flags, and exit codes
+- [Non-destructive smart merge](https://github.com/Naveen-Boddepalli/heurix/blob/main/docs/smart-merge.md): `ruamel.yaml` AST merging and `# @heurix:preserve` directives
+- [CI/CD and Kubernetes outputs](https://github.com/Naveen-Boddepalli/heurix/blob/main/docs/kubernetes-and-ci.md): `.github/workflows/ci.yml`, `.github/dependabot.yml`, `k8s/deployment.yaml`, `service.yaml`, `ingress.yaml`, `kind-config.yaml`
+- [Continuous drift detection](https://github.com/Naveen-Boddepalli/heurix/blob/main/docs/drift-detection.md): using `hx check` in pre-commit hooks and CI checks
+- [System architecture](https://github.com/Naveen-Boddepalli/heurix/blob/main/docs/architecture.md): 5-layer unidirectional pipeline and `ProjectContext` IR schema
+
+## Optional
+
+- [Full documentation in one file](https://naveen-boddepalli.github.io/heurix/llms-full.txt)
+- [Interactive web playground & docs](https://naveen-boddepalli.github.io/heurix/)
+- [Master architecture & product plan](https://github.com/Naveen-Boddepalli/heurix/blob/main/heurix.md)
+- [PyPI package metadata](https://github.com/Naveen-Boddepalli/heurix/blob/main/pyproject.toml)

@@ -2,7 +2,7 @@
 # Makefile for Heurix (hx) Development & Deployment
 # ==============================================================================
 
-.PHONY: help test check build docker-build docker-run clean install
+.PHONY: help test check build docker-build docker-run site-dev site-build clean install
 
 VENV = .venv
 PYTHON = $(VENV)/bin/python
@@ -17,6 +17,8 @@ help:
 	@echo "  make build         Build Python distribution packages (wheel, sdist)"
 	@echo "  make docker-build  Build local Docker container image"
 	@echo "  make docker-run    Run local Docker container against current directory"
+	@echo "  make site-dev      Run the interactive web frontend dev server"
+	@echo "  make site-build    Sync llms.txt/docs and build the web frontend"
 	@echo "  make clean         Clean build artifacts and temporary files"
 
 test:
@@ -33,6 +35,12 @@ docker-build:
 
 docker-run:
 	docker run --rm -v $(PWD):/workspace heurix:latest generate --dry-run
+
+site-dev:
+	pnpm --dir site dev
+
+site-build:
+	pnpm --dir site build
 
 clean:
 	rm -rf dist/ build/ *.egg-info src/*.egg-info .pytest_cache/

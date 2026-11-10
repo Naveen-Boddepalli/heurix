@@ -19,7 +19,20 @@ SENSITIVE_KEYWORDS = [
     "PRIVATE",
     "CREDENTIAL",
     "CERT",
+    "URL",
+    "URI",
+    "DSN",
+    "CONN",
+    "WEBHOOK",
+    "SESSION",
 ]
+
+DEPLOYMENT_SECRET_PREFIXES = (
+    "VERCEL_",
+    "FIREBASE_",
+    "AWS_",
+    "DOCKER_",
+)
 
 
 class EnvDetector(BaseDetector):
@@ -64,7 +77,11 @@ class EnvDetector(BaseDetector):
                     key = key.strip()
                     val = val.strip().strip("'\"")
 
-                    is_sensitive = any(sk in key.upper() for sk in SENSITIVE_KEYWORDS)
+                    key_upper = key.upper()
+                    is_sensitive = (
+                        any(sk in key_upper for sk in SENSITIVE_KEYWORDS)
+                        or "SERVICE_ACCOUNT" in key_upper
+                    )
                     if is_sensitive:
                         found_secrets.add(key)
                     else:
@@ -76,3 +93,9 @@ class EnvDetector(BaseDetector):
             if s not in context.required_secrets:
                 context.required_secrets.append(s)
                 context.add_explain(f"Wired sensitive secret: {s} -> ${{ secrets.{s} }}")
+            if s.upper().startswith(DEPLOYMENT_SECRET_PREFIXES):
+                if s not in context.deployment_secrets:
+                    context.deployment_secrets.append(s)
+            else:
+                if s not in context.test_secrets:
+                    context.test_secrets.append(s)

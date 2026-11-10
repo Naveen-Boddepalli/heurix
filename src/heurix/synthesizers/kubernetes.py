@@ -11,6 +11,30 @@ from heurix.core.context import ProjectContext
 from heurix.synthesizers.base import BaseSynthesizer
 
 
+SENSITIVE_KEYWORDS = (
+    "SECRET",
+    "PASSWORD",
+    "TOKEN",
+    "KEY",
+    "AUTH",
+    "PRIVATE",
+    "CREDENTIAL",
+    "CERT",
+    "URL",
+    "URI",
+    "DSN",
+    "CONN",
+    "WEBHOOK",
+    "SESSION",
+)
+
+
+def _is_sensitive_env_key(key: str) -> bool:
+    """Return True if an environment variable key matches any sensitive credential keyword."""
+    key_upper = key.upper()
+    return any(sk in key_upper for sk in SENSITIVE_KEYWORDS) or "SERVICE_ACCOUNT" in key_upper
+
+
 class KubernetesSynthesizer(BaseSynthesizer):
     @property
     def name(self) -> str:
@@ -25,16 +49,20 @@ class KubernetesSynthesizer(BaseSynthesizer):
         yaml.indent(mapping=2, sequence=4, offset=2)
 
         app_name = context.repo_name.lower().replace("_", "-")
+        primary = context.get_primary_language()
+        is_streamlit = bool(primary and primary.framework == "Streamlit")
+
         port = 8080
-        if context.containers and context.containers[0].exposed_ports:
+        if is_streamlit:
+            port = 8501
+        elif context.containers and context.containers[0].exposed_ports:
             port = context.containers[0].exposed_ports[0]
-        elif context.get_primary_language() and context.get_primary_language().framework == "FastAPI":
+        elif primary and primary.framework == "FastAPI":
             port = 8000
-        elif context.get_primary_language() and context.get_primary_language().framework in ["Next.js", "Express"]:
+        elif primary and primary.framework in ["Next.js", "Express"]:
             port = 3000
 
         # Memory baselines
-        primary = context.get_primary_language()
         if primary and primary.language in ["go", "rust"]:
             cpu_req = "50m"
             mem_req = "64Mi"
@@ -47,6 +75,62 @@ class KubernetesSynthesizer(BaseSynthesizer):
             cpu_req = "100m"
             mem_req = "256Mi"
             mem_limit = "512Mi"
+
+        if is_streamlit:
+            readiness_probe = {
+                "httpGet": {"path": "/_stcore/health", "port": port},
+                "initialDelaySeconds": 5,
+                "periodSeconds": 10,
+            }
+        else:
+            readiness_probe = {
+                "tcpSocket": {"port": port},
+                "initialDelaySeconds": 5,
+                "periodSeconds": 10,
+            }
+
+        liveness_probe = {
+            "tcpSocket": {"port": port},
+            "initialDelaySeconds": 15,
+            "periodSeconds": 10,
+        }
+
+        container_spec: Dict[str, Any] = {
+            "name": app_name,
+            "image": f"{app_name}:latest",
+            "ports": [{"containerPort": port}],
+            "resources": {
+                "requests": {"cpu": cpu_req, "memory": mem_req},
+                "limits": {"cpu": "500m", "memory": mem_limit},
+            },
+            "livenessProbe": liveness_probe,
+            "readinessProbe": readiness_probe,
+        }
+
+        declared_secrets = (
+            set(context.required_secrets)
+            | set(context.test_secrets)
+            | set(context.deployment_secrets)
+        )
+        safe_env = {
+            k: v
+            for k, v in context.env_vars.items()
+            if k not in declared_secrets and not _is_sensitive_env_key(k)
+        }
+
+        env_from: List[Dict[str, Any]] = []
+        if safe_env:
+            env_from.append({"configMapRef": {"name": f"{app_name}-config"}})
+        if declared_secrets:
+            env_from.append({
+                "secretRef": {
+                    "name": f"{app_name}-secrets",
+                    "optional": True,
+                }
+            })
+
+        if env_from:
+            container_spec["envFrom"] = env_from
 
         # 1. Deployment
         deployment: Dict[str, Any] = {
@@ -62,27 +146,7 @@ class KubernetesSynthesizer(BaseSynthesizer):
                 "template": {
                     "metadata": {"labels": {"app": app_name}},
                     "spec": {
-                        "containers": [
-                            {
-                                "name": app_name,
-                                "image": f"{app_name}:latest",
-                                "ports": [{"containerPort": port}],
-                                "resources": {
-                                    "requests": {"cpu": cpu_req, "memory": mem_req},
-                                    "limits": {"cpu": "500m", "memory": mem_limit},
-                                },
-                                "livenessProbe": {
-                                    "tcpSocket": {"port": port},
-                                    "initialDelaySeconds": 15,
-                                    "periodSeconds": 10,
-                                },
-                                "readinessProbe": {
-                                    "tcpSocket": {"port": port},
-                                    "initialDelaySeconds": 5,
-                                    "periodSeconds": 10,
-                                },
-                            }
-                        ]
+                        "containers": [container_spec]
                     },
                 },
             },
@@ -109,17 +173,15 @@ class KubernetesSynthesizer(BaseSynthesizer):
             },
         }
 
-        # 3. Ingress
+        # 3. Ingress (Modernized spec with ingressClassName)
         ingress: Dict[str, Any] = {
             "apiVersion": "networking.k8s.io/v1",
             "kind": "Ingress",
             "metadata": {
                 "name": f"{app_name}-ingress",
-                "annotations": {
-                    "kubernetes.io/ingress.class": "nginx",
-                },
             },
             "spec": {
+                "ingressClassName": "nginx",
                 "rules": [
                     {
                         "http": {
@@ -137,7 +199,7 @@ class KubernetesSynthesizer(BaseSynthesizer):
                             ]
                         }
                     }
-                ]
+                ],
             },
         }
 
@@ -147,8 +209,52 @@ class KubernetesSynthesizer(BaseSynthesizer):
             yaml.dump(data, s)
             return s.getvalue()
 
-        return {
+        # 4. Kind Local Development Cluster Config
+        kind_config: Dict[str, Any] = {
+            "kind": "Cluster",
+            "apiVersion": "kind.x-k8s.io/v1alpha4",
+            "metadata": {
+                "name": f"{app_name}-cluster",
+            },
+            "nodes": [
+                {
+                    "role": "control-plane",
+                    "kubeadmConfigPatches": [
+                        "kind: InitConfiguration\nnodeRegistration:\n  kubeletExtraArgs:\n    node-labels: \"ingress-ready=true\"\n"
+                    ],
+                    "extraPortMappings": [
+                        {
+                            "containerPort": 80,
+                            "hostPort": 80,
+                            "protocol": "TCP",
+                        },
+                        {
+                            "containerPort": 443,
+                            "hostPort": 443,
+                            "protocol": "TCP",
+                        },
+                    ],
+                }
+            ],
+        }
+
+        outputs: Dict[str, str] = {
             "k8s/deployment.yaml": to_yaml_str(deployment),
             "k8s/service.yaml": to_yaml_str(service),
             "k8s/ingress.yaml": to_yaml_str(ingress),
+            "k8s/kind-config.yaml": to_yaml_str(kind_config),
         }
+
+        if safe_env:
+            configmap: Dict[str, Any] = {
+                "apiVersion": "v1",
+                "kind": "ConfigMap",
+                "metadata": {
+                    "name": f"{app_name}-config",
+                    "labels": {"app": app_name},
+                },
+                "data": safe_env,
+            }
+            outputs["k8s/configmap.yaml"] = to_yaml_str(configmap)
+
+        return outputs

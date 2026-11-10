@@ -30,15 +30,3 @@ def prompt_conflict_resolution(file_path: str, non_interactive: bool = False) ->
 
     return choice or "apply"
 
-
-def prompt_e2e_parallel(non_interactive: bool = False) -> bool:
-    """
-    Ask if E2E tests should run in a separate parallel job.
-    """
-    if non_interactive:
-        return True
-
-    return questionary.confirm(
-        "Detected Playwright / E2E test runner alongside unit tests. Run E2E in a separate parallel job?",
-        default=True,
-    ).ask() or False

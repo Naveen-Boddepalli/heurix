@@ -7,7 +7,6 @@ from __future__ import annotations
 import difflib
 from rich.console import Console
 from rich.panel import Panel
-from rich.syntax import Syntax
 from rich.text import Text
 
 console = Console()

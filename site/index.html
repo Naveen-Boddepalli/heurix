@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- MANDATORY: Declare support for both light and dark themes -->
+    <meta name="color-scheme" content="light dark" />
+    <script>
+      try {
+        var saved = localStorage.getItem('color-scheme');
+        if (saved === 'light' || saved === 'dark') {
+          document.querySelector('meta[name="color-scheme"]').content = saved;
+        }
+      } catch (e) {}
+    </script>
+    <title>Heurix (hx) — Deterministic Codebase Scanner &amp; YAML Synthesizer</title>
+    <meta
+      name="description"
+      content="100% deterministic, offline-capable codebase scanner and automated YAML synthesizer for GitHub Actions CI/CD, Dependabot, and Kubernetes manifests."
+    />
+    <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+    <link rel="alternate" type="text/plain" title="llms.txt" href="llms.txt" />
+    <meta property="og:title" content="Heurix (hx) — Deterministic Codebase Scanner & YAML Synthesizer" />
+    <meta
+      property="og:description"
+      content="Scan lockfiles, versions, Dockerfiles, and dependencies to synthesize schema-validated CI/CD and Kubernetes YAML with non-destructive AST smart merging."
+    />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

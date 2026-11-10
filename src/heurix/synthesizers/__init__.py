@@ -18,7 +18,11 @@ DEFAULT_SYNTHESIZERS: List[BaseSynthesizer] = [
 ]
 
 
-def synthesize_all(context: ProjectContext, include_k8s: bool = True) -> Dict[str, str]:
+def synthesize_all(
+    context: ProjectContext,
+    include_k8s: bool = True,
+    include_dependabot: bool = True,
+) -> Dict[str, str]:
     """
     Runs all synthesizers against the project context.
     Returns mapping of { relative_path: yaml_content }.
@@ -26,6 +30,8 @@ def synthesize_all(context: ProjectContext, include_k8s: bool = True) -> Dict[st
     results: Dict[str, str] = {}
     for syn in DEFAULT_SYNTHESIZERS:
         if isinstance(syn, KubernetesSynthesizer) and not include_k8s:
+            continue
+        if isinstance(syn, MaintenanceSynthesizer) and not include_dependabot:
             continue
         files = syn.synthesize(context)
         results.update(files)

@@ -75,3 +75,645 @@ jobs:
 
     assert "Slack Notification" in merged
     assert "npm test" in merged
+
+
+def test_smart_merger_preserves_upload_coverage():
+    """Regression test: verify steps without words slack, notify, custom, deploy are preserved."""
+    existing_yaml = """name: CI
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # @heurix:preserve
+      - name: Upload Coverage
+        run: bash <(curl -s https://codecov.io/bash)
+"""
+
+    new_yaml = """name: CI
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run test
+        run: pytest
+"""
+
+    merger = SmartMerger()
+    merged = merger.merge_yaml(existing_yaml, new_yaml)
+
+    assert "Upload Coverage" in merged
+    assert "pytest" in merged
+
+
+def test_smart_merger_idempotent_across_multiple_runs():
+    existing_yaml = """name: CI
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # @heurix:preserve
+      - name: Upload Coverage
+        run: bash <(curl -s https://codecov.io/bash)
+"""
+    new_yaml = """name: CI
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run test
+        run: pytest
+"""
+    merger = SmartMerger()
+    run_1 = merger.merge_yaml(existing_yaml, new_yaml)
+    run_2 = merger.merge_yaml(run_1, new_yaml)
+
+    assert "Upload Coverage" in run_1
+    assert "Upload Coverage" in run_2
+
+
+def test_deep_merge_k8s_preserves_annotations_labels_probes_and_limits():
+    existing_yaml = """# User-managed Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo-app
+  # Keep Prometheus scraping enabled
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8080"
+  labels:
+    app: demo-app
+    team: platform
+spec:
+  replicas: 5 # Production replica count
+  template:
+    spec:
+      containers:
+        - name: demo-app
+          image: demo-app:v1.2.3
+          resources:
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8080
+"""
+
+    new_yaml = """# Synthesized deterministically by Heurix (hx)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo-app
+  labels:
+    app: demo-app
+    managed-by: heurix
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: demo-app
+  template:
+    metadata:
+      labels:
+        app: demo-app
+    spec:
+      containers:
+        - name: demo-app
+          image: demo-app:latest
+          ports:
+            - containerPort: 8080
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          livenessProbe:
+            tcpSocket:
+              port: 8080
+            periodSeconds: 10
+          readinessProbe:
+            tcpSocket:
+              port: 8080
+            periodSeconds: 10
+          envFrom:
+            - configMapRef:
+                name: demo-app-config
+"""
+
+    merger = SmartMerger()
+    merged = merger.merge_yaml(existing_yaml, new_yaml)
+
+    # User comments preserved
+    assert "# User-managed Deployment" in merged
+    assert "# Keep Prometheus scraping enabled" in merged
+    assert "# Production replica count" in merged
+
+    # Existing annotations, custom labels, replica count, and pinned image preserved
+    assert 'prometheus.io/scrape: "true"' in merged
+    assert 'prometheus.io/port: "8080"' in merged
+    assert "team: platform" in merged
+    assert "replicas: 5" in merged
+    assert "image: demo-app:v1.2.3" in merged
+
+    # Custom probes preserved without injecting conflicting tcpSocket handler
+    assert "path: /healthz" in merged
+    assert "path: /readyz" in merged
+    assert "tcpSocket" not in merged
+    assert "initialDelaySeconds: 20" in merged
+    assert "periodSeconds: 10" in merged
+
+    # Custom limits preserved while missing requests inserted
+    assert 'cpu: "1000m"' in merged
+    assert 'memory: "1Gi"' in merged
+    assert 'cpu: "100m"' in merged
+    assert 'memory: "256Mi"' in merged
+
+    # Missing synthesized keys inserted at multiple depths
+    assert "managed-by: heurix" in merged
+    assert "matchLabels:" in merged
+    assert "containerPort: 8080" in merged
+    assert "demo-app-config" in merged
+
+
+def test_deep_merge_sequences_by_identifier_keys():
+    from ruamel.yaml import YAML
+    from heurix.core.merger import deep_merge_nodes
+
+    yaml = YAML()
+    existing = yaml.load("""
+ports:
+  - containerPort: 8080
+    name: http
+    protocol: TCP
+  - port: 9090
+    targetPort: 9090
+items:
+  - id: primary
+    timeout: 30
+tags:
+  - stable
+  - v1
+""")
+    new = yaml.load("""
+ports:
+  - containerPort: 8080
+    hostPort: 80
+  - containerPort: 8443
+    name: https
+    protocol: TCP
+  - port: 9090
+    protocol: TCP
+items:
+  - id: primary
+    retries: 3
+  - id: secondary
+    retries: 1
+tags:
+  - v1
+  - latest
+""")
+
+    merged = deep_merge_nodes(existing, new)
+
+    # Matched by containerPort and deep-merged
+    http_port = next(p for p in merged["ports"] if p.get("containerPort") == 8080)
+    assert http_port["name"] == "http"
+    assert http_port["hostPort"] == 80
+
+    # Unmatched containerPort appended
+    https_port = next(p for p in merged["ports"] if p.get("containerPort") == 8443)
+    assert https_port["name"] == "https"
+
+    # Matched by port and deep-merged
+    metrics_port = next(p for p in merged["ports"] if p.get("port") == 9090)
+    assert metrics_port["targetPort"] == 9090
+    assert metrics_port["protocol"] == "TCP"
+
+    # Matched by id and appended unmatched id
+    primary = next(i for i in merged["items"] if i["id"] == "primary")
+    assert primary["timeout"] == 30
+    assert primary["retries"] == 3
+    assert any(i["id"] == "secondary" for i in merged["items"])
+
+    # Scalar sequence appends unique entries without duplicating existing ones
+    assert list(merged["tags"]) == ["stable", "v1", "latest"]
+
+
+def test_deep_merge_dependabot_preserves_schedule_and_ignore():
+    existing_yaml = """# Custom Dependabot policy
+version: 2
+updates:
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "daily" # Check security patches daily
+      time: "04:00"
+    ignore:
+      - dependency-name: "django"
+        versions: ["5.x"]
+  - package-ecosystem: "npm"
+    directory: "/frontend"
+    schedule:
+      interval: "monthly"
+"""
+
+    new_yaml = """# Synthesized deterministically by Heurix (hx)
+version: 2
+updates:
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+  - package-ecosystem: "npm"
+    directory: "/frontend"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+"""
+
+    merger = SmartMerger()
+    merged = merger.merge_yaml(existing_yaml, new_yaml)
+
+    # Comments and user schedule/ignore preserved
+    assert "# Custom Dependabot policy" in merged
+    assert "# Check security patches daily" in merged
+    assert 'interval: "daily"' in merged
+    assert 'time: "04:00"' in merged
+    assert 'dependency-name: "django"' in merged
+    assert 'interval: "monthly"' in merged
+
+    # Missing keys inserted on matched ecosystems without overwriting user values
+    from ruamel.yaml import YAML
+
+    doc = YAML().load(merged)
+    updates = doc["updates"]
+    pip_entry = next(u for u in updates if u["package-ecosystem"] == "pip")
+    assert pip_entry["schedule"]["interval"] == "daily"
+    assert pip_entry["open-pull-requests-limit"] == 10
+
+    frontend_npm = next(
+        u for u in updates if u["package-ecosystem"] == "npm" and u["directory"] == "/frontend"
+    )
+    assert frontend_npm["schedule"]["interval"] == "monthly"
+    assert frontend_npm["open-pull-requests-limit"] == 5
+
+    # Distinct directory npm and new docker ecosystem appended
+    assert any(u["package-ecosystem"] == "npm" and u["directory"] == "/" for u in updates)
+    assert any(u["package-ecosystem"] == "docker" and u["directory"] == "/" for u in updates)
+
+
+def test_step_matching_updates_managed_and_retains_unmanaged_steps():
+    from ruamel.yaml import YAML
+
+    existing_yaml = """name: CI
+jobs:
+  test:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Pre-checkout setup
+        run: echo init
+      - uses: actions/checkout@v3
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v4
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - run: pytest
+      - name: Custom Security Scan
+        run: ./scripts/scan.sh
+"""
+
+    new_yaml = """name: CI
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: uv sync --frozen
+      - name: Run tests
+        run: pytest
+"""
+
+    merger = SmartMerger()
+    merged = merger.merge_yaml(existing_yaml, new_yaml)
+    doc = YAML().load(merged)
+    steps = doc["jobs"]["test"]["steps"]
+    step_names = [s.get("name") for s in steps]
+    step_uses = [s.get("uses") for s in steps if "uses" in s]
+
+    # Managed steps updated without duplication
+    assert "actions/checkout@v4" in step_uses
+    assert "actions/checkout@v3" not in step_uses
+    assert "actions/setup-python@v5" in step_uses
+    assert "actions/setup-python@v4" not in step_uses
+    install_step = next(s for s in steps if s.get("name") == "Install dependencies")
+    assert install_step["run"] == "uv sync --frozen"
+    # Matched bare 'run: pytest' step against named 'Run tests' without duplication
+    assert sum(1 for s in steps if s.get("run") == "pytest") == 1
+
+    # Unmanaged custom steps retained in relative order
+    assert "Pre-checkout setup" in step_names
+    assert "Configure AWS" in step_names
+    assert "Custom Security Scan" in step_names
+    assert step_names.index("Pre-checkout setup") < step_names.index("Checkout repository")
+    assert step_names.index("Set up Python 3.12") < step_names.index("Configure AWS") < step_names.index("Install dependencies")
+
+
+def test_step_matching_preserved_step_not_overwritten_or_duplicated():
+    from ruamel.yaml import YAML
+
+    existing_yaml = """name: CI
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # @heurix:preserve
+      - name: Run tests
+        run: pytest -v --cov=src
+"""
+
+    new_yaml = """name: CI
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run tests
+        run: pytest
+"""
+
+    merger = SmartMerger()
+    merged = merger.merge_yaml(existing_yaml, new_yaml)
+    doc = YAML().load(merged)
+    steps = doc["jobs"]["test"]["steps"]
+
+    run_test_steps = [s for s in steps if s.get("name") == "Run tests"]
+    assert len(run_test_steps) == 1
+    assert run_test_steps[0]["run"] == "pytest -v --cov=src"
+    assert "@heurix:preserve" in merged
+
+
+def test_step_matching_idempotent_with_unmanaged_steps():
+    existing_yaml = """name: CI
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Custom Audit
+        run: bandit -r src
+      - name: Run tests
+        run: pytest
+"""
+
+    new_yaml = """name: CI
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run tests
+        run: pytest
+"""
+
+    merger = SmartMerger()
+    run_1 = merger.merge_yaml(existing_yaml, new_yaml)
+    run_2 = merger.merge_yaml(run_1, new_yaml)
+
+    assert run_1 == run_2
+    assert run_2.count("Custom Audit") == 1
+
+
+def test_syntax_error_raises_yaml_syntax_error():
+    import pytest
+    from heurix.core.merger import YamlSyntaxError
+
+    malformed_workflow = "jobs:\n  test:\n    - [unbalanced bracket"
+    malformed_k8s = "apiVersion: apps/v1\nmetadata:\n  name: [unclosed"
+    valid_new = "name: CI\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - run: pytest\n"
+
+    merger = SmartMerger()
+    with pytest.raises(YamlSyntaxError):
+        merger.merge_yaml(malformed_workflow, valid_new)
+
+    with pytest.raises(YamlSyntaxError):
+        merger.merge_yaml(malformed_k8s, "apiVersion: apps/v1\nkind: Deployment\n")
+
+
+def test_multidoc_k8s_merge_matches_preserves_and_appends():
+    from ruamel.yaml import YAML
+
+    existing_yaml = """# Custom deployment comment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo-app
+  annotations:
+    prometheus.io/scrape: "true"
+spec:
+  replicas: 4
+  template:
+    spec:
+      containers:
+        - name: demo-app
+          image: demo-app:v1.0.0
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: custom-extra-config
+data:
+  FEATURE_FLAG: "enabled"
+---
+# Custom service comment
+apiVersion: v1
+kind: Service
+metadata:
+  name: demo-app-service
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-type: nlb
+spec:
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+"""
+
+    new_yaml = """apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo-app
+  labels:
+    app: demo-app
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: demo-app
+  template:
+    spec:
+      containers:
+        - name: demo-app
+          image: demo-app:latest
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+          livenessProbe:
+            tcpSocket:
+              port: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: demo-app-service
+spec:
+  type: ClusterIP
+  ports:
+    - port: 80
+      targetPort: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: demo-app-ingress
+spec:
+  ingressClassName: nginx
+"""
+
+    merger = SmartMerger()
+    merged = merger.merge_yaml(existing_yaml, new_yaml)
+
+    assert "---" in merged
+    assert "# Custom deployment comment" in merged
+    assert "# Custom service comment" in merged
+
+    docs = [d for d in YAML().load_all(merged) if d is not None]
+    assert len(docs) == 4
+    by_key = {(d["kind"], d["metadata"]["name"]): d for d in docs}
+
+    assert ("Deployment", "demo-app") in by_key
+    assert ("ConfigMap", "custom-extra-config") in by_key
+    assert ("Service", "demo-app-service") in by_key
+    assert ("Ingress", "demo-app-ingress") in by_key
+
+    dep = by_key[("Deployment", "demo-app")]
+    assert dep["metadata"]["annotations"]["prometheus.io/scrape"] == "true"
+    assert dep["spec"]["replicas"] == 4
+    assert dep["spec"]["selector"]["matchLabels"]["app"] == "demo-app"
+    container = dep["spec"]["template"]["spec"]["containers"][0]
+    assert container["image"] == "demo-app:v1.0.0"
+    assert container["resources"]["requests"]["cpu"] == "100m"
+    assert "httpGet" in container["livenessProbe"]
+    assert "tcpSocket" not in container["livenessProbe"]
+
+    svc = by_key[("Service", "demo-app-service")]
+    assert svc["metadata"]["annotations"]["service.beta.kubernetes.io/aws-load-balancer-type"] == "nlb"
+    assert svc["spec"]["type"] == "ClusterIP"
+
+    # Idempotent on second run
+    merged_again = merger.merge_yaml(merged, new_yaml)
+    docs_again = [d for d in YAML().load_all(merged_again) if d is not None]
+    assert len(docs_again) == 4
+
+
+def test_multidoc_k8s_single_new_into_multidoc_existing():
+    from ruamel.yaml import YAML
+
+    existing_yaml = """apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo-app
+spec:
+  replicas: 3
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: demo-app-service
+spec:
+  type: NodePort
+"""
+
+    new_yaml = """apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo-app
+  labels:
+    app: demo-app
+spec:
+  replicas: 2
+"""
+
+    merger = SmartMerger()
+    merged = merger.merge_yaml(existing_yaml, new_yaml)
+    docs = [d for d in YAML().load_all(merged) if d is not None]
+
+    assert len(docs) == 2
+    assert docs[0]["kind"] == "Deployment"
+    assert docs[0]["spec"]["replicas"] == 3
+    assert docs[0]["metadata"]["labels"]["app"] == "demo-app"
+    assert docs[1]["kind"] == "Service"
+    assert docs[1]["spec"]["type"] == "NodePort"
+
+
+def test_multidoc_syntax_error_raises():
+    import pytest
+    from heurix.core.merger import YamlSyntaxError
+
+    existing_yaml = """apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo-app
+---
+apiVersion: v1
+kind: Service
+spec:
+  ports: [unclosed
+"""
+    new_yaml = "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: demo-app\n"
+
+    merger = SmartMerger()
+    with pytest.raises(YamlSyntaxError):
+        merger.merge_yaml(existing_yaml, new_yaml)
+
+
+

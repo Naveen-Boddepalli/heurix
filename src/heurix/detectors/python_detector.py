@@ -19,6 +19,20 @@ from heurix.core.context import LanguageContext, ProjectContext, ServiceRequirem
 from heurix.core.indexer import RepoIndexer
 from heurix.detectors.base import BaseDetector
 
+PYTHON_MOCK_SERVICES = {"fakeredis", "mockredispy", "testing.postgresql", "pgmock"}
+
+_MOCK_DEP_PATTERN = re.compile(
+    r"(?:testing[._-]postgresql|fakeredis|mockredispy|pgmock)(?:\[[^\]]*\])?",
+    re.IGNORECASE,
+)
+
+
+def _strip_python_mock_deps(deps_lower: str) -> tuple[str, list[str]]:
+    """Strip mock service package references (including extras) from dependency text."""
+    found_mocks = sorted({m.split("[")[0] for m in _MOCK_DEP_PATTERN.findall(deps_lower)})
+    cleaned = _MOCK_DEP_PATTERN.sub("", deps_lower)
+    return cleaned, found_mocks
+
 
 class PythonDetector(BaseDetector):
     @property
@@ -77,7 +91,7 @@ class PythonDetector(BaseDetector):
 
         # 2. Package Manager and Lockfile
         package_manager = "pip"
-        install_cmd = "pip install -r requirements.txt"
+        install_cmd = ""
 
         if indexer.has_file("uv.lock"):
             package_manager = "uv"
@@ -125,8 +139,23 @@ class PythonDetector(BaseDetector):
 
         deps_lower = deps_text.lower()
 
+        if not install_cmd:
+            install_cmd = "python -m pip install --upgrade pip"
+            if "pytest" in deps_lower or indexer.has_file("tests"):
+                install_cmd += " pytest"
+            context.add_explain("No lockfile or manifest found; using minimal pip setup")
+
+        # Prefix commands for isolated lockfile managers
+        cmd_prefix = ""
+        if package_manager == "uv":
+            cmd_prefix = "uv run "
+        elif package_manager == "poetry":
+            cmd_prefix = "poetry run "
+
         if "fastapi" in deps_lower:
             framework = "FastAPI"
+        elif "streamlit" in deps_lower:
+            framework = "Streamlit"
         elif "django" in deps_lower:
             framework = "Django"
         elif "flask" in deps_lower:
@@ -154,8 +183,19 @@ class PythonDetector(BaseDetector):
             lint_cmd = "flake8 ."
             context.add_explain("Detected Linter: flake8")
 
-        # 5. Service Container Inference from dependencies
-        if any(db in deps_lower for db in ["psycopg2", "asyncpg", "postgresql", "pgvector"]):
+        # Apply cmd_prefix to test_cmd and lint_cmd
+        if test_cmd:
+            test_cmd = f"{cmd_prefix}{test_cmd}"
+        if lint_cmd:
+            lint_cmd = f"{cmd_prefix}{lint_cmd}"
+
+        # 5. Service Container Inference from dependencies (excluding purely mock packages)
+        deps_clean, found_mocks = _strip_python_mock_deps(deps_lower)
+
+        has_real_postgres = any(
+            db in deps_clean for db in ["psycopg2", "asyncpg", "postgresql", "pgvector"]
+        )
+        if has_real_postgres:
             if not any(s.name == "postgres" for s in context.services):
                 context.services.append(
                     ServiceRequirement(
@@ -171,8 +211,11 @@ class PythonDetector(BaseDetector):
                     )
                 )
                 context.add_explain("Inferred Backing Service: PostgreSQL 16 (via python postgres client)")
+        elif any(m in {"testing.postgresql", "testing-postgresql", "testing_postgresql", "pgmock"} for m in found_mocks):
+            context.add_explain("Filtered mock postgres dependency from backing services")
 
-        if any(r in deps_lower for r in ["redis", "aioredis", "celery"]):
+        has_real_redis = any(r in deps_clean for r in ["redis", "aioredis", "celery"])
+        if has_real_redis:
             if not any(s.name == "redis" for s in context.services):
                 context.services.append(
                     ServiceRequirement(
@@ -184,6 +227,8 @@ class PythonDetector(BaseDetector):
                     )
                 )
                 context.add_explain("Inferred Backing Service: Redis 7 (via python redis client/celery)")
+        elif any(m in {"fakeredis", "mockredispy"} for m in found_mocks):
+            context.add_explain("Filtered mock redis dependency from backing services")
 
         context.languages.append(
             LanguageContext(

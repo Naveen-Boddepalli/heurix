@@ -1,0 +1,6 @@
+User-agent: *
+Allow: /
+
+# AI & LLM documentation endpoints (llmstxt.org)
+# /llms.txt
+# /llms-full.txt

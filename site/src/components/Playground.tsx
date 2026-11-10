@@ -1,0 +1,405 @@
+import { useMemo, useRef, useState } from 'react';
+import { checkDrift, runHeurixScan, simulateSmartMerge } from '../engine/heuristics';
+import { PRESET_REPOS } from '../engine/presets';
+import type { VirtualFile } from '../engine/types';
+import { CodeBlock } from './CodeBlock';
+
+type OutputTab = 'generate' | 'scan' | 'merge' | 'drift';
+
+const OUTPUT_TABS: { id: OutputTab; label: string }[] = [
+  { id: 'generate', label: 'hx generate (YAML)' },
+  { id: 'scan', label: 'hx scan (IR JSON)' },
+  { id: 'merge', label: 'hx diff (# @heurix:preserve)' },
+  { id: 'drift', label: 'hx check (Drift Guard)' },
+];
+
+export function Playground() {
+  const [presetId, setPresetId] = useState(PRESET_REPOS[0].id);
+  const currentPreset = PRESET_REPOS.find((p) => p.id === presetId) ?? PRESET_REPOS[0];
+
+  const [files, setFiles] = useState<VirtualFile[]>(() =>
+    currentPreset.files.map((f) => ({ ...f }))
+  );
+  const [selectedFilePath, setSelectedFilePath] = useState<string>(
+    currentPreset.files[0]?.path ?? ''
+  );
+  const [activeTab, setActiveTab] = useState<OutputTab>('generate');
+  const [selectedOutputFile, setSelectedOutputFile] = useState<string>('.github/workflows/ci.yml');
+  const [driftMode, setDriftMode] = useState<'clean' | 'stale-ci'>('stale-ci');
+
+  const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
+
+  function selectPreset(id: string) {
+    const next = PRESET_REPOS.find((p) => p.id === id) ?? PRESET_REPOS[0];
+    setPresetId(next.id);
+    setFiles(next.files.map((f) => ({ ...f })));
+    setSelectedFilePath(next.files[0]?.path ?? '');
+    setSelectedOutputFile('.github/workflows/ci.yml');
+  }
+
+  function toggleFile(path: string) {
+    setFiles((prev) =>
+      prev.map((f) => (f.path === path ? { ...f, enabled: !f.enabled } : f))
+    );
+  }
+
+  function updateFileContent(path: string, content: string) {
+    setFiles((prev) =>
+      prev.map((f) => (f.path === path ? { ...f, content } : f))
+    );
+  }
+
+  const scanResult = useMemo(
+    () => runHeurixScan(currentPreset.repoName, files),
+    [currentPreset.repoName, files]
+  );
+
+  const outputKeys = Object.keys(scanResult.synthesized);
+  const activeOutputPath = outputKeys.includes(selectedOutputFile)
+    ? selectedOutputFile
+    : outputKeys[0] ?? '';
+  const activeOutputCode = activeOutputPath
+    ? scanResult.synthesized[activeOutputPath]
+    : '# Enable at least one language or deployment config file to synthesize YAML.';
+
+  const activeFile = files.find((f) => f.path === selectedFilePath) ?? files[0];
+
+  const existingCiSample =
+    currentPreset.existingCiForMerge ??
+    `name: CI\non:\n  push:\n    branches: [main]\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      # @heurix:preserve\n      - name: Custom security & SBOM upload\n        run: ./scripts/upload-sbom.sh\n  slack_notify:\n    needs: test\n    if: failure()\n    runs-on: ubuntu-latest\n    steps:\n      - uses: slackapi/slack-github-action@v1`;
+
+  const mergedCiOutput = useMemo(
+    () =>
+      simulateSmartMerge(
+        existingCiSample,
+        scanResult.synthesized['.github/workflows/ci.yml'] ?? ''
+      ),
+    [existingCiSample, scanResult.synthesized]
+  );
+
+  const staleBaselineCi = useMemo(() => {
+    // Construct a baseline workflow that intentionally misses services or uses an older version
+    return `name: CI\non:\n  push:\n    branches: [main]\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - name: Legacy setup\n        run: echo "Outdated workflow"`;
+  }, []);
+
+  const driftFindings = useMemo(() => {
+    const targetCi =
+      driftMode === 'clean'
+        ? scanResult.synthesized['.github/workflows/ci.yml'] ?? null
+        : staleBaselineCi;
+    return checkDrift(scanResult.context, targetCi);
+  }, [driftMode, scanResult.context, scanResult.synthesized, staleBaselineCi]);
+
+  function handleTabKeyDown(e: React.KeyboardEvent<HTMLButtonElement>, index: number) {
+    let next = -1;
+    if (e.key === 'ArrowRight') next = (index + 1) % OUTPUT_TABS.length;
+    else if (e.key === 'ArrowLeft') next = (index - 1 + OUTPUT_TABS.length) % OUTPUT_TABS.length;
+    else if (e.key === 'Home') next = 0;
+    else if (e.key === 'End') next = OUTPUT_TABS.length - 1;
+
+    if (next !== -1) {
+      e.preventDefault();
+      setActiveTab(OUTPUT_TABS[next].id);
+      tabRefs.current[next]?.focus();
+    }
+  }
+
+  return (
+    <section id="playground" className="section">
+      <div className="container">
+        <div className="section-header">
+          <span className="eyebrow">Interactive Playground</span>
+          <h2>Run the deterministic engine live in your browser</h2>
+          <p>
+            Select a preset repository or edit any manifest file on the left. Heurix re-scans your virtual codebase
+            on every keystroke with zero network calls and synthesizes schema-validated YAML outputs.
+          </p>
+        </div>
+
+        <div className="playground-shell">
+          <div className="preset-strip" role="group" aria-label="Sample repositories">
+            {PRESET_REPOS.map((preset) => (
+              <button
+                key={preset.id}
+                type="button"
+                className="preset-btn"
+                aria-pressed={preset.id === presetId}
+                onClick={() => selectPreset(preset.id)}
+              >
+                {preset.label}
+              </button>
+            ))}
+
+            <div className="scan-meta" aria-live="polite">
+              <span>✔ Scanned in {scanResult.durationMs} ms</span>
+              <span>•</span>
+              <span>{outputKeys.length} artifacts</span>
+            </div>
+          </div>
+
+          <div className="workbench-grid">
+            {/* Left Sidebar: Virtual Repo Explorer & Live File Editor */}
+            <aside className="workbench-sidebar" aria-label="Repository files editor">
+              <div
+                style={{
+                  padding: '0.75rem 1rem',
+                  borderBlockEnd: '1px solid var(--border-subtle)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '0.5rem',
+                }}
+              >
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: '0.9375rem' }}>
+                    {currentPreset.repoName}/
+                  </div>
+                  <div style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)' }}>
+                    {currentPreset.subtitle}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="code-copy-btn"
+                  onClick={() => selectPreset(currentPreset.id)}
+                >
+                  Reset
+                </button>
+              </div>
+
+              <ul className="file-tree" aria-label="Repository files">
+                {files.map((file) => (
+                  <li key={file.path} className="file-row">
+                    <input
+                      type="checkbox"
+                      className="file-toggle"
+                      checked={file.enabled}
+                      onChange={() => toggleFile(file.path)}
+                      aria-label={`Include ${file.path} in scan`}
+                    />
+                    <button
+                      type="button"
+                      className={`file-select-btn${!file.enabled ? ' is-disabled' : ''}`}
+                      aria-current={activeFile?.path === file.path ? 'true' : undefined}
+                      onClick={() => setSelectedFilePath(file.path)}
+                    >
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {file.path}
+                      </span>
+                      <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>
+                        {file.enabled ? 'edit' : 'off'}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+
+              {activeFile && (
+                <div className="file-editor-wrap">
+                  <label htmlFor="virtual-file-editor" className="file-editor-label">
+                    <span>Editing: {activeFile.path}</span>
+                    <span>Live heuristic input</span>
+                  </label>
+                  <textarea
+                    id="virtual-file-editor"
+                    className="file-editor"
+                    value={activeFile.content}
+                    onChange={(e) => updateFileContent(activeFile.path, e.target.value)}
+                    spellCheck={false}
+                  />
+                </div>
+              )}
+            </aside>
+
+            {/* Right Panel: Synthesized Results & Explainability */}
+            <div className="workbench-main">
+              <div role="tablist" aria-label="Heurix output views" className="tablist">
+                {OUTPUT_TABS.map((tab, idx) => (
+                  <button
+                    key={tab.id}
+                    ref={(el) => {
+                      tabRefs.current[idx] = el;
+                    }}
+                    type="button"
+                    role="tab"
+                    id={`output-tab-${tab.id}`}
+                    aria-selected={activeTab === tab.id}
+                    tabIndex={activeTab === tab.id ? 0 : -1}
+                    className="tab-btn"
+                    onClick={() => setActiveTab(tab.id)}
+                    onKeyDown={(e) => handleTabKeyDown(e, idx)}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Tab 1: hx generate */}
+              <div
+                role="tabpanel"
+                aria-labelledby="output-tab-generate"
+                hidden={activeTab !== 'generate'}
+                tabIndex={activeTab === 'generate' ? 0 : undefined}
+              >
+                <div className="output-body">
+                  <div className="explain-box">
+                    <div className="explain-title">
+                      🔍 Heuristic Reasoning Tree (`hx generate --explain`)
+                    </div>
+                    <ul className="explain-list">
+                      {scanResult.context.explain_log.map((step, i) => (
+                        <li key={i}>
+                          <span className="explain-check" aria-hidden="true">
+                            ✔
+                          </span>
+                          <span>{step}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+
+                  {outputKeys.length > 0 && (
+                    <div className="output-file-bar" role="group" aria-label="Synthesized YAML targets">
+                      {outputKeys.map((filePath) => {
+                        const lineCount = scanResult.synthesized[filePath].trim().split('\n').length;
+                        return (
+                          <button
+                            key={filePath}
+                            type="button"
+                            className="output-file-pill"
+                            aria-pressed={activeOutputPath === filePath}
+                            onClick={() => setSelectedOutputFile(filePath)}
+                          >
+                            {filePath} ({lineCount}L)
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  <CodeBlock
+                    title={activeOutputPath || 'No targets generated'}
+                    code={activeOutputCode}
+                    badge={outputKeys.length > 0 ? '✔ JSON Schema Validated' : undefined}
+                  />
+                </div>
+              </div>
+
+              {/* Tab 2: hx scan */}
+              <div
+                role="tabpanel"
+                aria-labelledby="output-tab-scan"
+                hidden={activeTab !== 'scan'}
+                tabIndex={activeTab === 'scan' ? 0 : undefined}
+              >
+                <div className="output-body">
+                  <p style={{ fontSize: '0.9375rem' }}>
+                    Generators never touch the filesystem directly—all 8 detectors populate this strongly-typed
+                    <code>ProjectContext</code> Pydantic IR.
+                  </p>
+                  <CodeBlock
+                    title="hx scan (ProjectContext IR)"
+                    code={JSON.stringify(scanResult.context, null, 2)}
+                    badge={`Confidence: ${Math.round(scanResult.context.confidence * 100)}%`}
+                  />
+                </div>
+              </div>
+
+              {/* Tab 3: Smart Merge */}
+              <div
+                role="tabpanel"
+                aria-labelledby="output-tab-merge"
+                hidden={activeTab !== 'merge'}
+                tabIndex={activeTab === 'merge' ? 0 : undefined}
+              >
+                <div className="output-body">
+                  <p style={{ fontSize: '0.9375rem' }}>
+                    <code>SmartMerger</code> parses existing YAML via <code>ruamel.yaml</code> AST round-tripping.
+                    Custom jobs (like <code>slack_notify</code>) and any step marked with{' '}
+                    <code># @heurix:preserve</code> survive regeneration intact while managed steps update.
+                  </p>
+                  <div style={{ display: 'grid', gap: '1rem' }}>
+                    <CodeBlock
+                      title="Before: Existing .github/workflows/ci.yml (with custom steps)"
+                      code={existingCiSample}
+                      highlightDiff
+                    />
+                    <CodeBlock
+                      title="After: Merged .github/workflows/ci.yml (AST preserved)"
+                      code={mergedCiOutput}
+                      badge="✔ Preserved user customizations"
+                      highlightDiff
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Tab 4: Drift Guard */}
+              <div
+                role="tabpanel"
+                aria-labelledby="output-tab-drift"
+                hidden={activeTab !== 'drift'}
+                tabIndex={activeTab === 'drift' ? 0 : undefined}
+              >
+                <div className="output-body">
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem', alignItems: 'center' }}>
+                    <button
+                      type="button"
+                      className="preset-btn"
+                      aria-pressed={driftMode === 'stale-ci'}
+                      onClick={() => setDriftMode('stale-ci')}
+                    >
+                      Simulate Stale Workflow (Exit 1)
+                    </button>
+                    <button
+                      type="button"
+                      className="preset-btn"
+                      aria-pressed={driftMode === 'clean'}
+                      onClick={() => setDriftMode('clean')}
+                    >
+                      Simulate Synced Workflow (Exit 0)
+                    </button>
+                  </div>
+
+                  {driftFindings.length === 0 ? (
+                    <div className="drift-alert is-clean">
+                      <strong style={{ color: 'var(--success)' }}>
+                        ✔ Exit Code 0 — Zero Drift Detected
+                      </strong>
+                      <span>
+                        Existing CI/CD workflows are completely synchronized with {currentPreset.repoName}&apos;s
+                        dependencies, pinned runtime versions, and package managers.
+                      </span>
+                    </div>
+                  ) : (
+                    <div style={{ display: 'grid', gap: '0.75rem' }}>
+                      <div className="drift-alert">
+                        <strong style={{ color: 'var(--warning)' }}>
+                          ⚠ Exit Code 1 — Drift Detected ({driftFindings.length} issue(s))
+                        </strong>
+                        <span>
+                          Run <code>hx check</code> in CI or pre-commit hooks to catch these mismatches before merge:
+                        </span>
+                      </div>
+                      {driftFindings.map((finding, idx) => (
+                        <div key={idx} className="explain-box" style={{ display: 'grid', gap: '0.35rem' }}>
+                          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.84375rem', fontWeight: 700 }}>
+                            [{finding.severity}] {finding.file_path}
+                          </div>
+                          <div style={{ fontSize: '0.9rem' }}>{finding.issue}</div>
+                          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8125rem', color: 'var(--accent)' }}>
+                            ↳ {finding.recommendation}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}

@@ -72,30 +72,44 @@ class PreflightValidator:
     def validate(self, rel_path: str, content: str) -> Tuple[bool, List[str]]:
         errors: List[str] = []
 
-        # 1. Parse YAML syntax
+        # 1. Parse YAML syntax across all documents in stream
         try:
-            doc = self.yaml.load(content)
+            raw_docs = list(self.yaml.load_all(content))
         except Exception as e:
             return False, [f"YAML Syntax Error in '{rel_path}': {e}"]
 
-        if not isinstance(doc, dict):
+        docs = [d for d in raw_docs if d is not None]
+        if not docs:
             return False, [f"YAML Content in '{rel_path}' is not a valid dictionary/mapping."]
 
-        # 2. Schema check based on file path
-        if ".github/workflows" in rel_path:
-            try:
-                jsonschema.validate(instance=doc, schema=GITHUB_WORKFLOW_SCHEMA)
-            except jsonschema.ValidationError as ve:
-                errors.append(f"GitHub Workflow Schema Error: {ve.message}")
-        elif "dependabot.yml" in rel_path or "dependabot.yaml" in rel_path:
-            try:
-                jsonschema.validate(instance=doc, schema=DEPENDABOT_SCHEMA)
-            except jsonschema.ValidationError as ve:
-                errors.append(f"Dependabot Schema Error: {ve.message}")
-        elif rel_path.startswith("k8s/") or rel_path.endswith(".k8s.yaml"):
-            try:
-                jsonschema.validate(instance=doc, schema=K8S_SCHEMA)
-            except jsonschema.ValidationError as ve:
-                errors.append(f"Kubernetes Manifest Schema Error: {ve.message}")
+        multi = len(docs) > 1
+
+        schema_entry = self._select_schema(rel_path)
+
+        # 2. Schema check across each parsed document based on file path
+        for idx, doc in enumerate(docs, start=1):
+            doc_suffix = f" (document {idx})" if multi else ""
+            if not isinstance(doc, dict):
+                errors.append(
+                    f"YAML Content in '{rel_path}'{doc_suffix} is not a valid dictionary/mapping."
+                )
+                continue
+
+            if schema_entry is not None:
+                label, schema = schema_entry
+                try:
+                    jsonschema.validate(instance=doc, schema=schema)
+                except jsonschema.ValidationError as ve:
+                    errors.append(f"{label}{doc_suffix}: {ve.message}")
 
         return (len(errors) == 0), errors
+
+    @staticmethod
+    def _select_schema(rel_path: str) -> Tuple[str, dict] | None:
+        if ".github/workflows" in rel_path:
+            return ("GitHub Workflow Schema Error", GITHUB_WORKFLOW_SCHEMA)
+        if "dependabot.yml" in rel_path or "dependabot.yaml" in rel_path:
+            return ("Dependabot Schema Error", DEPENDABOT_SCHEMA)
+        if rel_path.startswith("k8s/") or rel_path.endswith((".k8s.yaml", ".k8s.yml")):
+            return ("Kubernetes Manifest Schema Error", K8S_SCHEMA)
+        return None

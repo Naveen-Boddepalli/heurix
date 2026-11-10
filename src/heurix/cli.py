@@ -14,7 +14,7 @@ from rich.panel import Panel
 
 from heurix import __version__
 from heurix.core.drift import DriftDetector
-from heurix.core.merger import SmartMerger
+from heurix.core.merger import SmartMerger, YamlSyntaxError
 from heurix.core.validator import PreflightValidator
 from heurix.detectors import analyze_repository
 from heurix.synthesizers import synthesize_all
@@ -29,6 +29,35 @@ app = typer.Typer(
     add_completion=False,
 )
 console = Console()
+
+
+def resolve_safe_path(base_dir: Path, rel_path: str | Path) -> Path:
+    """
+    Resolve rel_path against base_dir and verify strict containment within base_dir.
+    Raises ValueError on any path traversal or symlink escape attempt.
+    """
+    base_resolved = base_dir.resolve()
+    target_resolved = (base_resolved / rel_path).resolve()
+    if not target_resolved.is_relative_to(base_resolved):
+        raise ValueError(
+            f"Path traversal security violation: path '{rel_path}' resolves outside repository root '{base_dir}'"
+        )
+    return target_resolved
+
+
+def _resolve_or_exit(repo_path: Path, rel_path: str | Path) -> Path:
+    """Resolve a repository-relative target path or display an error panel and exit(1)."""
+    try:
+        return resolve_safe_path(repo_path, rel_path)
+    except ValueError as e:
+        console.print(
+            Panel.fit(
+                f"[bold red]Security Error:[/bold red] {e}",
+                title="Path Traversal Blocked",
+                border_style="red",
+            )
+        )
+        raise typer.Exit(code=1)
 
 
 def version_callback(value: bool):
@@ -87,10 +116,18 @@ def generate(
         print_explain_tree(context)
 
     # 3. Synthesize YAML outputs
-    synthesized = synthesize_all(context, include_k8s=k8s)
+    ci_cfg = context.policy_config.get("ci", {})
+    include_dependabot = ci_cfg.get("include_dependabot", True)
+    include_k8s = ci_cfg.get("include_k8s", k8s) if k8s else False
+
+    synthesized = synthesize_all(context, include_k8s=include_k8s, include_dependabot=include_dependabot)
     if not synthesized:
         console.print("[yellow]No relevant languages or container configs detected to synthesize.[/yellow]")
         return
+
+    # Validate repository boundary containment for all candidate output paths before validation or I/O
+    for rel_path in synthesized:
+        _resolve_or_exit(repo_path, rel_path)
 
     # 4. Pre-Flight Validation
     validator = PreflightValidator()
@@ -110,25 +147,46 @@ def generate(
     # 5. Diff preview or smart merge
     merger = SmartMerger()
     files_to_write: dict[str, str] = {}
+    engine_cfg = context.policy_config.get("engine", {})
+    non_destructive = engine_cfg.get("non_destructive", True)
 
     for rel_path, new_content in synthesized.items():
-        target_file = repo_path / rel_path
+        target_file = _resolve_or_exit(repo_path, rel_path)
         if target_file.exists():
             existing_content = target_file.read_text(encoding="utf-8", errors="replace")
-            merged_content = merger.merge_yaml(existing_content, new_content)
+            try:
+                merged_content = (
+                    merger.merge_yaml(existing_content, new_content)
+                    if non_destructive
+                    else new_content
+                )
+            except YamlSyntaxError as e:
+                console.print(
+                    Panel.fit(
+                        f"[bold red]YAML Syntax Error in '{rel_path}':[/bold red]\n{e}\n"
+                        "[dim]Fix the malformed YAML file or set non_destructive = false in .heurix.toml.[/dim]",
+                        title="Merge Aborted",
+                        border_style="red",
+                    )
+                )
+                raise typer.Exit(code=1)
 
             if diff:
                 show_diff(rel_path, existing_content, merged_content)
 
             if not dry_run and not yes:
-                choice = prompt_conflict_resolution(rel_path, non_interactive=yes)
+                while True:
+                    choice = prompt_conflict_resolution(rel_path, non_interactive=yes)
+                    if choice == "diff":
+                        show_diff(rel_path, existing_content, merged_content)
+                        continue
+                    break
+
                 if choice == "skip":
                     console.print(f"[dim]Skipped {rel_path}[/dim]")
                     continue
-                elif choice == "diff":
-                    show_diff(rel_path, existing_content, merged_content)
                 elif choice == "backup":
-                    backup_path = target_file.with_suffix(target_file.suffix + ".bak")
+                    backup_path = _resolve_or_exit(repo_path, f"{rel_path}.bak")
                     shutil.copyfile(target_file, backup_path)
                     console.print(f"[green]Backup created at {backup_path.name}[/green]")
 
@@ -147,7 +205,7 @@ def generate(
         return
 
     for rel_path, content in files_to_write.items():
-        dest = repo_path / rel_path
+        dest = _resolve_or_exit(repo_path, rel_path)
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text(content, encoding="utf-8")
         console.print(f"[bold green]✔ Written:[/bold green] [cyan]{rel_path}[/cyan]")
@@ -182,7 +240,10 @@ def check(
     """
     repo_path = Path(path).resolve()
     context = analyze_repository(repo_path)
-    synthesized = synthesize_all(context, include_k8s=False)
+    ci_cfg = context.policy_config.get("ci", {})
+    include_dependabot = ci_cfg.get("include_dependabot", True)
+    include_k8s = ci_cfg.get("include_k8s", False)
+    synthesized = synthesize_all(context, include_k8s=include_k8s, include_dependabot=include_dependabot)
 
     detector = DriftDetector(repo_path)
     findings = detector.check_drift(context, synthesized)
@@ -220,7 +281,7 @@ def init(
     Initialize a minimal .heurix.toml policy configuration for power users.
     """
     repo_path = Path(path).resolve()
-    config_file = repo_path / ".heurix.toml"
+    config_file = _resolve_or_exit(repo_path, ".heurix.toml")
     if config_file.exists():
         console.print("[yellow].heurix.toml already exists.[/yellow]")
         return

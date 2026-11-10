@@ -11,6 +11,42 @@ from heurix.core.context import LanguageContext, MonorepoPackage, ProjectContext
 from heurix.core.indexer import RepoIndexer
 from heurix.detectors.base import BaseDetector
 
+NODE_MOCK_SERVICES = {"redis-mock", "ioredis-mock", "pg-mem"}
+SQLITE_ADAPTERS = {"sqlite3", "better-sqlite3", "sqlite", "@libsql/client", "sql.js"}
+
+_PRISMA_DATASOURCE_RE = re.compile(
+    r"datasource\s+\w+\s*\{[^}]*provider\s*=\s*[\"']([^\"']+)[\"']",
+    re.DOTALL | re.IGNORECASE,
+)
+_TYPEORM_POSTGRES_RE = re.compile(
+    r"type\s*[:=]\s*[\"']postgres(?:ql)?[\"']",
+    re.IGNORECASE,
+)
+
+
+def _has_real_postgres_adapter(indexer: RepoIndexer, active_deps: Dict[str, Any]) -> bool:
+    """
+    Verify that Node dependencies or ORM schemas declare an explicit PostgreSQL
+    backing adapter rather than mock or embedded SQLite drivers.
+    """
+    if any(k in active_deps for k in ["pg", "pg-pool", "postgres", "@prisma/adapter-pg"]):
+        return True
+
+    if "prisma" in active_deps or "@prisma/client" in active_deps:
+        for prisma_file in indexer.find_files("*.prisma"):
+            schema_text = indexer.read_text(prisma_file) or ""
+            match = _PRISMA_DATASOURCE_RE.search(schema_text)
+            if match and match.group(1).strip().lower() in {"postgresql", "postgres", "cockroachdb"}:
+                return True
+
+    if "typeorm" in active_deps:
+        for cfg_file in indexer.find_files("*ormconfig*") + indexer.find_files("*data-source*"):
+            cfg_text = indexer.read_text(cfg_file) or ""
+            if _TYPEORM_POSTGRES_RE.search(cfg_text):
+                return True
+
+    return False
+
 
 class NodeDetector(BaseDetector):
     @property
@@ -161,8 +197,13 @@ class NodeDetector(BaseDetector):
         if framework:
             context.add_explain(f"Detected Framework: {framework}")
 
-        # Service Container Inference
-        if any(k in deps for k in ["pg", "pg-pool", "typeorm", "prisma", "@prisma/client"]):
+        # Service Container Inference (filter mock packages and verify real ORM adapters)
+        active_deps = {k: v for k, v in deps.items() if k not in NODE_MOCK_SERVICES}
+
+        has_orm_or_pg_mock = any(
+            k in deps for k in ["typeorm", "prisma", "@prisma/client", "pg-mem", *SQLITE_ADAPTERS]
+        )
+        if _has_real_postgres_adapter(indexer, active_deps):
             if not any(s.name == "postgres" for s in context.services):
                 context.services.append(
                     ServiceRequirement(
@@ -178,8 +219,13 @@ class NodeDetector(BaseDetector):
                     )
                 )
                 context.add_explain("Inferred Backing Service: PostgreSQL 16 (via node pg/prisma)")
+        elif has_orm_or_pg_mock:
+            context.add_explain(
+                "Skipped PostgreSQL inference: no real postgres adapter detected (mock or non-postgres datasource)"
+            )
 
-        if any(k in deps for k in ["redis", "ioredis"]):
+        redis_mocks_found = [k for k in deps if k in {"redis-mock", "ioredis-mock"}]
+        if any(k in active_deps for k in ["redis", "ioredis"]):
             if not any(s.name == "redis" for s in context.services):
                 context.services.append(
                     ServiceRequirement(
@@ -191,8 +237,12 @@ class NodeDetector(BaseDetector):
                     )
                 )
                 context.add_explain("Inferred Backing Service: Redis 7 (via node redis/ioredis)")
+        elif redis_mocks_found:
+            context.add_explain(
+                f"Filtered mock dependency '{', '.join(redis_mocks_found)}' from backing services"
+            )
 
-        if any(k in deps for k in ["mongodb", "mongoose"]):
+        if any(k in active_deps for k in ["mongodb", "mongoose"]):
             if not any(s.name == "mongodb" for s in context.services):
                 context.services.append(
                     ServiceRequirement(

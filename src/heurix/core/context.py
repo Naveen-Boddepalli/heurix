@@ -5,8 +5,8 @@ Generators never read the filesystem directly; they only read ProjectContext.
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional
-from pydantic import BaseModel, Field
+from typing import Any, Dict, List, Optional
+from pydantic import BaseModel, Field, model_validator
 
 
 class ServiceRequirement(BaseModel):
@@ -39,6 +39,16 @@ class ContainerContext(BaseModel):
     build_target: Optional[str] = None
 
 
+class DeploymentTarget(BaseModel):
+    platform: str  # "vercel", "firebase", etc.
+    config_file: str  # "vercel.json", "firebase.json", etc.
+    project_id: Optional[str] = None
+    features: List[str] = Field(default_factory=list)  # e.g. ["hosting", "functions", "firestore"]
+    deploy_cmd: Optional[str] = None
+    preview_deploy_cmd: Optional[str] = None
+    required_secrets: List[str] = Field(default_factory=list)
+
+
 class MonorepoPackage(BaseModel):
     name: str
     path: str
@@ -54,10 +64,23 @@ class ProjectContext(BaseModel):
     languages: List[LanguageContext] = Field(default_factory=list)
     services: List[ServiceRequirement] = Field(default_factory=list)
     containers: List[ContainerContext] = Field(default_factory=list)
+    deployment_targets: List[DeploymentTarget] = Field(default_factory=list)
+    test_secrets: List[str] = Field(default_factory=list)
+    deployment_secrets: List[str] = Field(default_factory=list)
     required_secrets: List[str] = Field(default_factory=list)
     env_vars: Dict[str, str] = Field(default_factory=dict)
+    language_scores: Dict[str, int] = Field(default_factory=dict)
     explain_log: List[str] = Field(default_factory=list)
     confidence: float = 1.0
+    runner: str = "ubuntu-latest"
+    policy_config: Dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _sync_required_secrets(self) -> "ProjectContext":
+        for secret in (*self.test_secrets, *self.deployment_secrets):
+            if secret not in self.required_secrets:
+                self.required_secrets.append(secret)
+        return self
 
     def add_explain(self, step: str) -> None:
         self.explain_log.append(step)
@@ -72,4 +95,38 @@ class ProjectContext(BaseModel):
         return None
 
     def get_primary_language(self) -> Optional[LanguageContext]:
-        return self.languages[0] if self.languages else None
+        """
+        Determine primary language dynamically using indexed language scores
+        (source file volume + root manifest weighting) or recorded language
+        metadata, breaking ties deterministically by alphabetized language name.
+        """
+        if not self.languages:
+            return None
+        if len(self.languages) == 1:
+            return self.languages[0]
+
+        if self.language_scores:
+            return min(
+                self.languages,
+                key=lambda lang: (
+                    -self.language_scores.get(lang.language.lower(), 0),
+                    lang.language.lower(),
+                ),
+            )
+
+        return min(
+            self.languages,
+            key=lambda lang: (
+                -lang.confidence,
+                lang.language.lower(),
+            ),
+        )
+
+    def has_deployment_target(self, platform: str) -> bool:
+        return any(t.platform.lower() == platform.lower() for t in self.deployment_targets)
+
+    def get_deployment_target(self, platform: str) -> Optional[DeploymentTarget]:
+        for t in self.deployment_targets:
+            if t.platform.lower() == platform.lower():
+                return t
+        return None

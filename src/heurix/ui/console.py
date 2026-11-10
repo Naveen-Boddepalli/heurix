@@ -57,6 +57,8 @@ def print_summary_table(synthesized_files: dict[str, str], dry_run: bool = False
         target = "GitHub Actions CI"
         if "dependabot" in path:
             target = "Dependabot Maintenance"
+        elif "kind" in path:
+            target = "Kind Cluster Config"
         elif "k8s" in path:
             target = "Kubernetes Manifest"
 

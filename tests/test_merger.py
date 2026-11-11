@@ -4,6 +4,7 @@ Tests for SmartMerger and AST preservation.
 
 from __future__ import annotations
 
+from pathlib import Path
 from heurix.core.merger import SmartMerger
 
 
@@ -716,4 +717,441 @@ spec:
         merger.merge_yaml(existing_yaml, new_yaml)
 
 
+def test_multijob_merger_syncs_defaults_needs_and_paths():
+    from ruamel.yaml import YAML
 
+    existing_yaml = """# Custom monorepo CI
+name: CI
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "**"
+jobs:
+  test-apps-web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+        working-directory: apps/old
+    steps:
+      - uses: actions/checkout@v3
+      # @heurix:preserve
+      - name: Custom Frontend Audit
+        run: pnpm audit
+  deploy_vercel:
+    name: Deploy to Vercel
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # @heurix:preserve
+      - name: Notify Deployment
+        run: echo deployed
+  custom_notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Slack
+        run: echo notify
+"""
+
+    new_yaml = """name: CI
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - apps/web/**
+      - services/api/**
+  pull_request:
+    branches:
+      - main
+    paths:
+      - apps/web/**
+      - services/api/**
+jobs:
+  test-apps-web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Run tests (node)
+        run: pnpm test
+  test-services-api:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/api
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Run tests (python)
+        run: pytest
+  deploy_vercel:
+    name: Deploy to Vercel
+    needs:
+      - test-apps-web
+      - test-services-api
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+"""
+
+    merger = SmartMerger()
+    merged = merger.merge_yaml(existing_yaml, new_yaml)
+    doc = YAML(typ="safe").load(merged)
+
+    assert doc["on"]["push"]["branches"] == ["main"]
+    assert doc["on"]["push"]["paths"] == ["apps/web/**", "services/api/**"]
+    assert doc["on"]["pull_request"]["branches"] == ["main"]
+    assert doc["on"]["pull_request"]["paths"] == ["apps/web/**", "services/api/**"]
+
+    web_job = doc["jobs"]["test-apps-web"]
+    assert web_job["timeout-minutes"] == 15
+    assert web_job["defaults"]["run"]["working-directory"] == "apps/web"
+    assert web_job["defaults"]["run"]["shell"] == "bash"
+    assert any("actions/checkout@v4" == s.get("uses") for s in web_job["steps"])
+    assert any(s.get("name") == "Custom Frontend Audit" for s in web_job["steps"])
+    assert any(s.get("run") == "pnpm test" for s in web_job["steps"])
+
+    assert "test-services-api" in doc["jobs"]
+    assert doc["jobs"]["test-services-api"]["defaults"]["run"]["working-directory"] == "services/api"
+
+    deploy_job = doc["jobs"]["deploy_vercel"]
+    assert deploy_job["needs"] == ["test-apps-web", "test-services-api"]
+    assert any(s.get("name") == "Notify Deployment" for s in deploy_job["steps"])
+
+    assert "custom_notify" in doc["jobs"]
+    assert doc["jobs"]["custom_notify"]["steps"][0]["name"] == "Ping Slack"
+
+    # Custom user-specified trigger paths must NOT be overwritten
+    custom_paths_existing = """name: CI
+on:
+  push:
+    branches: [main]
+    paths:
+      - custom/only/**
+jobs:
+  test-apps-web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+"""
+    merged_custom_paths = merger.merge_yaml(custom_paths_existing, new_yaml)
+    custom_doc = YAML(typ="safe").load(merged_custom_paths)
+    assert custom_doc["on"]["push"]["paths"] == ["custom/only/**"]
+
+    # Clearing stale working-directory when job moves to root without dropping custom shell
+    moved_to_root_new = """name: CI
+jobs:
+  test-apps-web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+"""
+    cleared_doc = YAML(typ="safe").load(merger.merge_yaml(merged, moved_to_root_new))
+    assert cleared_doc["jobs"]["test-apps-web"]["defaults"]["run"] == {"shell": "bash"}
+
+
+def test_matrix_merger_adds_updates_and_removes_stale_strategy():
+    from ruamel.yaml import YAML
+
+    merger = SmartMerger()
+
+    # 1. Existing single-pin workflow receives strategy.matrix + ${{ matrix.os }}
+    single_existing = """name: CI
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      # @heurix:preserve
+      - name: Security Check
+        run: bandit -r src
+      - name: Run tests (python)
+        run: pytest
+"""
+    matrix_new = """name: CI
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+        python-version:
+          - '3.10'
+          - '3.11'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Run tests (python)
+        run: pytest
+"""
+    added_yaml = merger.merge_yaml(single_existing, matrix_new)
+    added_doc = YAML(typ="safe").load(added_yaml)
+    job_added = added_doc["jobs"]["test"]
+    assert job_added["runs-on"] == "${{ matrix.os }}"
+    assert job_added["timeout-minutes"] == 20
+    assert job_added["strategy"] == {
+        "fail-fast": False,
+        "matrix": {
+            "os": ["ubuntu-latest", "macos-latest"],
+            "python-version": ["3.10", "3.11"],
+        },
+    }
+    assert any(s.get("name") == "Security Check" for s in job_added["steps"])
+
+    # 2. Existing matrix updates versions cleanly without leaving stale '3.10'
+    updated_matrix_new = """name: CI
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+        python-version:
+          - '3.11'
+          - '3.12'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Run tests (python)
+        run: pytest
+"""
+    updated_yaml = merger.merge_yaml(added_yaml, updated_matrix_new)
+    updated_doc = YAML(typ="safe").load(updated_yaml)
+    assert updated_doc["jobs"]["test"]["strategy"]["matrix"] == {
+        "os": ["ubuntu-latest"],
+        "python-version": ["3.11", "3.12"],
+    }
+
+    # 3. Collapsing matrix back to scalar pin removes stale strategy completely
+    collapsed_yaml = merger.merge_yaml(updated_yaml, single_existing)
+    collapsed_doc = YAML(typ="safe").load(collapsed_yaml)
+    job_collapsed = collapsed_doc["jobs"]["test"]
+    assert "strategy" not in job_collapsed
+    assert job_collapsed["runs-on"] == "ubuntu-latest"
+    assert job_collapsed["timeout-minutes"] == 20
+    assert any(s.get("name") == "Security Check" for s in job_collapsed["steps"])
+
+
+def test_phase3_merger_hpa_and_steps(tmp_path: Path):
+    from ruamel.yaml import YAML
+    from heurix.core.context import ContainerContext, LanguageContext, ProjectContext
+    from heurix.synthesizers.github_actions import GitHubActionsSynthesizer
+    from heurix.synthesizers.kubernetes import KubernetesSynthesizer
+
+    merger = SmartMerger()
+    yaml = YAML(typ="safe")
+
+    # 1. HPA v2 spec.metrics dedup + user threshold/comment/annotation preservation
+    existing_hpa = """# Custom HPA tuning
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: my-api-hpa
+  annotations:
+    team/owner: platform
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: my-api
+  minReplicas: 3
+  maxReplicas: 20
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 60
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 75
+"""
+    k8s_ctx = ProjectContext(
+        repo_name="my_api",
+        repo_root=str(tmp_path),
+        languages=[
+            LanguageContext(
+                language="python",
+                runtime_version="3.12",
+                version_source="pyproject.toml",
+                package_manager="pip",
+                install_cmd="pip install -e .",
+                framework="FastAPI",
+            )
+        ],
+        containers=[ContainerContext(dockerfile_path="Dockerfile", exposed_ports=[8000])],
+        policy_config={
+            "kubernetes": {
+                "namespace": "production",
+                "hpa": {
+                    "enabled": True,
+                    "min_replicas": 2,
+                    "max_replicas": 10,
+                    "target_cpu_utilization": 80,
+                },
+            }
+        },
+    )
+    k8s_files = KubernetesSynthesizer().synthesize(k8s_ctx)
+    new_hpa = k8s_files["k8s/hpa.yaml"]
+
+    hpa_run_1 = merger.merge_yaml(existing_hpa, new_hpa)
+    hpa_run_2 = merger.merge_yaml(hpa_run_1, new_hpa)
+    assert hpa_run_1 == hpa_run_2
+
+    hpa_doc = yaml.load(hpa_run_1)
+    assert "# Custom HPA tuning" in hpa_run_1
+    assert hpa_doc["metadata"]["annotations"]["team/owner"] == "platform"
+    assert hpa_doc["metadata"]["labels"]["app"] == "my-api"
+    assert hpa_doc["metadata"]["namespace"] == "production"
+    assert hpa_doc["spec"]["minReplicas"] == 3
+    assert hpa_doc["spec"]["maxReplicas"] == 20
+    cpu_metrics = [
+        m
+        for m in hpa_doc["spec"]["metrics"]
+        if m.get("type") == "Resource" and m.get("resource", {}).get("name") == "cpu"
+    ]
+    mem_metrics = [
+        m
+        for m in hpa_doc["spec"]["metrics"]
+        if m.get("type") == "Resource" and m.get("resource", {}).get("name") == "memory"
+    ]
+    assert len(cpu_metrics) == 1
+    assert cpu_metrics[0]["resource"]["target"]["averageUtilization"] == 60
+    assert len(mem_metrics) == 1
+    assert mem_metrics[0]["resource"]["target"]["averageUtilization"] == 75
+
+    # 2. K8s Deployment merge with [kubernetes].namespace injection preserves custom annotations and probes
+    existing_dep = """apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-api
+  annotations:
+    prometheus.io/scrape: "true"
+spec:
+  replicas: 4
+  template:
+    spec:
+      containers:
+        - name: my-api
+          image: my-api:v2.0.0
+          livenessProbe:
+            httpGet:
+              path: /custom-live
+              port: 8000
+            initialDelaySeconds: 25
+          readinessProbe:
+            exec:
+              command: ["cat", "/tmp/healthy"]
+            initialDelaySeconds: 5
+"""
+    new_dep = k8s_files["k8s/deployment.yaml"]
+    dep_run_1 = merger.merge_yaml(existing_dep, new_dep)
+    dep_run_2 = merger.merge_yaml(dep_run_1, new_dep)
+    assert dep_run_1 == dep_run_2
+
+    dep_doc = yaml.load(dep_run_1)
+    assert dep_doc["metadata"]["namespace"] == "production"
+    assert dep_doc["metadata"]["annotations"]["prometheus.io/scrape"] == "true"
+    assert dep_doc["spec"]["replicas"] == 4
+    dep_container = dep_doc["spec"]["template"]["spec"]["containers"][0]
+    assert dep_container["livenessProbe"]["httpGet"]["path"] == "/custom-live"
+    assert dep_container["readinessProbe"]["exec"]["command"] == ["cat", "/tmp/healthy"]
+    assert "httpGet" not in dep_container["readinessProbe"]
+
+    # 3. CI workflow merge with [ci.runners], pre_test/post_steps, excluded services cleanup, and @heurix:preserve
+    existing_ci = """name: CI
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+      redis:
+        image: redis:7-alpine
+    steps:
+      - uses: actions/checkout@v3
+      # @heurix:preserve
+      - name: Custom Compliance Check
+        run: ./scripts/compliance.sh
+"""
+    ci_ctx = ProjectContext(
+        repo_name="my_api",
+        repo_root=str(tmp_path),
+        languages=[
+            LanguageContext(
+                language="python",
+                runtime_version="3.12",
+                version_source=".python-version",
+                package_manager="pip",
+                install_cmd="pip install -r requirements.txt",
+                test_cmd="pytest",
+            )
+        ],
+        policy_config={
+            "services": {"exclude": ["postgres", "redis"]},
+            "ci": {
+                "runners": {"test": "ubuntu-24.04-arm"},
+                "steps": {
+                    "pre_test": [{"name": "Global Pre-Test", "run": "echo pre-test"}],
+                },
+            },
+            "jobs": {
+                "test": {
+                    "post_steps": [{"name": "Job Post-Step", "run": "echo post-step"}],
+                }
+            },
+        },
+    )
+    new_ci = GitHubActionsSynthesizer().synthesize(ci_ctx)[".github/workflows/ci.yml"]
+
+    ci_run_1 = merger.merge_yaml(existing_ci, new_ci)
+    ci_run_2 = merger.merge_yaml(ci_run_1, new_ci)
+    assert ci_run_1 == ci_run_2
+
+    ci_doc = yaml.load(ci_run_1)
+    test_job = ci_doc["jobs"]["test"]
+    assert test_job["runs-on"] == "ubuntu-24.04-arm"
+    assert "services" not in test_job
+    step_names = [s.get("name") for s in test_job["steps"]]
+    assert step_names.count("Global Pre-Test") == 1
+    assert step_names.count("Job Post-Step") == 1
+    assert step_names.count("Custom Compliance Check") == 1
+    assert "@heurix:preserve" in ci_run_1

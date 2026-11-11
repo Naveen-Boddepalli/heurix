@@ -1,0 +1,100 @@
+# Synthesized deterministically by Heurix (hx)
+# Non-destructive updates: preserve blocks marked with # @heurix:preserve
+{% from "macros/actions.j2" import render_step %}
+{% set wf_name = name if name is defined and name is not none else 'CI' %}
+{% set on_cfg = on if on is defined and on is not none else {} %}
+{% set jobs_cfg = jobs if jobs is defined and jobs is not none else {} %}
+name: {{ wf_name | yaml_scalar }}
+on:
+{% for event_name, event_cfg in on_cfg.items() %}
+{% if event_cfg is not none %}
+  {{ event_name | yaml_scalar }}:
+{% if event_cfg.get('branches') %}
+    branches:
+{% for branch in event_cfg.get('branches', []) %}
+      - {{ branch | yaml_scalar }}
+{% endfor %}
+{% endif %}
+{% if event_cfg.get('paths') %}
+    paths:
+{% for path_pattern in event_cfg.get('paths', []) %}
+      - {{ path_pattern | yaml_scalar }}
+{% endfor %}
+{% endif %}
+{% endif %}
+{% endfor %}
+jobs:
+{% for job_id, job in jobs_cfg.items() %}
+{% set job_name = job.get('name') %}
+{% set job_needs = job.get('needs') %}
+{% set job_if = job.get('if') %}
+{% set job_runs_on = job.get('runs-on') if job.get('runs-on') is not none else job.get('runs_on', 'ubuntu-latest') %}
+{% set job_defaults = job.get('defaults') %}
+{% set job_strategy = job.get('strategy') %}
+{% set job_services = job.get('services') %}
+{% set job_steps = job.get('steps', []) %}
+  {{ job_id | yaml_scalar }}:
+{% if job_name is not none %}
+    name: {{ job_name | yaml_scalar }}
+{% endif %}
+{% if job_needs is not none %}
+{% if job_needs is string %}
+    needs: {{ job_needs | yaml_scalar }}
+{% elif job_needs %}
+    needs:
+{% for dep in job_needs %}
+      - {{ dep | yaml_scalar }}
+{% endfor %}
+{% endif %}
+{% endif %}
+{% if job_if is not none %}
+    if: {{ job_if | yaml_scalar }}
+{% endif %}
+    runs-on: {{ job_runs_on | yaml_scalar }}
+{% if job_defaults and job_defaults.get('run') %}
+{% set default_wd = job_defaults['run'].get('working-directory') if job_defaults['run'].get('working-directory') is not none else job_defaults['run'].get('working_directory') %}
+{% if default_wd is not none %}
+    defaults:
+      run:
+        working-directory: {{ default_wd | yaml_scalar }}
+{% endif %}
+{% endif %}
+{% if job_strategy and job_strategy.get('matrix') %}
+{% set fail_fast = job_strategy.get('fail-fast') if job_strategy.get('fail-fast') is not none else job_strategy.get('fail_fast', false) %}
+    strategy:
+      fail-fast: {{ fail_fast | yaml_scalar }}
+      matrix:
+{% for matrix_key, matrix_vals in job_strategy.get('matrix', {}).items() %}
+        {{ matrix_key | yaml_scalar }}:
+{% for matrix_val in matrix_vals %}
+          - {{ matrix_val | yaml_scalar }}
+{% endfor %}
+{% endfor %}
+{% endif %}
+{% if job_services %}
+    services:
+{% for svc_name, svc in job_services.items() %}
+      {{ svc_name | yaml_scalar }}:
+        image: {{ svc.get('image') | yaml_scalar }}
+{% if svc.get('env') %}
+        env:
+{{ svc.get('env') | yaml_block(indent=10) }}
+{% endif %}
+{% if svc.get('ports') %}
+        ports:
+{% for port_map in svc.get('ports', []) %}
+          - {{ port_map | yaml_scalar }}
+{% endfor %}
+{% endif %}
+{% if svc.get('options') %}
+        options: {{ svc.get('options') | yaml_scalar }}
+{% endif %}
+{% endfor %}
+{% endif %}
+{% if job_steps %}
+    steps:
+{% for step in job_steps %}{{ render_step(step, base_indent=6) }}{% endfor %}
+{% else %}
+    steps: []
+{% endif %}
+{% endfor %}

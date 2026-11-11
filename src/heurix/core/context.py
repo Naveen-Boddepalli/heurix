@@ -15,6 +15,7 @@ class ServiceRequirement(BaseModel):
     ports: List[int] = Field(default_factory=list)  # e.g. [5432]
     env: Dict[str, str] = Field(default_factory=dict)
     source_file: str = ""  # e.g. "docker-compose.yml" or "pyproject.toml"
+    package_path: Optional[str] = None  # None = root/global; e.g. "services/api"
 
 
 class LanguageContext(BaseModel):
@@ -29,6 +30,9 @@ class LanguageContext(BaseModel):
     working_dir: str = "."
     framework: Optional[str] = None
     confidence: float = 1.0
+    matrix_versions: List[str] = Field(default_factory=list)
+    cache_dependency_path: Optional[str] = None
+    is_workspace_root: Optional[bool] = None
 
 
 class ContainerContext(BaseModel):
@@ -54,6 +58,15 @@ class MonorepoPackage(BaseModel):
     path: str
     language: str
     package_manager: str
+    runtime_version: str = ""
+    version_source: str = ""
+    install_cmd: Optional[str] = None
+    build_cmd: Optional[str] = None
+    test_cmd: Optional[str] = None
+    lint_cmd: Optional[str] = None
+    framework: Optional[str] = None
+    cache_dependency_path: Optional[str] = None
+    matrix_versions: List[str] = Field(default_factory=list)
 
 
 class ProjectContext(BaseModel):
@@ -73,13 +86,18 @@ class ProjectContext(BaseModel):
     explain_log: List[str] = Field(default_factory=list)
     confidence: float = 1.0
     runner: str = "ubuntu-latest"
+    matrix_os: List[str] = Field(default_factory=list)
     policy_config: Dict[str, Any] = Field(default_factory=dict)
 
-    @model_validator(mode="after")
-    def _sync_required_secrets(self) -> "ProjectContext":
+    def sync_required_secrets(self) -> None:
+        """Synchronize test_secrets and deployment_secrets into required_secrets without duplicates."""
         for secret in (*self.test_secrets, *self.deployment_secrets):
             if secret not in self.required_secrets:
                 self.required_secrets.append(secret)
+
+    @model_validator(mode="after")
+    def _sync_required_secrets(self) -> "ProjectContext":
+        self.sync_required_secrets()
         return self
 
     def add_explain(self, step: str) -> None:
@@ -93,6 +111,10 @@ class ProjectContext(BaseModel):
             if lang.language.lower() == name.lower():
                 return lang
         return None
+
+    def get_languages(self, name: str) -> List[LanguageContext]:
+        target = name.lower()
+        return [lang for lang in self.languages if lang.language.lower() == target]
 
     def get_primary_language(self) -> Optional[LanguageContext]:
         """

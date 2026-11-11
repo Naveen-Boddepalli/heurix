@@ -234,3 +234,106 @@ spec:
     assert len(errors) == 1
     assert "YAML Syntax Error" in errors[0]
 
+
+def test_validator_multijob_needs_strategy_defaults():
+    validator = PreflightValidator()
+
+    valid_multijob = """
+name: CI
+on:
+  push:
+    branches: [main]
+    paths:
+      - apps/web/**
+      - services/api/**
+jobs:
+  test-apps-web:
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: apps/web
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        node-version: ['18.x', '20.x']
+    steps:
+      - uses: actions/checkout@v4
+      - run: npm test
+  test-services-api:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/api
+    steps:
+      - uses: actions/checkout@v4
+      - run: pytest
+  deploy_vercel:
+    runs-on: ubuntu-latest
+    needs:
+      - test-apps-web
+      - test-services-api
+    steps:
+      - uses: actions/checkout@v4
+  deploy_single_dep:
+    runs-on: ubuntu-latest
+    needs: test-services-api
+    steps:
+      - uses: actions/checkout@v4
+"""
+    is_valid, errors = validator.validate(".github/workflows/ci.yml", valid_multijob)
+    assert is_valid, f"Expected valid multi-job workflow, got errors: {errors}"
+    assert errors == []
+
+    # Invalid 'needs' scalar type (integer instead of string or array of strings)
+    bad_needs_int = """
+jobs:
+  deploy_vercel:
+    runs-on: ubuntu-latest
+    needs: 123
+    steps:
+      - run: echo deploy
+"""
+    is_valid, errors = validator.validate(".github/workflows/ci.yml", bad_needs_int)
+    assert not is_valid
+    assert any("GitHub Workflow Schema Error" in e for e in errors)
+
+    # Invalid 'needs' array containing non-string item
+    bad_needs_item = """
+jobs:
+  deploy_vercel:
+    runs-on: ubuntu-latest
+    needs: [test-apps-web, 42]
+    steps:
+      - run: echo deploy
+"""
+    is_valid, errors = validator.validate(".github/workflows/ci.yml", bad_needs_item)
+    assert not is_valid
+    assert any("GitHub Workflow Schema Error" in e for e in errors)
+
+    # Invalid 'defaults' type (string instead of object)
+    bad_defaults = """
+jobs:
+  test-apps-web:
+    runs-on: ubuntu-latest
+    defaults: apps/web
+    steps:
+      - run: npm test
+"""
+    is_valid, errors = validator.validate(".github/workflows/ci.yml", bad_defaults)
+    assert not is_valid
+    assert any("GitHub Workflow Schema Error" in e for e in errors)
+
+    # Invalid 'strategy' type (list instead of object)
+    bad_strategy = """
+jobs:
+  test-apps-web:
+    runs-on: ubuntu-latest
+    strategy:
+      - ubuntu-latest
+    steps:
+      - run: npm test
+"""
+    is_valid, errors = validator.validate(".github/workflows/ci.yml", bad_strategy)
+    assert not is_valid
+    assert any("GitHub Workflow Schema Error" in e for e in errors)

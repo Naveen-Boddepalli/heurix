@@ -24,6 +24,14 @@ GITHUB_WORKFLOW_SCHEMA = {
                 "required": ["runs-on", "steps"],
                 "properties": {
                     "runs-on": {"type": "string"},
+                    "needs": {
+                        "oneOf": [
+                            {"type": "string"},
+                            {"type": "array", "items": {"type": "string"}},
+                        ]
+                    },
+                    "defaults": {"type": "object"},
+                    "strategy": {"type": "object"},
                     "steps": {
                         "type": "array",
                         "items": {"type": "object"},

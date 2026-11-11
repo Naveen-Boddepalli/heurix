@@ -53,9 +53,33 @@ def _normalize_step_run(step: Any) -> Optional[str]:
     return val if val else None
 
 
+_HPA_METRIC_SUBKEYS = ("resource", "pods", "object", "external", "containerResource")
+
+
+def _extract_hpa_metric_key(item: Any) -> Optional[Tuple[str, str]]:
+    """Extract (type, metric_name) identity for Kubernetes HPA v2 spec.metrics items."""
+    if not isinstance(item, (dict, CommentedMap)) or "type" not in item:
+        return None
+    metric_type = item.get("type")
+    if metric_type is None:
+        return None
+    for subkey in _HPA_METRIC_SUBKEYS:
+        submetric = item.get(subkey)
+        if isinstance(submetric, (dict, CommentedMap)):
+            metric_name = submetric.get("name")
+            if metric_name is None and isinstance(submetric.get("metric"), (dict, CommentedMap)):
+                metric_name = submetric["metric"].get("name")
+            if metric_name is not None and str(metric_name).strip():
+                return (str(metric_type), str(metric_name))
+    return None
+
+
 def _get_entity_identifier(item: Any) -> Optional[Tuple[str, Any]]:
     """Extract the primary identity key/value pair from a YAML mapping sequence item."""
     if isinstance(item, (dict, CommentedMap)):
+        hpa_key = _extract_hpa_metric_key(item)
+        if hpa_key is not None:
+            return ("__hpa_metric__", hpa_key)
         for key in IDENTIFIER_KEYS:
             if key in item:
                 return (key, item[key])
@@ -66,6 +90,9 @@ def _sequence_items_match(
     ex_item: Any, new_item: Any, ident_key: str, ident_val: Any
 ) -> bool:
     """Return True if an existing sequence mapping represents the same entity as new_item."""
+    if ident_key == "__hpa_metric__":
+        return _extract_hpa_metric_key(ex_item) == ident_val
+
     if not isinstance(ex_item, (dict, CommentedMap)) or ex_item.get(ident_key) != ident_val:
         return False
 
@@ -248,6 +275,26 @@ class SmartMerger:
         if "name" in new and "name" not in result:
             result["name"] = new["name"]
 
+        # Synchronize monorepo path filters on mapping-style push/pull_request triggers
+        existing_on = result.get("on")
+        new_on = new.get("on")
+        if isinstance(existing_on, (dict, CommentedMap)) and isinstance(new_on, (dict, CommentedMap)):
+            for trigger in ("push", "pull_request"):
+                ex_trigger = existing_on.get(trigger)
+                new_trigger = new_on.get(trigger)
+                if (
+                    isinstance(ex_trigger, (dict, CommentedMap))
+                    and isinstance(new_trigger, (dict, CommentedMap))
+                    and "paths" in new_trigger
+                ):
+                    existing_paths = ex_trigger.get("paths")
+                    if (
+                        "paths" not in ex_trigger
+                        or existing_paths is None
+                        or (isinstance(existing_paths, (list, CommentedSeq)) and list(existing_paths) == ["**"])
+                    ):
+                        ex_trigger["paths"] = new_trigger["paths"]
+
         # Preserve custom jobs
         existing_jobs = result.get("jobs", CommentedMap())
         new_jobs = new.get("jobs", CommentedMap())
@@ -396,11 +443,65 @@ class SmartMerger:
             return new_job
 
         merged_job = existing_job.copy()
-        # Update runs-on, services from new_job
+        # Update runs-on, services, defaults, needs, and strategy from new_job
         if "runs-on" in new_job:
             merged_job["runs-on"] = new_job["runs-on"]
         if "services" in new_job:
             merged_job["services"] = new_job["services"]
+        else:
+            merged_job.pop("services", None)
+
+        if "defaults" in new_job:
+            new_defaults = new_job["defaults"]
+            ex_defaults = merged_job.get("defaults")
+            if isinstance(ex_defaults, (dict, CommentedMap)) and isinstance(new_defaults, (dict, CommentedMap)):
+                merged_defaults = ex_defaults.copy()
+                for k, v in new_defaults.items():
+                    if (
+                        k == "run"
+                        and isinstance(merged_defaults.get("run"), (dict, CommentedMap))
+                        and isinstance(v, (dict, CommentedMap))
+                    ):
+                        merged_run = merged_defaults["run"].copy()
+                        merged_run.update(v)
+                        merged_defaults["run"] = merged_run
+                    else:
+                        merged_defaults[k] = v
+                merged_job["defaults"] = merged_defaults
+            else:
+                merged_job["defaults"] = new_defaults
+        else:
+            ex_defaults = merged_job.get("defaults")
+            if isinstance(ex_defaults, (dict, CommentedMap)) and isinstance(ex_defaults.get("run"), (dict, CommentedMap)):
+                ex_run = ex_defaults["run"]
+                if "working-directory" in ex_run:
+                    merged_defaults = ex_defaults.copy()
+                    merged_run = ex_run.copy()
+                    merged_run.pop("working-directory", None)
+                    if merged_run:
+                        merged_defaults["run"] = merged_run
+                    else:
+                        merged_defaults.pop("run", None)
+                    if merged_defaults:
+                        merged_job["defaults"] = merged_defaults
+                    else:
+                        merged_job.pop("defaults", None)
+
+        if "needs" in new_job:
+            merged_job["needs"] = new_job["needs"]
+
+        if "strategy" in new_job:
+            new_strat = new_job["strategy"]
+            ex_strat = merged_job.get("strategy")
+            if isinstance(ex_strat, (dict, CommentedMap)) and isinstance(new_strat, (dict, CommentedMap)):
+                merged_strat = ex_strat.copy()
+                for k, v in new_strat.items():
+                    merged_strat[k] = v
+                merged_job["strategy"] = merged_strat
+            else:
+                merged_job["strategy"] = new_strat
+        else:
+            merged_job.pop("strategy", None)
 
         # Steps merging
         if "steps" not in new_job and "steps" not in existing_job:

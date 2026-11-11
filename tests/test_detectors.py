@@ -598,3 +598,726 @@ DOCKER_PASSWORD=docker_pass
     assert set(context.test_secrets).isdisjoint(set(context.deployment_secrets))
 
 
+def test_workspace_topology_pnpm_and_npm_subpackages(tmp_path: Path):
+    # 1. pnpm workspace with root coordinator, inherited lockfile, ! exclusion, and scoped service
+    pnpm_repo = tmp_path / "pnpm_repo"
+    (pnpm_repo / "apps" / "web").mkdir(parents=True)
+    (pnpm_repo / "packages" / "ui" / "button").mkdir(parents=True)
+    (pnpm_repo / "packages" / "test" / "ignored").mkdir(parents=True)
+    (pnpm_repo / "site").mkdir(parents=True)
+
+    (pnpm_repo / ".nvmrc").write_text("v20.11.0\n", encoding="utf-8")
+    (pnpm_repo / "pnpm-lock.yaml").write_text("lockfileVersion: '9.0'\n", encoding="utf-8")
+    (pnpm_repo / "pnpm-workspace.yaml").write_text(
+        "packages:\n  - './apps/*'\n  - 'packages/**'\n  - '!**/test/**'\n",
+        encoding="utf-8",
+    )
+    (pnpm_repo / "package.json").write_text('{"name": "root", "private": true}', encoding="utf-8")
+    (pnpm_repo / "apps" / "web" / "package.json").write_text(
+        """{
+        "name": "@acme/web",
+        "scripts": {"build": "next build", "test": "vitest run", "lint": "eslint ."},
+        "dependencies": {"next": "^14.0.0", "pg": "^8.11.0"}
+    }""",
+        encoding="utf-8",
+    )
+    (pnpm_repo / "packages" / "ui" / "button" / "package.json").write_text(
+        """{
+        "name": "@acme/button",
+        "scripts": {"build": "vite build", "test": "vitest run"},
+        "devDependencies": {"vite": "^5.0.0"}
+    }""",
+        encoding="utf-8",
+    )
+    (pnpm_repo / "packages" / "test" / "ignored" / "package.json").write_text(
+        '{"name": "ignored"}',
+        encoding="utf-8",
+    )
+    (pnpm_repo / "site" / "package.json").write_text('{"name": "docs-site"}', encoding="utf-8")
+
+    indexer = RepoIndexer(pnpm_repo)
+    ctx = ProjectContext(repo_name="pnpm_repo", repo_root=str(pnpm_repo))
+    detector = NodeDetector()
+    assert detector.detect(indexer)
+    detector.analyze(indexer, ctx)
+
+    assert ctx.is_monorepo is True
+    root_node = ctx.get_language("node")
+    assert root_node is not None
+    assert root_node.working_dir == "."
+    assert root_node.is_workspace_root is True
+
+    pkg_by_path = {pkg.path: pkg for pkg in ctx.monorepo_packages}
+    assert sorted(pkg_by_path.keys()) == ["apps/web", "packages/ui/button"]
+
+    web = pkg_by_path["apps/web"]
+    assert web.language == "node"
+    assert web.package_manager == "pnpm"
+    assert web.runtime_version == "20.x"
+    assert web.install_cmd == "pnpm i --frozen-lockfile"
+    assert web.build_cmd == "pnpm run build"
+    assert web.test_cmd == "pnpm test"
+    assert web.lint_cmd == "pnpm run lint"
+    assert web.framework == "Next.js"
+    assert web.cache_dependency_path == "pnpm-lock.yaml"
+
+    btn = pkg_by_path["packages/ui/button"]
+    assert btn.framework == "Vite"
+    assert btn.cache_dependency_path == "pnpm-lock.yaml"
+
+    pg_services = [s for s in ctx.services if s.name == "postgres"]
+    assert len(pg_services) == 1
+    assert pg_services[0].package_path == "apps/web"
+
+    # 2. Yarn/npm object workspaces + turbo.json + local sub-package lockfile override
+    npm_repo = tmp_path / "npm_repo"
+    (npm_repo / "apps" / "admin").mkdir(parents=True)
+    (npm_repo / "turbo.json").write_text('{"pipeline": {}}', encoding="utf-8")
+    (npm_repo / "package-lock.json").write_text("{}", encoding="utf-8")
+    (npm_repo / "package.json").write_text(
+        '{"name": "npm-ws", "workspaces": {"packages": ["apps/*"]}}',
+        encoding="utf-8",
+    )
+    (npm_repo / "apps" / "admin" / "package-lock.json").write_text("{}", encoding="utf-8")
+    (npm_repo / "apps" / "admin" / "package.json").write_text(
+        '{"name": "admin", "scripts": {"test": "jest"}, "dependencies": {"express": "^4.18.0", "redis": "^4.6.0"}}',
+        encoding="utf-8",
+    )
+
+    npm_ctx = ProjectContext(repo_name="npm_repo", repo_root=str(npm_repo))
+    detector.analyze(RepoIndexer(npm_repo), npm_ctx)
+    assert npm_ctx.is_monorepo is True
+    assert npm_ctx.get_language("node").is_workspace_root is True
+    assert len(npm_ctx.monorepo_packages) == 1
+    admin = npm_ctx.monorepo_packages[0]
+    assert admin.path == "apps/admin"
+    assert admin.package_manager == "npm"
+    assert admin.install_cmd == "npm ci"
+    assert admin.test_cmd == "npm test"
+    assert admin.framework == "Express"
+    assert admin.cache_dependency_path == "apps/admin/package-lock.json"
+    assert [s.package_path for s in npm_ctx.services if s.name == "redis"] == ["apps/admin"]
+
+    # 3. Sub-package without root package.json -> detect() True, representative LanguageContext is_workspace_root is None
+    sub_only = tmp_path / "node_sub_only"
+    (sub_only / "apps" / "web").mkdir(parents=True)
+    (sub_only / "apps" / "web" / ".nvmrc").write_text("22.0.0\n", encoding="utf-8")
+    (sub_only / "apps" / "web" / "package-lock.json").write_text("{}", encoding="utf-8")
+    (sub_only / "apps" / "web" / "package.json").write_text('{"name": "web"}', encoding="utf-8")
+
+    sub_indexer = RepoIndexer(sub_only)
+    assert detector.detect(sub_indexer) is True
+    sub_ctx = ProjectContext(repo_name="node_sub_only", repo_root=str(sub_only))
+    detector.analyze(sub_indexer, sub_ctx)
+    assert len(sub_ctx.monorepo_packages) == 1
+    assert sub_ctx.monorepo_packages[0].runtime_version == "22.x"
+    assert sub_ctx.monorepo_packages[0].cache_dependency_path == "apps/web/package-lock.json"
+    rep = sub_ctx.get_language("node")
+    assert rep is not None
+    assert rep.is_workspace_root is None
+
+    # 4. Active non-coordinator root package.json + heuristic sub-package -> root has is_workspace_root=False
+    active_root = tmp_path / "active_root"
+    (active_root / "tools" / "cli").mkdir(parents=True)
+    (active_root / "package.json").write_text('{"name": "root-app", "scripts": {"test": "node test.js"}}', encoding="utf-8")
+    (active_root / "tools" / "cli" / "package.json").write_text('{"name": "cli"}', encoding="utf-8")
+
+    active_ctx = ProjectContext(repo_name="active_root", repo_root=str(active_root))
+    detector.analyze(RepoIndexer(active_root), active_ctx)
+    assert active_ctx.get_language("node").working_dir == "."
+    assert active_ctx.get_language("node").is_workspace_root is False
+    assert [p.path for p in active_ctx.monorepo_packages] == ["tools/cli"]
+
+
+def test_workspace_topology_python_subpackages_and_docs_guard(tmp_path: Path):
+    detector = PythonDetector()
+
+    # 1. Pure docs/requirements.txt must NOT trigger PythonDetector
+    docs_only = tmp_path / "docs_only"
+    (docs_only / "docs").mkdir(parents=True)
+    (docs_only / "docs" / "requirements.txt").write_text("sphinx\n", encoding="utf-8")
+    assert detector.detect(RepoIndexer(docs_only)) is False
+
+    # 2. Sub-packages without root Python manifest; docs/requirements.txt ignored cleanly
+    mono = tmp_path / "py_mono"
+    (mono / "docs").mkdir(parents=True)
+    (mono / "requirements").mkdir(parents=True)
+    (mono / "services" / "api").mkdir(parents=True)
+    (mono / "services" / "worker").mkdir(parents=True)
+
+    (mono / "docs" / "requirements.txt").write_text("sphinx\npsycopg2-binary\n", encoding="utf-8")
+    (mono / "requirements" / "dev.txt").write_text("pytest\n", encoding="utf-8")
+    (mono / "services" / "api" / "uv.lock").write_text("", encoding="utf-8")
+    (mono / "services" / "api" / "pyproject.toml").write_text(
+        """
+[project]
+name = "api"
+requires-python = ">=3.11"
+dependencies = ["fastapi", "psycopg2-binary", "pytest", "ruff", "fakeredis"]
+""",
+        encoding="utf-8",
+    )
+    (mono / "services" / "worker" / "requirements.txt").write_text("celery\npytest\n", encoding="utf-8")
+    (mono / "services" / "worker" / "worker.py").write_text("print('ok')\n", encoding="utf-8")
+
+    indexer = RepoIndexer(mono)
+    assert detector.detect(indexer) is True
+    ctx = ProjectContext(repo_name="py_mono", repo_root=str(mono))
+    detector.analyze(indexer, ctx)
+
+    pkg_by_path = {p.path: p for p in ctx.monorepo_packages}
+    assert sorted(pkg_by_path.keys()) == ["services/api", "services/worker"]
+
+    api = pkg_by_path["services/api"]
+    assert api.package_manager == "uv"
+    assert api.runtime_version == "3.11"
+    assert api.install_cmd == "uv sync --frozen"
+    assert api.test_cmd == "uv run pytest"
+    assert api.lint_cmd == "uv run ruff check ."
+    assert api.framework == "FastAPI"
+    assert api.cache_dependency_path == "services/api/uv.lock"
+
+    worker = pkg_by_path["services/worker"]
+    assert worker.package_manager == "pip"
+    assert worker.install_cmd == "pip install -r requirements.txt"
+    assert worker.cache_dependency_path == "services/worker/requirements.txt"
+
+    # Mock fakeredis in services/api filtered; real celery in services/worker & psycopg2 in services/api kept & scoped
+    svc_pairs = {(s.name, s.package_path) for s in ctx.services}
+    assert svc_pairs == {("postgres", "services/api"), ("redis", "services/worker")}
+
+    rep = ctx.get_language("python")
+    assert rep is not None
+    assert rep.is_workspace_root is None
+
+    # 3. Active root Python + sub-package inheriting root uv.lock -> root has is_workspace_root=False
+    hybrid_py = tmp_path / "hybrid_py"
+    (hybrid_py / "services" / "ml").mkdir(parents=True)
+    (hybrid_py / "uv.lock").write_text("", encoding="utf-8")
+    (hybrid_py / ".python-version").write_text("3.12\n", encoding="utf-8")
+    (hybrid_py / "pyproject.toml").write_text('[project]\nname = "root"\ndependencies = ["pytest"]\n', encoding="utf-8")
+    (hybrid_py / "services" / "ml" / "pyproject.toml").write_text('[project]\nname = "ml"\n', encoding="utf-8")
+
+    h_ctx = ProjectContext(repo_name="hybrid_py", repo_root=str(hybrid_py))
+    detector.analyze(RepoIndexer(hybrid_py), h_ctx)
+    assert h_ctx.get_language("python").working_dir == "."
+    assert h_ctx.get_language("python").is_workspace_root is False
+    assert len(h_ctx.monorepo_packages) == 1
+    assert h_ctx.monorepo_packages[0].path == "services/ml"
+    assert h_ctx.monorepo_packages[0].package_manager == "uv"
+    assert h_ctx.monorepo_packages[0].cache_dependency_path == "uv.lock"
+
+
+def test_matrix_signal_classifiers_tox_and_engines_node(tmp_path: Path):
+    py_det = PythonDetector()
+    node_det = NodeDetector()
+
+    # 1. pyproject.toml classifiers extracted unconditionally even when .python-version exists (sorted numerically)
+    cls_repo = tmp_path / "cls_repo"
+    cls_repo.mkdir()
+    (cls_repo / ".python-version").write_text("3.11\n", encoding="utf-8")
+    (cls_repo / "pyproject.toml").write_text(
+        """
+[project]
+name = "cls-app"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12 :: Only",
+]
+""",
+        encoding="utf-8",
+    )
+    cls_ctx = ProjectContext(repo_name="cls_repo", repo_root=str(cls_repo))
+    py_det.analyze(RepoIndexer(cls_repo), cls_ctx)
+    py_cls = cls_ctx.get_language("python")
+    assert py_cls.runtime_version == "3.11"
+    assert py_cls.matrix_versions == ["3.9", "3.10", "3.11", "3.12"]
+
+    # 2. Single .python-version + single classifier must NOT trigger matrix_versions
+    single_py = tmp_path / "single_py"
+    single_py.mkdir()
+    (single_py / ".python-version").write_text("3.12\n", encoding="utf-8")
+    (single_py / "pyproject.toml").write_text(
+        '[project]\nname = "single"\nclassifiers = ["Programming Language :: Python :: 3.12"]\n',
+        encoding="utf-8",
+    )
+    single_ctx = ProjectContext(repo_name="single_py", repo_root=str(single_py))
+    py_det.analyze(RepoIndexer(single_py), single_ctx)
+    assert single_ctx.get_language("python").matrix_versions == []
+
+    # 3. tox.ini envlist with brace expansion and interpolation placeholders ({posargs}, %(here)s)
+    tox_repo = tmp_path / "tox_repo"
+    tox_repo.mkdir()
+    (tox_repo / "pyproject.toml").write_text('[project]\nname = "tox-app"\n', encoding="utf-8")
+    (tox_repo / "tox.ini").write_text(
+        """
+[tox]
+envlist = py{310,311,312}-django{42,50}, py3.13, lint
+
+[testenv]
+commands = pytest {posargs} %(toxinidir)s
+""",
+        encoding="utf-8",
+    )
+    tox_ctx = ProjectContext(repo_name="tox_repo", repo_root=str(tox_repo))
+    py_det.analyze(RepoIndexer(tox_repo), tox_ctx)
+    assert tox_ctx.get_language("python").matrix_versions == ["3.10", "3.11", "3.12", "3.13"]
+
+    # 4. Node engines.node || multi-version vs single constraints
+    node_matrix = tmp_path / "node_matrix"
+    node_matrix.mkdir()
+    (node_matrix / "package.json").write_text(
+        '{"name": "nm", "engines": {"node": "18 || 20 || 22"}}',
+        encoding="utf-8",
+    )
+    nm_ctx = ProjectContext(repo_name="node_matrix", repo_root=str(node_matrix))
+    node_det.analyze(RepoIndexer(node_matrix), nm_ctx)
+    assert nm_ctx.get_language("node").matrix_versions == ["18.x", "20.x", "22.x"]
+
+    for idx, spec in enumerate([">=18", "^20.0.0", "20.x", ">=18 <21"]):
+        single_node = tmp_path / f"single_node_{idx}"
+        single_node.mkdir()
+        (single_node / "package.json").write_text(
+            f'{{"name": "sn", "engines": {{"node": "{spec}"}}}}',
+            encoding="utf-8",
+        )
+        sn_ctx = ProjectContext(repo_name="sn", repo_root=str(single_node))
+        node_det.analyze(RepoIndexer(single_node), sn_ctx)
+        assert sn_ctx.get_language("node").matrix_versions == []
+
+
+def test_rust_workspace_members_and_exclude(tmp_path: Path):
+    detector = RustDetector()
+
+    # 1. Virtual Cargo [workspace] (no [package]) with members/exclude and toolchain inheritance
+    virt = tmp_path / "virt_rust"
+    (virt / "crates" / "core").mkdir(parents=True)
+    (virt / "crates" / "cli").mkdir(parents=True)
+    (virt / "crates" / "ignored").mkdir(parents=True)
+    (virt / "rust-toolchain.toml").write_text('[toolchain]\nchannel = "1.79.0"\n', encoding="utf-8")
+    (virt / "Cargo.lock").write_text("", encoding="utf-8")
+    (virt / "Cargo.toml").write_text(
+        '[workspace]\nmembers = ["crates/*"]\nexclude = ["crates/ignored"]\n',
+        encoding="utf-8",
+    )
+    (virt / "crates" / "core" / "Cargo.toml").write_text(
+        '[package]\nname = "core"\nversion = "0.1.0"\n[dependencies]\nactix-web = "4"\n',
+        encoding="utf-8",
+    )
+    (virt / "crates" / "cli" / "rust-toolchain").write_text("1.80.0\n", encoding="utf-8")
+    (virt / "crates" / "cli" / "Cargo.toml").write_text(
+        '[package]\nname = "cli"\nversion = "0.1.0"\n[dependencies]\naxum = "0.7"\n',
+        encoding="utf-8",
+    )
+    (virt / "crates" / "ignored" / "Cargo.toml").write_text(
+        '[package]\nname = "ignored"\nversion = "0.1.0"\n',
+        encoding="utf-8",
+    )
+
+    v_indexer = RepoIndexer(virt)
+    assert detector.detect(v_indexer) is True
+    v_ctx = ProjectContext(repo_name="virt_rust", repo_root=str(virt))
+    detector.analyze(v_indexer, v_ctx)
+
+    assert v_ctx.is_monorepo is True
+    root_rust = v_ctx.get_language("rust")
+    assert root_rust is not None
+    assert root_rust.working_dir == "."
+    assert root_rust.is_workspace_root is True
+    assert root_rust.runtime_version == "1.79.0"
+
+    pkg_by_path = {p.path: p for p in v_ctx.monorepo_packages}
+    assert sorted(pkg_by_path.keys()) == ["crates/cli", "crates/core"]
+    assert pkg_by_path["crates/core"].framework == "Actix-Web"
+    assert pkg_by_path["crates/core"].runtime_version == "1.79.0"
+    assert pkg_by_path["crates/core"].cache_dependency_path == "Cargo.lock"
+    assert pkg_by_path["crates/core"].install_cmd == "cargo fetch"
+    assert pkg_by_path["crates/core"].build_cmd == "cargo build --release"
+    assert pkg_by_path["crates/core"].test_cmd == "cargo test --verbose"
+    assert pkg_by_path["crates/core"].lint_cmd == "cargo clippy -- -D warnings"
+    assert pkg_by_path["crates/cli"].framework == "Axum"
+    assert pkg_by_path["crates/cli"].runtime_version == "1.80.0"
+
+    # 2. Root crate + workspace ([package] + [workspace]) -> active root crate has is_workspace_root=False
+    hybrid = tmp_path / "hybrid_rust"
+    (hybrid / "crates" / "sub").mkdir(parents=True)
+    (hybrid / "Cargo.toml").write_text(
+        '[package]\nname = "root-app"\nversion = "0.1.0"\n[workspace]\nmembers = ["crates/*"]\n',
+        encoding="utf-8",
+    )
+    (hybrid / "crates" / "sub" / "Cargo.toml").write_text(
+        '[package]\nname = "sub"\nversion = "0.1.0"\n',
+        encoding="utf-8",
+    )
+
+    h_ctx = ProjectContext(repo_name="hybrid_rust", repo_root=str(hybrid))
+    detector.analyze(RepoIndexer(hybrid), h_ctx)
+    assert h_ctx.is_monorepo is True
+    assert h_ctx.get_language("rust").is_workspace_root is False
+    assert sorted(p.path for p in h_ctx.monorepo_packages) == [".", "crates/sub"]
+
+    # 3. Polyglot Rust sub-package without root Cargo.toml
+    sub_only = tmp_path / "sub_rust"
+    (sub_only / "crates" / "engine").mkdir(parents=True)
+    (sub_only / "crates" / "engine" / "Cargo.toml").write_text(
+        '[package]\nname = "engine"\nversion = "0.1.0"\n',
+        encoding="utf-8",
+    )
+    s_indexer = RepoIndexer(sub_only)
+    assert detector.detect(s_indexer) is True
+    s_ctx = ProjectContext(repo_name="sub_rust", repo_root=str(sub_only))
+    detector.analyze(s_indexer, s_ctx)
+    assert [p.path for p in s_ctx.monorepo_packages] == ["crates/engine"]
+    assert s_ctx.get_language("rust").working_dir == "crates/engine"
+    assert s_ctx.get_language("rust").is_workspace_root is None
+
+    # 4. Single root Rust crate -> non-monorepo, is_workspace_root=False
+    single = tmp_path / "single_rust"
+    single.mkdir()
+    (single / "Cargo.toml").write_text('[package]\nname = "solo"\nversion = "0.1.0"\n', encoding="utf-8")
+    sg_ctx = ProjectContext(repo_name="single_rust", repo_root=str(single))
+    detector.analyze(RepoIndexer(single), sg_ctx)
+    assert sg_ctx.is_monorepo is False
+    assert sg_ctx.monorepo_packages == []
+    assert sg_ctx.get_language("rust").is_workspace_root is False
+
+
+def test_go_work_workspace_modules(tmp_path: Path):
+    from heurix.detectors.go_detector import GoDetector
+
+    detector = GoDetector()
+
+    # 1. Virtual go.work without root go.mod
+    virt = tmp_path / "go_virt"
+    (virt / "services" / "gateway").mkdir(parents=True)
+    (virt / "services" / "billing").mkdir(parents=True)
+    (virt / "services" / "unused").mkdir(parents=True)
+    (virt / "go.work").write_text(
+        "go 1.22\n\nuse (\n    ./services/gateway\n    ./services/billing\n)\n",
+        encoding="utf-8",
+    )
+    (virt / "services" / "gateway" / "go.mod").write_text(
+        "module example.com/gateway\n\ngo 1.21\n\nrequire github.com/gin-gonic/gin v1.9.1\n",
+        encoding="utf-8",
+    )
+    (virt / "services" / "gateway" / "go.sum").write_text("", encoding="utf-8")
+    (virt / "services" / "billing" / "go.mod").write_text(
+        "module example.com/billing\n\ngo 1.22\n\nrequire github.com/labstack/echo/v4 v4.11.0\n",
+        encoding="utf-8",
+    )
+    (virt / "services" / "unused" / "go.mod").write_text(
+        "module example.com/unused\n\ngo 1.22\n",
+        encoding="utf-8",
+    )
+
+    v_indexer = RepoIndexer(virt)
+    assert detector.detect(v_indexer) is True
+    v_ctx = ProjectContext(repo_name="go_virt", repo_root=str(virt))
+    detector.analyze(v_indexer, v_ctx)
+
+    assert v_ctx.is_monorepo is True
+    root_go = v_ctx.get_language("go")
+    assert root_go is not None
+    assert root_go.working_dir == "."
+    assert root_go.is_workspace_root is True
+
+    pkg_by_path = {p.path: p for p in v_ctx.monorepo_packages}
+    assert sorted(pkg_by_path.keys()) == ["services/billing", "services/gateway"]
+
+    gw = pkg_by_path["services/gateway"]
+    assert gw.package_manager == "gomod"
+    assert gw.runtime_version == "1.21"
+    assert gw.framework == "Gin"
+    assert gw.cache_dependency_path == "services/gateway/go.sum"
+    assert gw.install_cmd == "go mod download"
+    assert gw.build_cmd == "go build -v ./..."
+    assert gw.test_cmd == "go test -v -race -cover ./..."
+    assert gw.lint_cmd == "golangci-lint run"
+
+    bill = pkg_by_path["services/billing"]
+    assert bill.runtime_version == "1.22"
+    assert bill.framework == "Echo"
+    assert bill.cache_dependency_path is None
+
+    # 2. go.work with active root go.mod (`use .`) -> root LanguageContext is_workspace_root=False
+    active = tmp_path / "go_active"
+    (active / "services" / "api").mkdir(parents=True)
+    (active / "go.work").write_text("go 1.22\nuse (\n  .\n  ./services/api\n)\n", encoding="utf-8")
+    (active / "go.mod").write_text("module example.com/root\n\ngo 1.22\n", encoding="utf-8")
+    (active / "services" / "api" / "go.mod").write_text("module example.com/api\n\ngo 1.22\n", encoding="utf-8")
+
+    a_ctx = ProjectContext(repo_name="go_active", repo_root=str(active))
+    detector.analyze(RepoIndexer(active), a_ctx)
+    assert a_ctx.is_monorepo is True
+    assert a_ctx.get_language("go").working_dir == "."
+    assert a_ctx.get_language("go").is_workspace_root is False
+    assert [p.path for p in a_ctx.monorepo_packages] == ["services/api"]
+
+    # 3. Polyglot sub-package without go.work or root go.mod
+    sub = tmp_path / "go_sub"
+    (sub / "services" / "auth").mkdir(parents=True)
+    (sub / "services" / "auth" / "go.mod").write_text("module example.com/auth\n\ngo 1.23\n", encoding="utf-8")
+    (sub / "services" / "auth" / "main.go").write_text("package main\nfunc main() {}\n", encoding="utf-8")
+
+    s_indexer = RepoIndexer(sub)
+    assert detector.detect(s_indexer) is True
+    s_ctx = ProjectContext(repo_name="go_sub", repo_root=str(sub))
+    detector.analyze(s_indexer, s_ctx)
+    assert [p.path for p in s_ctx.monorepo_packages] == ["services/auth"]
+    assert s_ctx.get_language("go").working_dir == "services/auth"
+    assert s_ctx.get_language("go").is_workspace_root is None
+
+
+def test_cpp_subpackage_polyglot_detection(tmp_path: Path):
+    from heurix.detectors.cpp_detector import CppDetector
+
+    detector = CppDetector()
+
+    # 1. Polyglot C++ sub-package without root C++ manifest
+    sub = tmp_path / "cpp_sub"
+    (sub / "services" / "engine").mkdir(parents=True)
+    (sub / "services" / "engine" / "CMakeLists.txt").write_text(
+        "cmake_minimum_required(VERSION 3.20)\nproject(engine)\nset(CMAKE_CXX_STANDARD 20)\n",
+        encoding="utf-8",
+    )
+    (sub / "services" / "engine" / ".clang-tidy").write_text("Checks: '*'\n", encoding="utf-8")
+    (sub / "services" / "engine" / "main.cpp").write_text("int main() { return 0; }\n", encoding="utf-8")
+
+    s_indexer = RepoIndexer(sub)
+    assert detector.detect(s_indexer) is True
+    s_ctx = ProjectContext(repo_name="cpp_sub", repo_root=str(sub))
+    detector.analyze(s_indexer, s_ctx)
+
+    assert len(s_ctx.monorepo_packages) == 1
+    eng = s_ctx.monorepo_packages[0]
+    assert eng.path == "services/engine"
+    assert eng.language == "cpp"
+    assert eng.package_manager == "cmake"
+    assert eng.runtime_version == "c++20"
+    assert eng.version_source == "CMakeLists.txt"
+    assert eng.lint_cmd == "clang-tidy -p build"
+    assert s_ctx.get_language("cpp").working_dir == "services/engine"
+    assert s_ctx.get_language("cpp").is_workspace_root is None
+
+    # 2. Root CMake project with internal add_subdirectory(src) must NOT duplicate into monorepo_packages
+    root_cmake = tmp_path / "cpp_root"
+    (root_cmake / "src").mkdir(parents=True)
+    (root_cmake / "CMakeLists.txt").write_text(
+        "project(app)\nset(CMAKE_CXX_STANDARD 17)\nadd_subdirectory(src)\n",
+        encoding="utf-8",
+    )
+    (root_cmake / "src" / "CMakeLists.txt").write_text("add_library(core lib.cpp)\n", encoding="utf-8")
+
+    r_ctx = ProjectContext(repo_name="cpp_root", repo_root=str(root_cmake))
+    detector.analyze(RepoIndexer(root_cmake), r_ctx)
+    assert r_ctx.is_monorepo is False
+    assert r_ctx.monorepo_packages == []
+    assert r_ctx.get_language("cpp").working_dir == "."
+    assert r_ctx.get_language("cpp").is_workspace_root is False
+
+    # 3. Root CMake + independent sub-packages (preferred group + conan standalone)
+    mono_cmake = tmp_path / "cpp_mono"
+    (mono_cmake / "services" / "engine").mkdir(parents=True)
+    (mono_cmake / "standalone").mkdir(parents=True)
+    (mono_cmake / "CMakeLists.txt").write_text("project(mono)\nset(CMAKE_CXX_STANDARD 17)\n", encoding="utf-8")
+    (mono_cmake / "services" / "engine" / "CMakeLists.txt").write_text(
+        "project(engine)\nset(CMAKE_CXX_STANDARD 20)\n",
+        encoding="utf-8",
+    )
+    (mono_cmake / "standalone" / "conanfile.txt").write_text("[requires]\nfmt/10.0.0\n", encoding="utf-8")
+    (mono_cmake / "standalone" / "CMakeLists.txt").write_text(
+        "project(standalone)\nset(CMAKE_CXX_STANDARD 23)\n",
+        encoding="utf-8",
+    )
+
+    m_ctx = ProjectContext(repo_name="cpp_mono", repo_root=str(mono_cmake))
+    detector.analyze(RepoIndexer(mono_cmake), m_ctx)
+    assert m_ctx.get_language("cpp").working_dir == "."
+    assert m_ctx.get_language("cpp").is_workspace_root is False
+    m_pkgs = {p.path: p for p in m_ctx.monorepo_packages}
+    assert sorted(m_pkgs.keys()) == ["services/engine", "standalone"]
+    assert m_pkgs["services/engine"].runtime_version == "c++20"
+    assert m_pkgs["standalone"].package_manager == "conan"
+    assert m_pkgs["standalone"].runtime_version == "c++23"
+
+
+def test_polyglot_monorepo_nested_gitignore_end_to_end(tmp_path: Path):
+    from heurix.detectors import analyze_repository
+
+    # 1. Polyglot monorepo: Node in apps/web + Python in services/api + nested .gitignore hiding local_build/
+    mono = tmp_path / "poly_mono"
+    (mono / "apps" / "web" / "local_build").mkdir(parents=True)
+    (mono / "services" / "api").mkdir(parents=True)
+    (mono / "docs").mkdir(parents=True)
+
+    (mono / "pnpm-workspace.yaml").write_text("packages:\n  - 'apps/*'\n", encoding="utf-8")
+    (mono / "pnpm-lock.yaml").write_text("lockfileVersion: '9.0'\n", encoding="utf-8")
+    (mono / "apps" / "web" / ".gitignore").write_text("local_build/\n", encoding="utf-8")
+    (mono / "apps" / "web" / "package.json").write_text(
+        '{"name": "web", "scripts": {"test": "vitest run", "build": "next build"}, "dependencies": {"next": "^14.0.0"}}',
+        encoding="utf-8",
+    )
+    # Must be hidden by apps/web/.gitignore and never indexed or picked up as a package
+    (mono / "apps" / "web" / "local_build" / "package.json").write_text('{"name": "ignored"}', encoding="utf-8")
+    (mono / "apps" / "web" / "local_build" / "pyproject.toml").write_text('[project]\nname = "ignored"\n', encoding="utf-8")
+
+    (mono / "services" / "api" / "uv.lock").write_text("", encoding="utf-8")
+    (mono / "services" / "api" / "pyproject.toml").write_text(
+        """
+[project]
+name = "api"
+requires-python = ">=3.11"
+dependencies = ["fastapi", "psycopg2-binary", "pytest"]
+""",
+        encoding="utf-8",
+    )
+    (mono / "docs" / "requirements.txt").write_text("sphinx\n", encoding="utf-8")
+
+    ctx = analyze_repository(mono)
+    assert ctx.is_monorepo is True
+    assert [(p.path, p.language) for p in ctx.monorepo_packages] == [
+        ("apps/web", "node"),
+        ("services/api", "python"),
+    ]
+    pkg_map = {(p.path, p.language): p for p in ctx.monorepo_packages}
+    assert pkg_map[("apps/web", "node")].cache_dependency_path == "pnpm-lock.yaml"
+    assert pkg_map[("services/api", "python")].cache_dependency_path == "services/api/uv.lock"
+    assert pkg_map[("services/api", "python")].framework == "FastAPI"
+    assert [(s.name, s.package_path) for s in ctx.services] == [("postgres", "services/api")]
+
+    # 2. Hybrid root Python + 1 Node sub-package -> is_monorepo reconciled to True
+    hybrid = tmp_path / "hybrid_mono"
+    (hybrid / "frontend").mkdir(parents=True)
+    (hybrid / "pyproject.toml").write_text('[project]\nname = "api"\n', encoding="utf-8")
+    (hybrid / "frontend" / "package.json").write_text('{"name": "frontend"}', encoding="utf-8")
+
+    h_ctx = analyze_repository(hybrid)
+    assert h_ctx.is_monorepo is True
+    assert [(p.path, p.language) for p in h_ctx.monorepo_packages] == [("frontend", "node")]
+
+
+def test_toml_matrix_and_scalar_override_precedence(tmp_path: Path):
+    from heurix.detectors import analyze_repository
+
+    # 1. [matrix] table populates matrix_os and *-version aliases across LanguageContext and MonorepoPackage
+    repo1 = tmp_path / "matrix_repo"
+    (repo1 / "services" / "api").mkdir(parents=True)
+    (repo1 / "apps" / "web").mkdir(parents=True)
+    (repo1 / "services" / "api" / "pyproject.toml").write_text('[project]\nname = "api"\n', encoding="utf-8")
+    (repo1 / "apps" / "web" / "package.json").write_text('{"name": "web"}', encoding="utf-8")
+    (repo1 / ".heurix.toml").write_text(
+        """
+[matrix]
+os = ["ubuntu-latest", "macos-latest"]
+python-version = ["3.11", "3.12", "3.13"]
+node = ["20.x", "22.x"]
+""",
+        encoding="utf-8",
+    )
+
+    ctx1 = analyze_repository(repo1)
+    assert ctx1.matrix_os == ["ubuntu-latest", "macos-latest"]
+    py_lang = ctx1.get_language("python")
+    assert py_lang.matrix_versions == ["3.11", "3.12", "3.13"]
+    assert py_lang.runtime_version == "3.13"
+    assert py_lang.version_source == ".heurix.toml"
+
+    py_pkg = next(p for p in ctx1.monorepo_packages if p.language == "python")
+    assert py_pkg.matrix_versions == ["3.11", "3.12", "3.13"]
+    assert py_pkg.runtime_version == "3.13"
+    assert py_pkg.version_source == ".heurix.toml"
+
+    node_pkg = next(p for p in ctx1.monorepo_packages if p.language == "node")
+    assert node_pkg.matrix_versions == ["20.x", "22.x"]
+    assert node_pkg.runtime_version == "22.x"
+    assert node_pkg.version_source == ".heurix.toml"
+
+    # 2. Single-entry [matrix] lists resolve to scalar runner/runtime_version without matrix expansion
+    repo2 = tmp_path / "single_matrix_entry"
+    repo2.mkdir()
+    (repo2 / "pyproject.toml").write_text('[project]\nname = "solo"\n', encoding="utf-8")
+    (repo2 / ".heurix.toml").write_text(
+        """
+[matrix]
+os = ["ubuntu-22.04"]
+python = ["3.11"]
+""",
+        encoding="utf-8",
+    )
+    ctx2 = analyze_repository(repo2)
+    assert ctx2.matrix_os == []
+    assert ctx2.runner == "ubuntu-22.04"
+    assert ctx2.get_language("python").runtime_version == "3.11"
+    assert ctx2.get_language("python").matrix_versions == []
+
+    # 3. [overrides] list values map to matrix_versions without str(list) coercion
+    repo3 = tmp_path / "list_override"
+    repo3.mkdir()
+    (repo3 / "pyproject.toml").write_text('[project]\nname = "app"\n', encoding="utf-8")
+    (repo3 / ".heurix.toml").write_text(
+        """
+[overrides]
+python = ["3.11", "3.12"]
+""",
+        encoding="utf-8",
+    )
+    ctx3 = analyze_repository(repo3)
+    py3 = ctx3.get_language("python")
+    assert py3.matrix_versions == ["3.11", "3.12"]
+    assert py3.runtime_version == "3.12"
+    assert "[" not in py3.runtime_version
+    assert py3.version_source == ".heurix.toml"
+
+    # 4. Scalar [overrides] collapses pyproject.toml classifiers AND [matrix] across all matching contexts/packages
+    repo4 = tmp_path / "scalar_collapse"
+    (repo4 / "services" / "a").mkdir(parents=True)
+    (repo4 / "services" / "b").mkdir(parents=True)
+    for sub in ("a", "b"):
+        (repo4 / "services" / sub / "pyproject.toml").write_text(
+            """
+[project]
+name = "svc"
+classifiers = [
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+""",
+            encoding="utf-8",
+        )
+    (repo4 / ".heurix.toml").write_text(
+        """
+[matrix]
+python = ["3.10", "3.11", "3.12"]
+
+[overrides]
+python = "3.11"
+""",
+        encoding="utf-8",
+    )
+    ctx4 = analyze_repository(repo4)
+    for lang in ctx4.get_languages("python"):
+        assert lang.runtime_version == "3.11"
+        assert lang.version_source == ".heurix.toml"
+        assert lang.matrix_versions == []
+    for pkg in ctx4.monorepo_packages:
+        assert pkg.runtime_version == "3.11"
+        assert pkg.version_source == ".heurix.toml"
+        assert pkg.matrix_versions == []
+
+    # 5. Malformed .heurix.toml degrades gracefully with explain_log warning
+    repo5 = tmp_path / "bad_toml"
+    repo5.mkdir()
+    (repo5 / "pyproject.toml").write_text('[project]\nname = "app"\n', encoding="utf-8")
+    (repo5 / ".heurix.toml").write_text("[overrides\npython = broken", encoding="utf-8")
+    ctx5 = analyze_repository(repo5)
+    assert any("Warning: Failed to parse .heurix.toml" in msg for msg in ctx5.explain_log)
+
+
+
+
+

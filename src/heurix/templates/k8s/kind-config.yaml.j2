@@ -1,0 +1,31 @@
+# Synthesized deterministically by Heurix (hx)
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+metadata:
+  name: {{ cluster_name | yaml_scalar }}
+nodes:
+{% for node in nodes %}
+  - role: {{ node.role | yaml_scalar }}
+{% if node.kubeadmConfigPatches %}
+    kubeadmConfigPatches:
+{% for patch in node.kubeadmConfigPatches %}
+{% set norm_patch = patch.replace('\r\n', '\n') %}
+{% if '\n' in norm_patch and norm_patch.strip('\n') %}
+      - |
+{% for line in norm_patch.rstrip('\n').split('\n') %}
+{{ ('        ' ~ line) if line else '' }}
+{% endfor %}
+{% else %}
+      - {{ patch | yaml_scalar }}
+{% endif %}
+{% endfor %}
+{% endif %}
+{% if node.extraPortMappings %}
+    extraPortMappings:
+{% for mapping in node.extraPortMappings %}
+      - containerPort: {{ mapping.containerPort }}
+        hostPort: {{ mapping.hostPort }}
+        protocol: {{ mapping.protocol | yaml_scalar }}
+{% endfor %}
+{% endif %}
+{% endfor %}

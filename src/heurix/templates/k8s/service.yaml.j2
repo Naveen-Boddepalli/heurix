@@ -1,0 +1,20 @@
+# Synthesized deterministically by Heurix (hx)
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ service_name | yaml_scalar }}
+{% if namespace %}
+  namespace: {{ namespace | yaml_scalar }}
+{% endif %}
+  labels:
+    app: {{ app_name | yaml_scalar }}
+spec:
+  type: {{ service_type | yaml_scalar }}
+  selector:
+    app: {{ app_name | yaml_scalar }}
+  ports:
+{% for p in ports %}
+    - protocol: {{ p.protocol | yaml_scalar }}
+      port: {{ p.port }}
+      targetPort: {{ p.targetPort }}
+{% endfor %}

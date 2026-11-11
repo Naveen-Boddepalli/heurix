@@ -1,0 +1,75 @@
+{% macro render_step(step, base_indent=6) %}
+{% set pad = ' ' * base_indent %}
+{% set inner = ' ' * (base_indent + 2) %}
+{% set ns = namespace(first=true) %}
+{% set step_id = step.get('id') %}
+{% set step_name = step.get('name') %}
+{% set step_if = step.get('if') %}
+{% set step_uses = step.get('uses') %}
+{% set step_uses_comment = step.get('uses_comment') %}
+{% set step_wd = step.get('working-directory') if step.get('working-directory') is not none else step.get('working_directory') %}
+{% set step_shell = step.get('shell') %}
+{% set step_coe = step.get('continue-on-error') if step.get('continue-on-error') is not none else step.get('continue_on_error') %}
+{% set step_timeout = step.get('timeout-minutes') if step.get('timeout-minutes') is not none else step.get('timeout_minutes') %}
+{% set step_with = step.get('with') %}
+{% set step_run = step.get('run') %}
+{% set step_env = step.get('env') %}
+{% if step_id %}
+{{ pad ~ '- ' if ns.first else inner }}id: {{ step_id | yaml_scalar }}
+{% set ns.first = false %}
+{% endif %}
+{% if step_name %}
+{{ pad ~ '- ' if ns.first else inner }}name: {{ step_name | yaml_scalar }}
+{% set ns.first = false %}
+{% endif %}
+{% if step_if %}
+{{ pad ~ '- ' if ns.first else inner }}if: {{ step_if | yaml_scalar }}
+{% set ns.first = false %}
+{% endif %}
+{% if step_uses %}
+{% if step_uses_comment %}
+{{ pad ~ '- ' if ns.first else inner }}uses: {{ step_uses | yaml_scalar }}  # {{ step_uses_comment | string | replace('\n', ' ') | replace('\r', '') | trim }}
+{% else %}
+{{ pad ~ '- ' if ns.first else inner }}uses: {{ step_uses | yaml_scalar }}
+{% endif %}
+{% set ns.first = false %}
+{% endif %}
+{% if step_wd %}
+{{ pad ~ '- ' if ns.first else inner }}working-directory: {{ step_wd | yaml_scalar }}
+{% set ns.first = false %}
+{% endif %}
+{% if step_shell %}
+{{ pad ~ '- ' if ns.first else inner }}shell: {{ step_shell | yaml_scalar }}
+{% set ns.first = false %}
+{% endif %}
+{% if step_coe is not none %}
+{{ pad ~ '- ' if ns.first else inner }}continue-on-error: {{ step_coe | yaml_scalar }}
+{% set ns.first = false %}
+{% endif %}
+{% if step_timeout is not none %}
+{{ pad ~ '- ' if ns.first else inner }}timeout-minutes: {{ step_timeout | yaml_scalar }}
+{% set ns.first = false %}
+{% endif %}
+{% if step_with %}
+{{ pad ~ '- ' if ns.first else inner }}with:
+{{ step_with | yaml_block(indent=base_indent + 4) }}
+{% set ns.first = false %}
+{% endif %}
+{% if step_run %}
+{% set normalized_run = step_run.replace('\r\n', '\n') %}
+{% if '\n' in normalized_run and normalized_run.strip('\n') %}
+{{ pad ~ '- ' if ns.first else inner }}run: |
+{% for line in normalized_run.rstrip('\n').split('\n') %}
+{{ (' ' * (base_indent + 4) ~ line) if line else '' }}
+{% endfor %}
+{% else %}
+{{ pad ~ '- ' if ns.first else inner }}run: {{ step_run | yaml_scalar }}
+{% endif %}
+{% set ns.first = false %}
+{% endif %}
+{% if step_env %}
+{{ pad ~ '- ' if ns.first else inner }}env:
+{{ step_env | yaml_block(indent=base_indent + 4) }}
+{% set ns.first = false %}
+{% endif %}
+{% endmacro %}

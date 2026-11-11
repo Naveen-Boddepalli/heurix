@@ -13,8 +13,10 @@ from rich.console import Console
 from rich.panel import Panel
 
 from heurix import __version__
+from heurix.core.context import ProjectContext
 from heurix.core.drift import DriftDetector
 from heurix.core.merger import SmartMerger, YamlSyntaxError
+from heurix.core.policy import HeurixPolicy
 from heurix.core.validator import PreflightValidator
 from heurix.detectors import analyze_repository
 from heurix.synthesizers import synthesize_all
@@ -54,6 +56,30 @@ def _resolve_or_exit(repo_path: Path, rel_path: str | Path) -> Path:
             Panel.fit(
                 f"[bold red]Security Error:[/bold red] {e}",
                 title="Path Traversal Blocked",
+                border_style="red",
+            )
+        )
+        raise typer.Exit(code=1)
+
+
+def _synthesize_or_exit(
+    context: ProjectContext,
+    *,
+    include_k8s: bool,
+    include_dependabot: bool,
+) -> dict[str, str]:
+    """Run synthesize_all() and exit cleanly with code 1 on SEC-01 template/path ValueError."""
+    try:
+        return synthesize_all(
+            context,
+            include_k8s=include_k8s,
+            include_dependabot=include_dependabot,
+        )
+    except ValueError as e:
+        console.print(
+            Panel.fit(
+                f"[bold red]Security Error:[/bold red] {e}",
+                title="Template / Path Security Error",
                 border_style="red",
             )
         )
@@ -116,11 +142,15 @@ def generate(
         print_explain_tree(context)
 
     # 3. Synthesize YAML outputs
-    ci_cfg = context.policy_config.get("ci", {})
-    include_dependabot = ci_cfg.get("include_dependabot", True)
-    include_k8s = ci_cfg.get("include_k8s", k8s) if k8s else False
+    policy = HeurixPolicy.from_raw(context.policy_config)
+    include_dependabot = policy.ci.include_dependabot
+    include_k8s = (policy.ci.include_k8s if policy.ci.include_k8s is not None else k8s) if k8s else False
 
-    synthesized = synthesize_all(context, include_k8s=include_k8s, include_dependabot=include_dependabot)
+    synthesized = _synthesize_or_exit(
+        context,
+        include_k8s=include_k8s,
+        include_dependabot=include_dependabot,
+    )
     if not synthesized:
         console.print("[yellow]No relevant languages or container configs detected to synthesize.[/yellow]")
         return
@@ -147,8 +177,7 @@ def generate(
     # 5. Diff preview or smart merge
     merger = SmartMerger()
     files_to_write: dict[str, str] = {}
-    engine_cfg = context.policy_config.get("engine", {})
-    non_destructive = engine_cfg.get("non_destructive", True)
+    non_destructive = policy.engine.non_destructive
 
     for rel_path, new_content in synthesized.items():
         target_file = _resolve_or_exit(repo_path, rel_path)
@@ -240,10 +269,14 @@ def check(
     """
     repo_path = Path(path).resolve()
     context = analyze_repository(repo_path)
-    ci_cfg = context.policy_config.get("ci", {})
-    include_dependabot = ci_cfg.get("include_dependabot", True)
-    include_k8s = ci_cfg.get("include_k8s", False)
-    synthesized = synthesize_all(context, include_k8s=include_k8s, include_dependabot=include_dependabot)
+    policy = HeurixPolicy.from_raw(context.policy_config)
+    include_dependabot = policy.ci.include_dependabot
+    include_k8s = bool(policy.ci.include_k8s)
+    synthesized = _synthesize_or_exit(
+        context,
+        include_k8s=include_k8s,
+        include_dependabot=include_dependabot,
+    )
 
     detector = DriftDetector(repo_path)
     findings = detector.check_drift(context, synthesized)
@@ -287,20 +320,104 @@ def init(
         return
 
     content = """# Heurix Configuration Policy (.heurix.toml)
-# Optional configuration overrides for power users.
+# Deterministic CI/CD, Dependabot, and Kubernetes policy configuration.
 
 [engine]
 runner = "ubuntu-latest"
 non_destructive = true
+# templates_dir = ".heurix/templates"  # Repo-local Jinja2 override directory (contained inside repo)
 
 [ci]
 include_dependabot = true
 include_k8s = true
+# default_branch = "main"
+# pin_actions = true
+#
+# [ci.action_shas]
+# "actions/checkout" = "<40-char-commit-sha>"
+#
+# [ci.runners]
+# test-apps-web = "ubuntu-24.04-arm"
+# deploy_vercel = "ubuntu-latest"
+#
+# [[ci.steps.pre_test]]
+# name = "Pre-test check"
+# run = "echo Running pre-test hooks"
+#
+# [[ci.steps.post_test]]
+# name = "Post-test cleanup"
+# run = "echo Done"
 
 [overrides]
 # Force specific runtime versions if desired:
 # python = "3.12"
 # node = "20.x"
+
+# [matrix]
+# os = ["ubuntu-latest", "macos-latest"]
+# python = ["3.11", "3.12"]
+
+# [jobs.test]  # Also supports any [jobs.<id>]
+# runner = "ubuntu-latest"
+# [[jobs.test.pre_steps]]
+# name = "Job pre-step"
+# run = "echo pre"
+# [[jobs.test.post_steps]]
+# name = "Job post-step"
+# run = "echo post"
+
+# [services]
+# exclude = ["redis"]
+
+# [env]
+# APP_ENV = "ci"
+
+# [secrets]
+# test = ["TEST_API_TOKEN"]
+# deploy = ["VERCEL_TOKEN"]
+
+# [linters]
+# enabled = true
+# python = true
+# node = true
+# go = true
+# rust = true
+# cpp = true
+
+# [kubernetes]  # Alias: [k8s]
+# replicas = 2
+# namespace = "production"
+# image = "my-app:latest"
+# port = 8000
+# service_type = "ClusterIP"  # ClusterIP | NodePort | LoadBalancer
+#
+# [kubernetes.resources.requests]
+# cpu = "100m"
+# memory = "256Mi"
+#
+# [kubernetes.resources.limits]
+# cpu = "500m"
+# memory = "512Mi"
+#
+# [kubernetes.liveness_probe]
+# enabled = true
+# type = "httpGet"  # httpGet | tcpSocket | exec
+# path = "/health"
+# initial_delay_seconds = 15
+# period_seconds = 10
+#
+# [kubernetes.readiness_probe]
+# enabled = true
+# type = "httpGet"
+# path = "/health"
+# initial_delay_seconds = 5
+# period_seconds = 10
+#
+# [kubernetes.hpa]
+# enabled = true
+# min_replicas = 2
+# max_replicas = 10
+# target_cpu_utilization = 80
 """
     config_file.write_text(content, encoding="utf-8")
     console.print("[bold green]✔ Initialized .heurix.toml policy file.[/bold green]")

@@ -781,3 +781,604 @@ jobs:
     assert inspect_workflow_ast(None).discovered_services == set()
 
 
+def test_multijob_drift_monorepo_working_dir_and_packages(tmp_path: Path):
+    from ruamel.yaml import YAML
+    from heurix.core.context import MonorepoPackage
+    from heurix.core.drift import WorkflowASTInfo
+    from heurix.synthesizers.github_actions import GitHubActionsSynthesizer
+
+    # Backward-compatible 6-arg positional WorkflowASTInfo + independent defaults
+    a = WorkflowASTInfo(set(), {"python": set()}, set(), set(), [], {})
+    b = WorkflowASTInfo(set(), {"python": set()}, set(), set(), [], {})
+    a.working_dirs.add("apps/web")
+    assert b.working_dirs == set()
+
+    context = ProjectContext(
+        repo_name="mono-drift",
+        repo_root=str(tmp_path),
+        is_monorepo=True,
+        languages=[
+            LanguageContext(
+                language="node",
+                runtime_version="20.x",
+                version_source="package.json",
+                package_manager="pnpm",
+                install_cmd="pnpm install",
+                is_workspace_root=True,
+            ),
+            LanguageContext(
+                language="python",
+                runtime_version="3.12",
+                version_source="pyproject.toml",
+                package_manager="uv",
+                install_cmd="uv sync --frozen",
+                working_dir="services/api",
+                is_workspace_root=None,
+            ),
+        ],
+        monorepo_packages=[
+            MonorepoPackage(
+                name="apps/web",
+                path="apps/web",
+                language="node",
+                package_manager="pnpm",
+                runtime_version="20.x",
+                version_source=".nvmrc",
+                install_cmd="pnpm i --frozen-lockfile",
+                test_cmd="pnpm test",
+                cache_dependency_path="pnpm-lock.yaml",
+            ),
+            MonorepoPackage(
+                name="services/api",
+                path="services/api",
+                language="python",
+                package_manager="uv",
+                runtime_version="3.12",
+                version_source=".python-version",
+                install_cmd="uv sync --frozen",
+                test_cmd="uv run pytest",
+                cache_dependency_path="services/api/uv.lock",
+            ),
+            MonorepoPackage(
+                name="crates/core",
+                path="crates/core",
+                language="rust",
+                package_manager="cargo",
+                runtime_version="stable",
+                version_source="default",
+                install_cmd="cargo fetch",
+                test_cmd="cargo test",
+            ),
+            MonorepoPackage(
+                name="services/worker",
+                path="services/worker",
+                language="go",
+                package_manager="gomod",
+                runtime_version="1.22",
+                version_source="go.mod",
+                install_cmd="go mod download",
+                test_cmd="go test ./...",
+            ),
+        ],
+        services=[
+            ServiceRequirement(
+                name="postgres",
+                image="postgres:16-alpine",
+                ports=[5432],
+                source_file="services/api/pyproject.toml",
+                package_path="services/api",
+            )
+        ],
+    )
+
+    synthesized = GitHubActionsSynthesizer().synthesize(context)
+    wf_dir = tmp_path / ".github" / "workflows"
+    wf_dir.mkdir(parents=True)
+    ci_file = wf_dir / "ci.yml"
+    ci_file.write_text(synthesized[".github/workflows/ci.yml"], encoding="utf-8")
+
+    detector = DriftDetector(tmp_path)
+    assert detector.check_drift(context, synthesized) == []
+
+    ast_info = inspect_workflow_ast(YAML(typ="safe").load(ci_file.read_text(encoding="utf-8")))
+    assert {"apps/web", "services/api", "crates/core", "services/worker"}.issubset(ast_info.working_dirs)
+    assert ast_info.job_working_dirs["test-apps-web"] == "apps/web"
+    assert ast_info.job_working_dirs["test-services-api"] == "services/api"
+    assert "3.12" in ast_info.job_runtime_versions["test-services-api"]["python"]
+    assert "uv" in ast_info.job_package_managers["test-services-api"]
+    assert "pnpm" in ast_info.job_package_managers["test-apps-web"]
+    assert ast_info.runs_on_oses == {"ubuntu-latest"}
+
+    # Step-level working-directory normalization (./apps/web/ -> apps/web)
+    step_wd_info = inspect_workflow_ast(
+        {
+            "jobs": {
+                "step-job": {
+                    "runs-on": "ubuntu-latest",
+                    "steps": [
+                        {"run": "pnpm test", "working-directory": "./apps/web/"},
+                    ],
+                }
+            }
+        }
+    )
+    assert "apps/web" in step_wd_info.working_dirs
+    assert step_wd_info.job_working_dirs["step-job"] == "apps/web"
+
+    # 1. Missing working-directory on services/api must be flagged
+    ci_file.write_text(
+        """name: CI
+jobs:
+  test-apps-web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+  test-services-api:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+    steps:
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+  test-crates-core:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: crates/core
+    steps:
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+  test-services-worker:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/worker
+    steps:
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+""",
+        encoding="utf-8",
+    )
+    missing_wd_findings = detector.check_drift(context, {".github/workflows/ci.yml": "dummy"})
+    assert any("services/api" in f.issue and "working-directory" in f.issue for f in missing_wd_findings)
+
+    # 2. Per-job isolation: test-services-api has python 3.10 + pip while unrelated job has 3.12 + uv
+    ci_file.write_text(
+        """name: CI
+jobs:
+  test-apps-web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+  test-services-api:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/api
+    services:
+      postgres:
+        image: postgres:16-alpine
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - run: pip install -r requirements.txt
+  decoy-other-python:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tools/helper
+    steps:
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+  test-crates-core:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: crates/core
+    steps:
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+  test-services-worker:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/worker
+    steps:
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+""",
+        encoding="utf-8",
+    )
+    isolated_findings = detector.check_drift(context, {".github/workflows/ci.yml": "dummy"})
+    assert any("3.12" in f.issue and "services/api" in f.issue for f in isolated_findings)
+    assert any("uv" in f.issue.lower() and "services/api" in f.issue for f in isolated_findings)
+
+
+def test_matrix_drift_versions_and_os_roundtrip(tmp_path: Path):
+    from heurix.core.context import MonorepoPackage
+    from heurix.synthesizers.github_actions import GitHubActionsSynthesizer
+
+    wf_dir = tmp_path / ".github" / "workflows"
+    wf_dir.mkdir(parents=True)
+    ci_file = wf_dir / "ci.yml"
+    detector = DriftDetector(tmp_path)
+
+    # 1. Single-root multi-version + multi-OS matrix roundtrip
+    single_matrix_ctx = ProjectContext(
+        repo_name="matrix-py",
+        repo_root=str(tmp_path),
+        matrix_os=["ubuntu-latest", "macos-latest"],
+        languages=[
+            LanguageContext(
+                language="python",
+                runtime_version="3.12",
+                version_source="pyproject.toml",
+                package_manager="pip",
+                install_cmd="pip install -e '.[dev]'",
+                test_cmd="pytest",
+                matrix_versions=["3.10", "3.11", "3.12"],
+            )
+        ],
+    )
+    single_synth = GitHubActionsSynthesizer().synthesize(single_matrix_ctx)
+    ci_file.write_text(single_synth[".github/workflows/ci.yml"], encoding="utf-8")
+    assert detector.check_drift(single_matrix_ctx, single_synth) == []
+
+    # Missing matrix versions (3.11, 3.12) and missing OS (macos-latest), with comment decoy
+    ci_file.write_text(
+        """name: CI
+# macos-latest and python 3.11 3.12
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+""",
+        encoding="utf-8",
+    )
+    single_findings = detector.check_drift(single_matrix_ctx, {".github/workflows/ci.yml": "dummy"})
+    single_issues = [f.issue for f in single_findings]
+    assert any("python 3.11" in i for i in single_issues)
+    assert any("python 3.12" in i for i in single_issues)
+    assert any("macos-latest" in i for i in single_issues)
+
+    # 2. C++ cross-OS matrix roundtrip
+    cpp_ctx = ProjectContext(
+        repo_name="cpp-matrix",
+        repo_root=str(tmp_path),
+        matrix_os=["ubuntu-latest", "macos-latest"],
+        languages=[
+            LanguageContext(
+                language="cpp",
+                runtime_version="c++20",
+                version_source="CMakeLists.txt",
+                package_manager="cmake",
+                install_cmd="cmake -B build -S .",
+                build_cmd="cmake --build build",
+                test_cmd="ctest --test-dir build --output-on-failure",
+            )
+        ],
+    )
+    cpp_synth = GitHubActionsSynthesizer().synthesize(cpp_ctx)
+    ci_file.write_text(cpp_synth[".github/workflows/ci.yml"], encoding="utf-8")
+    assert detector.check_drift(cpp_ctx, cpp_synth) == []
+
+    # 3. Polyglot monorepo with per-package matrices and OS matrix roundtrip
+    mono_matrix_ctx = ProjectContext(
+        repo_name="mono-matrix",
+        repo_root=str(tmp_path),
+        is_monorepo=True,
+        matrix_os=["ubuntu-latest", "macos-latest"],
+        monorepo_packages=[
+            MonorepoPackage(
+                name="apps/web",
+                path="apps/web",
+                language="node",
+                package_manager="pnpm",
+                runtime_version="22.x",
+                version_source="package.json (engines)",
+                install_cmd="pnpm i --frozen-lockfile",
+                test_cmd="pnpm test",
+                matrix_versions=["18.x", "20.x", "22.x"],
+            ),
+            MonorepoPackage(
+                name="services/api",
+                path="services/api",
+                language="python",
+                package_manager="uv",
+                runtime_version="3.12",
+                version_source="pyproject.toml",
+                install_cmd="uv sync --frozen",
+                test_cmd="uv run pytest",
+                matrix_versions=["3.11", "3.12"],
+            ),
+        ],
+    )
+    mono_synth = GitHubActionsSynthesizer().synthesize(mono_matrix_ctx)
+    ci_file.write_text(mono_synth[".github/workflows/ci.yml"], encoding="utf-8")
+    assert detector.check_drift(mono_matrix_ctx, mono_synth) == []
+
+    # Remove '22.x' from test-apps-web and 'macos-latest' from test-services-api
+    ci_file.write_text(
+        """name: CI
+jobs:
+  test-apps-web:
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: apps/web
+    strategy:
+      matrix:
+        os: [ubuntu-latest]
+        node-version: ['18.x', '20.x']
+    steps:
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+  test-services-api:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/api
+    strategy:
+      matrix:
+        python-version: ['3.11', '3.12']
+    steps:
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+""",
+        encoding="utf-8",
+    )
+    mono_findings = detector.check_drift(mono_matrix_ctx, {".github/workflows/ci.yml": "dummy"})
+    mono_issues = [f.issue for f in mono_findings]
+    assert any("22.x" in i and "apps/web" in i for i in mono_issues)
+    assert any("macos-latest" in i for i in mono_issues)
+
+
+def test_phase3_drift_policy(tmp_path: Path):
+    from ruamel.yaml import YAML
+    from heurix.core.context import MonorepoPackage
+    from heurix.core.drift import WorkflowASTInfo
+    from heurix.synthesizers.github_actions import GitHubActionsSynthesizer
+
+    # Backward-compatible 6-arg positional WorkflowASTInfo + new defaulted fields
+    info_a = WorkflowASTInfo(set(), {"python": set()}, set(), set(), [], {})
+    info_b = WorkflowASTInfo(set(), {"python": set()}, set(), set(), [], {})
+    info_a.job_runs_on["test"] = {"ubuntu-latest"}
+    info_a.job_steps["test"] = [(None, "step", "echo hi")]
+    assert info_b.job_runs_on == {}
+    assert info_b.job_steps == {}
+
+    wf_dir = tmp_path / ".github" / "workflows"
+    wf_dir.mkdir(parents=True)
+    ci_file = wf_dir / "ci.yml"
+    detector = DriftDetector(tmp_path)
+
+    # 1. All test jobs explicitly override matrix_os + excluded services (postgresql alias) + disabled linters + injected steps
+    full_override_policy = {
+        "services": {"exclude": ["postgresql", "redis"]},
+        "linters": {"enabled": False, "python": False},
+        "ci": {
+            "pin_actions": True,
+            "action_shas": {"actions/cache": "0c45773b623bea8c8e75f6c82b208c3cf94ea4f9"},
+            "runners": {
+                "test-apps-web": "ubuntu-22.04",
+                "test-services-api": "ubuntu-24.04-arm",
+            },
+            "steps": {
+                "pre_test": [{"name": "Global Pre-Test", "run": "echo  global-pre"}],
+                "post_test": [{"run": "echo global-post-only"}],
+            },
+        },
+        "jobs": {
+            "test-apps-web": {
+                "runner": "ubuntu-24.04-arm",  # overrides [ci.runners].test-apps-web
+                "pre_steps": [{"name": "Cache Web", "uses": "actions/cache@v4"}],
+            },
+            "test-services-api": {
+                "post_steps": [{"name": "API Audit", "run": "echo api-audit"}],
+            },
+        },
+    }
+
+    mono_ctx = ProjectContext(
+        repo_name="phase3-drift",
+        repo_root=str(tmp_path),
+        is_monorepo=True,
+        matrix_os=["ubuntu-latest", "macos-latest"],
+        monorepo_packages=[
+            MonorepoPackage(
+                name="apps/web",
+                path="apps/web",
+                language="node",
+                package_manager="pnpm",
+                runtime_version="20.x",
+                version_source=".nvmrc",
+                install_cmd="pnpm i --frozen-lockfile",
+                test_cmd="pnpm test",
+                lint_cmd="pnpm lint",
+            ),
+            MonorepoPackage(
+                name="services/api",
+                path="services/api",
+                language="python",
+                package_manager="uv",
+                runtime_version="3.12",
+                version_source=".python-version",
+                install_cmd="uv sync --frozen",
+                test_cmd="uv run pytest",
+                lint_cmd="uv run ruff check .",
+            ),
+        ],
+        services=[
+            ServiceRequirement(
+                name="postgres",
+                image="postgres:16-alpine",
+                ports=[5432],
+                source_file="services/api/pyproject.toml",
+                package_path="services/api",
+            ),
+            ServiceRequirement(
+                name="redis",
+                image="redis:7-alpine",
+                ports=[6379],
+                source_file="docker-compose.yml",
+            ),
+            ServiceRequirement(
+                name="mongodb",
+                image="mongo:7",
+                ports=[27017],
+                source_file="apps/web/package.json",
+                package_path="apps/web",
+            ),
+        ],
+        policy_config=full_override_policy,
+    )
+
+    synth_files = GitHubActionsSynthesizer().synthesize(mono_ctx)
+    ci_file.write_text(synth_files[".github/workflows/ci.yml"], encoding="utf-8")
+
+    # Zero drift on freshly synthesized workflow (and with "dummy" synthesized_files)
+    assert detector.check_drift(mono_ctx, synth_files) == []
+    assert detector.check_drift(mono_ctx, {".github/workflows/ci.yml": "dummy"}) == []
+
+    # AST info captures per-job runs_on and normalized job_steps
+    ast_info = inspect_workflow_ast(YAML(typ="safe").load(ci_file.read_text(encoding="utf-8")))
+    assert ast_info.job_runs_on["test-apps-web"] == {"ubuntu-24.04-arm"}
+    assert ast_info.job_runs_on["test-services-api"] == {"ubuntu-24.04-arm"}
+    assert ("actions/cache", "cache web", None) in ast_info.job_steps["test-apps-web"]
+    assert (None, "global pre-test", "echo global-pre") in ast_info.job_steps["test-services-api"]
+    assert (None, None, "echo global-post-only") in ast_info.job_steps["test-apps-web"]
+
+    # 2. Positive drift detection when runner or injected steps drift on disk (using "dummy")
+    drifted_workflow = """name: CI
+jobs:
+  test-apps-web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    services:
+      mongodb:
+        image: mongo:7
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+      - name: Global Pre-Test
+        run: echo global-pre
+      # Missing: Cache Web (actions/cache), echo global-post-only
+  test-services-api:
+    runs-on: ubuntu-24.04-arm
+    defaults:
+      run:
+        working-directory: services/api
+    services:
+      mongodb:
+        image: mongo:7
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Global Pre-Test
+        run: echo global-pre
+      - run: echo global-post-only
+      # Missing: API Audit
+"""
+    ci_file.write_text(drifted_workflow, encoding="utf-8")
+    drift_findings = detector.check_drift(mono_ctx, {".github/workflows/ci.yml": "dummy"})
+    drift_issues = [f.issue for f in drift_findings]
+    assert any("test-apps-web" in i and "ubuntu-24.04-arm" in i for i in drift_issues)
+    assert any("Cache Web" in i and "test-apps-web" in i for i in drift_issues)
+    assert any("echo global-post-only" in i and "test-apps-web" in i for i in drift_issues)
+    assert any("API Audit" in i and "test-services-api" in i for i in drift_issues)
+    # Excluded services (postgres/redis) and disabled linters must NOT be flagged
+    assert not any("postgres" in i.lower() or "redis" in i.lower() or "lint" in i.lower() for i in drift_issues)
+    # matrix_os must NOT be flagged since all test jobs override runner
+    assert not any("macos-latest" in i for i in drift_issues)
+
+    # 3. Partial runner override: non-overridden test job still enforces matrix_os
+    partial_policy = {
+        "services": {"exclude": ["postgres", "redis"]},
+        "linters": {"python": False},
+        "ci": {
+            "runners": {"test-apps-web": "ubuntu-24.04-arm"},
+        },
+    }
+    partial_ctx = mono_ctx.model_copy(update={"policy_config": partial_policy})
+    partial_synth = GitHubActionsSynthesizer().synthesize(partial_ctx)
+    ci_file.write_text(partial_synth[".github/workflows/ci.yml"], encoding="utf-8")
+    assert detector.check_drift(partial_ctx, {".github/workflows/ci.yml": "dummy"}) == []
+
+    # Drop macos-latest from unoverridden test-services-api -> matrix_os drift must trigger
+    ci_file.write_text(
+        """name: CI
+jobs:
+  test-apps-web:
+    runs-on: ubuntu-24.04-arm
+    defaults:
+      run:
+        working-directory: apps/web
+    services:
+      mongodb:
+        image: mongo:7
+    steps:
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+  test-services-api:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/api
+    services:
+      mongodb:
+        image: mongo:7
+    steps:
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+""",
+        encoding="utf-8",
+    )
+    partial_findings = detector.check_drift(partial_ctx, {".github/workflows/ci.yml": "dummy"})
+    assert any("macos-latest" in f.issue for f in partial_findings)
+
+
+

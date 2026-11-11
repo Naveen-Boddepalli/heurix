@@ -1,0 +1,19 @@
+# Synthesized deterministically by Heurix (hx)
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ hpa_name | yaml_scalar }}
+{% if namespace %}
+  namespace: {{ namespace | yaml_scalar }}
+{% endif %}
+  labels:
+    app: {{ app_name | yaml_scalar }}
+spec:
+  scaleTargetRef:
+    apiVersion: {{ scale_target_ref.apiVersion | yaml_scalar }}
+    kind: {{ scale_target_ref.kind | yaml_scalar }}
+    name: {{ scale_target_ref.name | yaml_scalar }}
+  minReplicas: {{ min_replicas }}
+  maxReplicas: {{ max_replicas }}
+  metrics:
+{{ metrics | yaml_block(indent=4) }}

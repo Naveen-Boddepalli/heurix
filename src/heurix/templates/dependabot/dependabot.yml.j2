@@ -1,0 +1,14 @@
+# Synthesized deterministically by Heurix (hx)
+version: 2
+{% if updates %}
+updates:
+{% for update in updates %}
+  - package-ecosystem: {{ update['package-ecosystem'] | yaml_scalar }}
+    directory: {{ update['directory'] | yaml_scalar }}
+    schedule:
+      interval: {{ update['schedule']['interval'] | yaml_scalar }}
+    open-pull-requests-limit: {{ update.get('open-pull-requests-limit', 10) | yaml_scalar }}
+{% endfor %}
+{% else %}
+updates: []
+{% endif %}

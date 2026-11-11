@@ -1,0 +1,46 @@
+# Synthesized deterministically by Heurix (hx)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ app_name | yaml_scalar }}
+{% if namespace %}
+  namespace: {{ namespace | yaml_scalar }}
+{% endif %}
+  labels:
+    app: {{ app_name | yaml_scalar }}
+spec:
+  replicas: {{ replicas }}
+  selector:
+    matchLabels:
+      app: {{ app_name | yaml_scalar }}
+  template:
+    metadata:
+      labels:
+        app: {{ app_name | yaml_scalar }}
+    spec:
+      containers:
+        - name: {{ container.name | yaml_scalar }}
+          image: {{ container.image | yaml_scalar }}
+          ports:
+{% for p in container.ports %}
+            - containerPort: {{ p.containerPort }}
+{% endfor %}
+          resources:
+            requests:
+              cpu: {{ container.resources.requests.cpu | yaml_scalar }}
+              memory: {{ container.resources.requests.memory | yaml_scalar }}
+            limits:
+              cpu: {{ container.resources.limits.cpu | yaml_scalar }}
+              memory: {{ container.resources.limits.memory | yaml_scalar }}
+{% if container.livenessProbe is not none %}
+          livenessProbe:
+{{ container.livenessProbe | yaml_block(indent=12) }}
+{% endif %}
+{% if container.readinessProbe is not none %}
+          readinessProbe:
+{{ container.readinessProbe | yaml_block(indent=12) }}
+{% endif %}
+{% if container.envFrom %}
+          envFrom:
+{{ container.envFrom | yaml_block(indent=12) }}
+{% endif %}

@@ -1,0 +1,14 @@
+# Synthesized deterministically by Heurix (hx)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ configmap_name | yaml_scalar }}
+{% if namespace %}
+  namespace: {{ namespace | yaml_scalar }}
+{% endif %}
+  labels:
+    app: {{ app_name | yaml_scalar }}
+data:
+{% for k, v in data | dictsort(case_sensitive=True) %}
+  {{ k | yaml_scalar }}: {{ v | string | yaml_scalar }}
+{% endfor %}

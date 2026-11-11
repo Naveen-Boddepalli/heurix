@@ -6,9 +6,10 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 from heurix.core.context import LanguageContext, MonorepoPackage, ProjectContext, ServiceRequirement
 from heurix.core.indexer import RepoIndexer
+from heurix.core.monorepo import discover_monorepo_topology
 from heurix.detectors.base import BaseDetector
 
 NODE_MOCK_SERVICES = {"redis-mock", "ioredis-mock", "pg-mem"}
@@ -22,9 +23,57 @@ _TYPEORM_POSTGRES_RE = re.compile(
     r"type\s*[:=]\s*[\"']postgres(?:ql)?[\"']",
     re.IGNORECASE,
 )
+_ENGINE_MAJOR_RE = re.compile(r"(?:>=|\^|~|=|<=|<|>)?\s*v?(\d+)")
+_ROOT_INDICATORS = (
+    "package.json",
+    ".nvmrc",
+    ".node-version",
+    "pnpm-lock.yaml",
+    "yarn.lock",
+    "bun.lockb",
+    "bun.lock",
+    "pnpm-workspace.yaml",
+    "turbo.json",
+    "nx.json",
+)
 
 
-def _has_real_postgres_adapter(indexer: RepoIndexer, active_deps: Dict[str, Any]) -> bool:
+def _join(base_dir: str, fname: str) -> str:
+    return fname if base_dir == "." else f"{base_dir}/{fname}"
+
+
+def _extract_engines_node_matrix(engine_spec: Any) -> List[str]:
+    """
+    Extract discrete Node.js major versions from `engines.node` when explicit `||`
+    branches exist (e.g. `"18 || 20 || 22"` -> `["18.x", "20.x", "22.x"]`).
+    Returns an empty list for single constraints without `||` or < 2 distinct majors.
+    """
+    if not isinstance(engine_spec, str) or "||" not in engine_spec:
+        return []
+
+    versions: List[str] = []
+    for branch in engine_spec.split("||"):
+        match = _ENGINE_MAJOR_RE.search(branch)
+        if match:
+            ver = f"{match.group(1)}.x"
+            if ver not in versions:
+                versions.append(ver)
+
+    return versions if len(versions) >= 2 else []
+
+
+def _matches_scope(rel_path: str, base_dir: str, exclude_dirs: Sequence[str] = ()) -> bool:
+    if base_dir != ".":
+        return rel_path.startswith(f"{base_dir}/")
+    return not any(rel_path.startswith(f"{d}/") for d in exclude_dirs)
+
+
+def _has_real_postgres_adapter(
+    indexer: RepoIndexer,
+    active_deps: Dict[str, Any],
+    base_dir: str = ".",
+    exclude_dirs: Sequence[str] = (),
+) -> bool:
     """
     Verify that Node dependencies or ORM schemas declare an explicit PostgreSQL
     backing adapter rather than mock or embedded SQLite drivers.
@@ -34,6 +83,8 @@ def _has_real_postgres_adapter(indexer: RepoIndexer, active_deps: Dict[str, Any]
 
     if "prisma" in active_deps or "@prisma/client" in active_deps:
         for prisma_file in indexer.find_files("*.prisma"):
+            if not _matches_scope(prisma_file, base_dir, exclude_dirs):
+                continue
             schema_text = indexer.read_text(prisma_file) or ""
             match = _PRISMA_DATASOURCE_RE.search(schema_text)
             if match and match.group(1).strip().lower() in {"postgresql", "postgres", "cockroachdb"}:
@@ -41,11 +92,38 @@ def _has_real_postgres_adapter(indexer: RepoIndexer, active_deps: Dict[str, Any]
 
     if "typeorm" in active_deps:
         for cfg_file in indexer.find_files("*ormconfig*") + indexer.find_files("*data-source*"):
+            if not _matches_scope(cfg_file, base_dir, exclude_dirs):
+                continue
             cfg_text = indexer.read_text(cfg_file) or ""
             if _TYPEORM_POSTGRES_RE.search(cfg_text):
                 return True
 
     return False
+
+
+def _detect_node_lockfile(indexer: RepoIndexer, base_dir: str) -> Optional[Tuple[str, str, str]]:
+    """Detect package manager, install command, and lockfile path inside `base_dir`."""
+    pnpm_lock = _join(base_dir, "pnpm-lock.yaml")
+    if indexer.has_file(pnpm_lock):
+        return ("pnpm", "pnpm i --frozen-lockfile", pnpm_lock)
+
+    yarn_lock = _join(base_dir, "yarn.lock")
+    if indexer.has_file(yarn_lock):
+        return ("yarn", "yarn install --frozen-lockfile", yarn_lock)
+
+    bun_lockb = _join(base_dir, "bun.lockb")
+    if indexer.has_file(bun_lockb):
+        return ("bun", "bun install --frozen-lockfile", bun_lockb)
+
+    bun_lock = _join(base_dir, "bun.lock")
+    if indexer.has_file(bun_lock):
+        return ("bun", "bun install --frozen-lockfile", bun_lock)
+
+    pkg_lock = _join(base_dir, "package-lock.json")
+    if indexer.has_file(pkg_lock):
+        return ("npm", "npm ci", pkg_lock)
+
+    return None
 
 
 class NodeDetector(BaseDetector):
@@ -54,127 +132,136 @@ class NodeDetector(BaseDetector):
         return "Node"
 
     def detect(self, indexer: RepoIndexer) -> bool:
-        indicators = ["package.json", ".nvmrc", ".node-version", "pnpm-lock.yaml", "yarn.lock", "bun.lockb"]
-        return any(indexer.has_file(f) for f in indicators)
+        if any(indexer.has_file(f) for f in _ROOT_INDICATORS):
+            return True
+        return bool(discover_monorepo_topology(indexer).packages_by_lang.get("node"))
 
-    def analyze(self, indexer: RepoIndexer, context: ProjectContext) -> None:
-        context.add_explain("Analyzing Node.js / JavaScript / TypeScript ecosystem...")
+    def _analyze_node_dir(
+        self,
+        indexer: RepoIndexer,
+        context: ProjectContext,
+        base_dir: str,
+        root_pm: str = "npm",
+        root_version: str = "20.x",
+        root_lockfile: Optional[str] = None,
+        *,
+        root_version_source: str = "default",
+        root_install_cmd: Optional[str] = None,
+        exclude_dirs: Sequence[str] = (),
+        add_language_ctx: bool = True,
+        add_monorepo_pkg: Optional[bool] = None,
+        is_workspace_root: Optional[bool] = None,
+    ) -> LanguageContext:
+        pkg_scope = None if base_dir == "." else base_dir
+        scope_label = f" in {base_dir}" if base_dir != "." else ""
 
         # 1. Determine Node Version
         node_version = "20.x"
         version_source = "default"
 
-        if indexer.has_file(".nvmrc"):
-            raw = (indexer.read_text(".nvmrc") or "").strip().lstrip("v")
+        nvmrc_path = _join(base_dir, ".nvmrc")
+        node_ver_path = _join(base_dir, ".node-version")
+        if indexer.has_file(nvmrc_path):
+            raw = (indexer.read_text(nvmrc_path) or "").strip().lstrip("v")
             match = re.search(r"^(\d+)", raw)
             if match:
                 node_version = f"{match.group(1)}.x"
                 version_source = ".nvmrc"
-        elif indexer.has_file(".node-version"):
-            raw = (indexer.read_text(".node-version") or "").strip().lstrip("v")
+        elif indexer.has_file(node_ver_path):
+            raw = (indexer.read_text(node_ver_path) or "").strip().lstrip("v")
             match = re.search(r"^(\d+)", raw)
             if match:
                 node_version = f"{match.group(1)}.x"
                 version_source = ".node-version"
 
-        # 2. Parse Root package.json
+        # 2. Parse package.json
         pkg_data: Dict[str, Any] = {}
-        if indexer.has_file("package.json"):
+        pkg_json_path = _join(base_dir, "package.json")
+        if indexer.has_file(pkg_json_path):
             try:
-                content = indexer.read_text("package.json") or "{}"
-                pkg_data = json.loads(content)
+                content = indexer.read_text(pkg_json_path) or "{}"
+                parsed = json.loads(content)
+                if isinstance(parsed, dict):
+                    pkg_data = parsed
             except Exception:
-                pass
+                pkg_data = {}
 
-        if version_source == "default" and "engines" in pkg_data:
-            node_engine = pkg_data.get("engines", {}).get("node")
-            if node_engine:
+        engines_raw = pkg_data.get("engines")
+        node_engine = engines_raw.get("node") if isinstance(engines_raw, dict) else None
+        matrix_versions = _extract_engines_node_matrix(node_engine)
+
+        if version_source == "default":
+            if matrix_versions:
+                node_version = matrix_versions[-1]
+                version_source = "package.json (engines)"
+            elif node_engine:
                 match = re.search(r"(\d+)", str(node_engine))
                 if match:
                     node_version = f"{match.group(1)}.x"
                     version_source = "package.json (engines)"
+            elif base_dir != "." and root_version_source != "default":
+                node_version = root_version
+                version_source = root_version_source
 
-        context.add_explain(f"Detected Node.js {node_version} (via {version_source})")
+        context.add_explain(f"Detected Node.js {node_version}{scope_label} (via {version_source})")
+        if matrix_versions:
+            context.add_explain(f"Detected Node.js matrix versions{scope_label}: {matrix_versions}")
 
-        # 3. Determine Package Manager & Lockfile
-        package_manager = "npm"
-        install_cmd = "npm ci"
-
-        if indexer.has_file("pnpm-lock.yaml"):
+        # 3. Determine Package Manager, install command, and cache_dependency_path
+        local_lock = _detect_node_lockfile(indexer, base_dir)
+        cache_dependency_path: Optional[str] = None
+        if local_lock is not None:
+            package_manager, install_cmd, cache_dependency_path = local_lock
+            context.add_explain(f"Detected Package Manager: {package_manager} (via {cache_dependency_path})")
+        elif base_dir != "." and root_lockfile is not None:
+            package_manager = root_pm
+            install_cmd = root_install_cmd or (
+                "pnpm i --frozen-lockfile"
+                if root_pm == "pnpm"
+                else ("yarn install --frozen-lockfile" if root_pm == "yarn" else ("bun install --frozen-lockfile" if root_pm == "bun" else "npm ci"))
+            )
+            cache_dependency_path = root_lockfile
+            context.add_explain(f"Inherited workspace Package Manager{scope_label}: {package_manager} (via {root_lockfile})")
+        elif base_dir == "." and indexer.has_file("pnpm-workspace.yaml"):
             package_manager = "pnpm"
-            install_cmd = "pnpm i --frozen-lockfile"
-            context.add_explain("Detected Package Manager: pnpm (via pnpm-lock.yaml)")
-        elif indexer.has_file("yarn.lock"):
-            package_manager = "yarn"
-            install_cmd = "yarn install --frozen-lockfile"
-            context.add_explain("Detected Package Manager: yarn (via yarn.lock)")
-        elif indexer.has_file("bun.lockb") or indexer.has_file("bun.lock"):
-            package_manager = "bun"
-            install_cmd = "bun install --frozen-lockfile"
-            context.add_explain("Detected Package Manager: bun (via bun.lock)")
-        elif indexer.has_file("package-lock.json"):
-            package_manager = "npm"
-            install_cmd = "npm ci"
-            context.add_explain("Detected Package Manager: npm (via package-lock.json)")
+            install_cmd = "pnpm install"
+            context.add_explain("Detected Package Manager: pnpm (via pnpm-workspace.yaml)")
+        elif base_dir != "." and root_pm != "npm":
+            package_manager = root_pm
+            install_cmd = root_install_cmd or f"{root_pm} install"
         else:
+            package_manager = "npm"
             install_cmd = "npm install"
-            context.add_explain("Detected Package Manager: npm")
+            context.add_explain(f"Detected Package Manager: npm{scope_label}")
 
-        # 4. Check for Monorepo & Workspaces
-        is_monorepo = False
-        if indexer.has_file("pnpm-workspace.yaml"):
-            is_monorepo = True
-            context.is_monorepo = True
-            context.add_explain("Detected Monorepo Topology: pnpm-workspace.yaml")
-        elif indexer.has_file("turbo.json"):
-            is_monorepo = True
-            context.is_monorepo = True
-            context.add_explain("Detected Monorepo Topology: Turborepo (turbo.json)")
-        elif indexer.has_file("nx.json"):
-            is_monorepo = True
-            context.is_monorepo = True
-            context.add_explain("Detected Monorepo Topology: Nx (nx.json)")
-        elif "workspaces" in pkg_data:
-            is_monorepo = True
-            context.is_monorepo = True
-            context.add_explain("Detected Monorepo Topology: npm/yarn workspaces")
+        # 4. Scripts: test, build, lint
+        raw_scripts = pkg_data.get("scripts", {})
+        scripts = raw_scripts if isinstance(raw_scripts, dict) else {}
 
-        # Sub-packages in monorepo
-        if is_monorepo:
-            all_pkgs = indexer.find_by_name("package.json")
-            for p in all_pkgs:
-                if p != "package.json":
-                    sub_dir = p.rsplit("/", 1)[0]
-                    context.monorepo_packages.append(
-                        MonorepoPackage(
-                            name=sub_dir,
-                            path=sub_dir,
-                            language="node",
-                            package_manager=package_manager,
-                        )
-                    )
-
-        # 5. Scripts: test, build, lint
-        scripts = pkg_data.get("scripts", {})
         test_cmd: Optional[str] = None
-        if "test" in scripts:
+        if "test" in scripts and isinstance(scripts["test"], str):
             test_val = scripts["test"]
             if "no test specified" not in test_val.lower():
                 test_cmd = f"{package_manager} test" if package_manager != "npm" else "npm test"
-                context.add_explain(f"Detected Test Script: '{test_val}' (via package.json)")
+                context.add_explain(f"Detected Test Script{scope_label}: '{test_val}' (via {pkg_json_path})")
 
         build_cmd: Optional[str] = None
         if "build" in scripts:
             build_cmd = f"{package_manager} run build" if package_manager != "npm" else "npm run build"
-            context.add_explain("Detected Build Script: 'build' (via package.json)")
+            context.add_explain(f"Detected Build Script{scope_label}: 'build' (via {pkg_json_path})")
 
         lint_cmd: Optional[str] = None
         if "lint" in scripts:
             lint_cmd = f"{package_manager} run lint" if package_manager != "npm" else "npm run lint"
-            context.add_explain("Detected Linter Script: 'lint' (via package.json)")
+            context.add_explain(f"Detected Linter Script{scope_label}: 'lint' (via {pkg_json_path})")
 
-        # 6. Framework Detection & Backing Services
-        deps = {**pkg_data.get("dependencies", {}), **pkg_data.get("devDependencies", {})}
+        # 5. Framework Detection & Backing Services
+        raw_deps = pkg_data.get("dependencies", {})
+        raw_dev_deps = pkg_data.get("devDependencies", {})
+        deps: Dict[str, Any] = {
+            **(raw_deps if isinstance(raw_deps, dict) else {}),
+            **(raw_dev_deps if isinstance(raw_dev_deps, dict) else {}),
+        }
         framework: Optional[str] = None
 
         if "next" in deps:
@@ -195,16 +282,16 @@ class NodeDetector(BaseDetector):
             framework = "SvelteKit"
 
         if framework:
-            context.add_explain(f"Detected Framework: {framework}")
+            context.add_explain(f"Detected Framework{scope_label}: {framework}")
 
-        # Service Container Inference (filter mock packages and verify real ORM adapters)
         active_deps = {k: v for k, v in deps.items() if k not in NODE_MOCK_SERVICES}
+        svc_source = "package.json dependencies" if base_dir == "." else f"{base_dir}/package.json dependencies"
 
         has_orm_or_pg_mock = any(
             k in deps for k in ["typeorm", "prisma", "@prisma/client", "pg-mem", *SQLITE_ADAPTERS]
         )
-        if _has_real_postgres_adapter(indexer, active_deps):
-            if not any(s.name == "postgres" for s in context.services):
+        if _has_real_postgres_adapter(indexer, active_deps, base_dir, exclude_dirs):
+            if not any(s.name == "postgres" and s.package_path == pkg_scope for s in context.services):
                 context.services.append(
                     ServiceRequirement(
                         name="postgres",
@@ -215,57 +302,160 @@ class NodeDetector(BaseDetector):
                             "POSTGRES_PASSWORD": "test_password",
                             "POSTGRES_DB": "test_db",
                         },
-                        source_file="package.json dependencies",
+                        source_file=svc_source,
+                        package_path=pkg_scope,
                     )
                 )
-                context.add_explain("Inferred Backing Service: PostgreSQL 16 (via node pg/prisma)")
+                context.add_explain(f"Inferred Backing Service{scope_label}: PostgreSQL 16 (via node pg/prisma)")
         elif has_orm_or_pg_mock:
             context.add_explain(
-                "Skipped PostgreSQL inference: no real postgres adapter detected (mock or non-postgres datasource)"
+                f"Skipped PostgreSQL inference{scope_label}: no real postgres adapter detected (mock or non-postgres datasource)"
             )
 
         redis_mocks_found = [k for k in deps if k in {"redis-mock", "ioredis-mock"}]
         if any(k in active_deps for k in ["redis", "ioredis"]):
-            if not any(s.name == "redis" for s in context.services):
+            if not any(s.name == "redis" and s.package_path == pkg_scope for s in context.services):
                 context.services.append(
                     ServiceRequirement(
                         name="redis",
                         image="redis:7-alpine",
                         ports=[6379],
                         env={},
-                        source_file="package.json dependencies",
+                        source_file=svc_source,
+                        package_path=pkg_scope,
                     )
                 )
-                context.add_explain("Inferred Backing Service: Redis 7 (via node redis/ioredis)")
+                context.add_explain(f"Inferred Backing Service{scope_label}: Redis 7 (via node redis/ioredis)")
         elif redis_mocks_found:
             context.add_explain(
-                f"Filtered mock dependency '{', '.join(redis_mocks_found)}' from backing services"
+                f"Filtered mock dependency '{', '.join(redis_mocks_found)}' from backing services{scope_label}"
             )
 
         if any(k in active_deps for k in ["mongodb", "mongoose"]):
-            if not any(s.name == "mongodb" for s in context.services):
+            if not any(s.name == "mongodb" and s.package_path == pkg_scope for s in context.services):
                 context.services.append(
                     ServiceRequirement(
                         name="mongodb",
                         image="mongo:6",
                         ports=[27017],
                         env={},
-                        source_file="package.json dependencies",
+                        source_file=svc_source,
+                        package_path=pkg_scope,
                     )
                 )
-                context.add_explain("Inferred Backing Service: MongoDB 6 (via mongoose/mongodb)")
+                context.add_explain(f"Inferred Backing Service{scope_label}: MongoDB 6 (via mongoose/mongodb)")
 
-        context.languages.append(
-            LanguageContext(
-                language="node",
-                runtime_version=node_version,
-                version_source=version_source,
-                package_manager=package_manager,
-                install_cmd=install_cmd,
-                build_cmd=build_cmd,
-                test_cmd=test_cmd,
-                lint_cmd=lint_cmd,
-                framework=framework,
-                confidence=0.95,
-            )
+        lang_ctx = LanguageContext(
+            language="node",
+            runtime_version=node_version,
+            version_source=version_source,
+            package_manager=package_manager,
+            install_cmd=install_cmd,
+            build_cmd=build_cmd,
+            test_cmd=test_cmd,
+            lint_cmd=lint_cmd,
+            working_dir=base_dir,
+            framework=framework,
+            confidence=0.95,
+            matrix_versions=list(matrix_versions),
+            cache_dependency_path=cache_dependency_path,
+            is_workspace_root=is_workspace_root,
         )
+
+        if add_language_ctx:
+            context.languages.append(lang_ctx)
+
+        should_add_pkg = add_monorepo_pkg if add_monorepo_pkg is not None else (base_dir != ".")
+        if should_add_pkg:
+            context.monorepo_packages.append(
+                MonorepoPackage(
+                    name=base_dir,
+                    path=base_dir,
+                    language="node",
+                    package_manager=package_manager,
+                    runtime_version=node_version,
+                    version_source=version_source,
+                    install_cmd=install_cmd,
+                    build_cmd=build_cmd,
+                    test_cmd=test_cmd,
+                    lint_cmd=lint_cmd,
+                    framework=framework,
+                    cache_dependency_path=cache_dependency_path,
+                    matrix_versions=list(matrix_versions),
+                )
+            )
+
+        return lang_ctx
+
+    def analyze(self, indexer: RepoIndexer, context: ProjectContext) -> None:
+        context.add_explain("Analyzing Node.js / JavaScript / TypeScript ecosystem...")
+
+        root_pkg_data: Dict[str, Any] = {}
+        if indexer.has_file("package.json"):
+            try:
+                parsed = json.loads(indexer.read_text("package.json") or "{}")
+                if isinstance(parsed, dict):
+                    root_pkg_data = parsed
+            except Exception:
+                root_pkg_data = {}
+
+        has_ws_marker = False
+        if indexer.has_file("pnpm-workspace.yaml"):
+            has_ws_marker = True
+            context.is_monorepo = True
+            context.add_explain("Detected Monorepo Topology: pnpm-workspace.yaml")
+        elif indexer.has_file("turbo.json"):
+            has_ws_marker = True
+            context.is_monorepo = True
+            context.add_explain("Detected Monorepo Topology: Turborepo (turbo.json)")
+        elif indexer.has_file("nx.json"):
+            has_ws_marker = True
+            context.is_monorepo = True
+            context.add_explain("Detected Monorepo Topology: Nx (nx.json)")
+        elif isinstance(root_pkg_data.get("workspaces"), (list, dict)):
+            has_ws_marker = True
+            context.is_monorepo = True
+            context.add_explain("Detected Monorepo Topology: npm/yarn workspaces")
+
+        topo = discover_monorepo_topology(indexer)
+        node_sub_dirs = topo.packages_by_lang.get("node", [])
+        if topo.is_monorepo:
+            context.is_monorepo = True
+
+        has_root_indicators = any(indexer.has_file(f) for f in _ROOT_INDICATORS)
+
+        if has_root_indicators:
+            is_ws_root = bool(has_ws_marker and len(node_sub_dirs) > 0)
+            root_ctx = self._analyze_node_dir(
+                indexer,
+                context,
+                ".",
+                exclude_dirs=node_sub_dirs,
+                add_language_ctx=True,
+                add_monorepo_pkg=False,
+                is_workspace_root=is_ws_root,
+            )
+            for sub_dir in node_sub_dirs:
+                self._analyze_node_dir(
+                    indexer,
+                    context,
+                    sub_dir,
+                    root_pm=root_ctx.package_manager,
+                    root_version=root_ctx.runtime_version,
+                    root_lockfile=root_ctx.cache_dependency_path,
+                    root_version_source=root_ctx.version_source,
+                    root_install_cmd=root_ctx.install_cmd,
+                    add_language_ctx=False,
+                    add_monorepo_pkg=True,
+                )
+        else:
+            for idx, sub_dir in enumerate(node_sub_dirs):
+                self._analyze_node_dir(
+                    indexer,
+                    context,
+                    sub_dir,
+                    add_language_ctx=(idx == 0),
+                    add_monorepo_pkg=True,
+                    is_workspace_root=None,
+                )
+

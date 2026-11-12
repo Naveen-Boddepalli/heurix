@@ -1,4 +1,9 @@
 import { useMemo, useRef, useState } from 'react';
+import {
+  downloadZipArchive,
+  formatAllConfigsText,
+  generateSetupShellScript,
+} from '../engine/exportArchive';
 import { checkDrift, runHeurixScan, simulateSmartMerge } from '../engine/heuristics';
 import { PRESET_REPOS, STARTER_FILE_TEMPLATES } from '../engine/presets';
 import type { VirtualFile } from '../engine/types';
@@ -85,6 +90,36 @@ export function Playground() {
       }
       return next;
     });
+  }
+
+  const [copiedAll, setCopiedAll] = useState(false);
+
+  function handleCopyAll() {
+    const exportable = outputKeys.map((p) => ({ path: p, content: scanResult.synthesized[p] }));
+    const text = formatAllConfigsText(exportable);
+    navigator.clipboard.writeText(text).then(() => {
+      setCopiedAll(true);
+      setTimeout(() => setCopiedAll(false), 2000);
+    });
+  }
+
+  function handleDownloadZip() {
+    const exportable = outputKeys.map((p) => ({ path: p, content: scanResult.synthesized[p] }));
+    downloadZipArchive(`${currentPreset.id}-heurix-configs`, exportable);
+  }
+
+  function handleDownloadScript() {
+    const exportable = outputKeys.map((p) => ({ path: p, content: scanResult.synthesized[p] }));
+    const script = generateSetupShellScript(exportable);
+    const blob = new Blob([script], { type: 'text/x-shellscript;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `apply-${currentPreset.id}-configs.sh`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
   }
 
   const scanResult = useMemo(
@@ -361,21 +396,51 @@ export function Playground() {
                   </div>
 
                   {outputKeys.length > 0 && (
-                    <div className="output-file-bar" role="group" aria-label="Synthesized YAML targets">
-                      {outputKeys.map((filePath) => {
-                        const lineCount = scanResult.synthesized[filePath].trim().split('\n').length;
-                        return (
-                          <button
-                            key={filePath}
-                            type="button"
-                            className="output-file-pill"
-                            aria-pressed={activeOutputPath === filePath}
-                            onClick={() => setSelectedOutputFile(filePath)}
-                          >
-                            {filePath} ({lineCount}L)
-                          </button>
-                        );
-                      })}
+                    <div className="export-actions-bar">
+                      <div className="output-file-bar" role="group" aria-label="Synthesized YAML targets">
+                        {outputKeys.map((filePath) => {
+                          const lineCount = scanResult.synthesized[filePath].trim().split('\n').length;
+                          return (
+                            <button
+                              key={filePath}
+                              type="button"
+                              className="output-file-pill"
+                              aria-pressed={activeOutputPath === filePath}
+                              onClick={() => setSelectedOutputFile(filePath)}
+                            >
+                              {filePath} ({lineCount}L)
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      <div className="export-btn-group" role="group" aria-label="Export configurations">
+                        <button
+                          type="button"
+                          className="export-btn"
+                          onClick={handleDownloadZip}
+                          title="Download all synthesized configurations in a ZIP archive"
+                        >
+                          <span aria-hidden="true">📦</span> Download ZIP
+                        </button>
+                        <button
+                          type="button"
+                          className="export-btn"
+                          onClick={handleDownloadScript}
+                          title="Download bash setup script"
+                        >
+                          <span aria-hidden="true">⚡</span> Setup Script
+                        </button>
+                        <button
+                          type="button"
+                          className={`export-btn${copiedAll ? ' is-success' : ''}`}
+                          onClick={handleCopyAll}
+                          title="Copy all synthesized YAML configurations"
+                        >
+                          <span aria-hidden="true">{copiedAll ? '✔' : '📋'}</span>
+                          {copiedAll ? 'Copied All!' : 'Copy All YAML'}
+                        </button>
+                      </div>
                     </div>
                   )}
 

@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
 import { checkDrift, runHeurixScan, simulateSmartMerge } from '../engine/heuristics';
-import { PRESET_REPOS } from '../engine/presets';
+import { PRESET_REPOS, STARTER_FILE_TEMPLATES } from '../engine/presets';
 import type { VirtualFile } from '../engine/types';
 import { CodeBlock } from './CodeBlock';
 
@@ -27,6 +27,11 @@ export function Playground() {
   const [selectedOutputFile, setSelectedOutputFile] = useState<string>('.github/workflows/ci.yml');
   const [driftMode, setDriftMode] = useState<'clean' | 'stale-ci'>('stale-ci');
 
+  // Add File state
+  const [isAddingFile, setIsAddingFile] = useState(false);
+  const [newFilePath, setNewFilePath] = useState(STARTER_FILE_TEMPLATES[1].defaultPath);
+  const [templateIdx, setTemplateIdx] = useState(1);
+
   const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
   function selectPreset(id: string) {
@@ -35,6 +40,7 @@ export function Playground() {
     setFiles(next.files.map((f) => ({ ...f })));
     setSelectedFilePath(next.files[0]?.path ?? '');
     setSelectedOutputFile('.github/workflows/ci.yml');
+    setIsAddingFile(false);
   }
 
   function toggleFile(path: string) {
@@ -47,6 +53,38 @@ export function Playground() {
     setFiles((prev) =>
       prev.map((f) => (f.path === path ? { ...f, content } : f))
     );
+  }
+
+  function handleCreateFile(e: React.FormEvent) {
+    e.preventDefault();
+    const cleanPath = newFilePath.trim();
+    if (!cleanPath) return;
+
+    if (files.some((f) => f.path === cleanPath)) {
+      alert(`File "${cleanPath}" already exists.`);
+      return;
+    }
+
+    const tpl = STARTER_FILE_TEMPLATES[templateIdx] ?? STARTER_FILE_TEMPLATES[0];
+    const newFile: VirtualFile = {
+      path: cleanPath,
+      enabled: true,
+      content: tpl.content,
+    };
+
+    setFiles((prev) => [...prev, newFile]);
+    setSelectedFilePath(cleanPath);
+    setIsAddingFile(false);
+  }
+
+  function handleDeleteFile(path: string) {
+    setFiles((prev) => {
+      const next = prev.filter((f) => f.path !== path);
+      if (selectedFilePath === path && next.length > 0) {
+        setSelectedFilePath(next[0].path);
+      }
+      return next;
+    });
   }
 
   const scanResult = useMemo(
@@ -158,14 +196,67 @@ export function Playground() {
                     {currentPreset.subtitle}
                   </div>
                 </div>
-                <button
-                  type="button"
-                  className="code-copy-btn"
-                  onClick={() => selectPreset(currentPreset.id)}
-                >
-                  Reset
-                </button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                  <button
+                    type="button"
+                    className="code-copy-btn"
+                    onClick={() => setIsAddingFile((prev) => !prev)}
+                    aria-expanded={isAddingFile}
+                  >
+                    {isAddingFile ? 'Cancel' : '+ File'}
+                  </button>
+                  <button
+                    type="button"
+                    className="code-copy-btn"
+                    onClick={() => selectPreset(currentPreset.id)}
+                  >
+                    Reset
+                  </button>
+                </div>
               </div>
+
+              {isAddingFile && (
+                <form className="add-file-box" onSubmit={handleCreateFile}>
+                  <label htmlFor="starter-template-select" style={{ fontSize: '0.75rem', fontWeight: 600 }}>
+                    Choose template:
+                  </label>
+                  <select
+                    id="starter-template-select"
+                    className="form-select"
+                    value={templateIdx}
+                    onChange={(e) => {
+                      const idx = Number(e.target.value);
+                      setTemplateIdx(idx);
+                      const tpl = STARTER_FILE_TEMPLATES[idx];
+                      if (tpl) setNewFilePath(tpl.defaultPath);
+                    }}
+                  >
+                    {STARTER_FILE_TEMPLATES.map((tpl, i) => (
+                      <option key={tpl.name} value={i}>
+                        {tpl.name} ({tpl.defaultPath})
+                      </option>
+                    ))}
+                  </select>
+
+                  <label htmlFor="custom-file-path-input" style={{ fontSize: '0.75rem', fontWeight: 600 }}>
+                    File path:
+                  </label>
+                  <div style={{ display: 'flex', gap: '0.35rem' }}>
+                    <input
+                      id="custom-file-path-input"
+                      type="text"
+                      className="form-input"
+                      value={newFilePath}
+                      onChange={(e) => setNewFilePath(e.target.value)}
+                      placeholder="e.g. Dockerfile"
+                      required
+                    />
+                    <button type="submit" className="btn btn-primary" style={{ minBlockSize: '2.25rem', paddingInline: '0.75rem', fontSize: '0.8125rem' }}>
+                      Add
+                    </button>
+                  </div>
+                </form>
+              )}
 
               <ul className="file-tree" aria-label="Repository files">
                 {files.map((file) => (
@@ -190,6 +281,17 @@ export function Playground() {
                         {file.enabled ? 'edit' : 'off'}
                       </span>
                     </button>
+                    {files.length > 1 && (
+                      <button
+                        type="button"
+                        className="file-del-btn"
+                        onClick={() => handleDeleteFile(file.path)}
+                        aria-label={`Delete ${file.path}`}
+                        title={`Delete ${file.path}`}
+                      >
+                        ×
+                      </button>
+                    )}
                   </li>
                 ))}
               </ul>

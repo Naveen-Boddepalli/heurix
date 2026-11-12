@@ -373,3 +373,66 @@ dependencies = [
     ],
   },
 ];
+
+export interface FileTemplate {
+  name: string;
+  defaultPath: string;
+  content: string;
+}
+
+export const STARTER_FILE_TEMPLATES: FileTemplate[] = [
+  {
+    name: 'Blank File',
+    defaultPath: 'config.toml',
+    content: '# New configuration file\n',
+  },
+  {
+    name: 'Dockerfile (Container)',
+    defaultPath: 'Dockerfile',
+    content: `FROM python:3.12-slim AS runtime
+WORKDIR /app
+COPY . .
+EXPOSE 8000
+HEALTHCHECK CMD curl -f http://localhost:8000/health || exit 1
+CMD ["python", "main.py"]\n`,
+  },
+  {
+    name: 'docker-compose.yml (Postgres + Redis)',
+    defaultPath: 'docker-compose.yml',
+    content: `services:
+  postgres:
+    image: postgres:16-alpine
+    ports:
+      - "5432:5432"
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"\n`,
+  },
+  {
+    name: '.env.example (Secrets & Config)',
+    defaultPath: '.env.example',
+    content: `APP_ENV=development
+API_PORT=8000
+DATABASE_URL=postgres://localhost:5432/app
+JWT_SECRET_KEY=replace_with_secret_token
+STRIPE_API_KEY=sk_test_mock\n`,
+  },
+  {
+    name: 'pnpm-workspace.yaml (Monorepo)',
+    defaultPath: 'pnpm-workspace.yaml',
+    content: `packages:
+  - 'apps/*'
+  - 'packages/*'\n`,
+  },
+  {
+    name: 'vercel.json (Vercel Target)',
+    defaultPath: 'vercel.json',
+    content: `{\n  "name": "my-cloud-app",\n  "framework": "nextjs"\n}\n`,
+  },
+  {
+    name: 'firebase.json (Firebase Target)',
+    defaultPath: 'firebase.json',
+    content: `{\n  "hosting": {\n    "public": "dist"\n  }\n}\n`,
+  },
+];

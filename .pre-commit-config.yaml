@@ -1,0 +1,11 @@
+# Pre-commit configuration for Heurix repository
+# Enforces continuous CI/CD drift detection before commits
+repos:
+  - repo: local
+    hooks:
+      - id: heurix-drift-check
+        name: Heurix CI/CD Drift Check (hx check)
+        entry: ./hx check
+        language: system
+        pass_filenames: false
+        always_run: true

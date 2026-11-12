@@ -35,6 +35,7 @@ hx check
 - [Non-destructive smart merge](https://github.com/Naveen-Boddepalli/heurix/blob/main/docs/smart-merge.md): `ruamel.yaml` AST merging and `# @heurix:preserve` directives
 - [CI/CD and Kubernetes outputs](https://github.com/Naveen-Boddepalli/heurix/blob/main/docs/kubernetes-and-ci.md): `.github/workflows/ci.yml`, `.github/dependabot.yml`, `k8s/deployment.yaml`, `service.yaml`, `ingress.yaml`, `kind-config.yaml`
 - [Continuous drift detection](https://github.com/Naveen-Boddepalli/heurix/blob/main/docs/drift-detection.md): using `hx check` in pre-commit hooks and CI checks
+- [AI assistant integration](https://github.com/Naveen-Boddepalli/heurix/blob/main/docs/ai-integration.md): `.cursorrules`, `CLAUDE.md`, and `AGENTS.md` instructions preventing LLM hallucinations in CI/CD
 - [System architecture](https://github.com/Naveen-Boddepalli/heurix/blob/main/docs/architecture.md): 5-layer unidirectional pipeline and `ProjectContext` IR schema
 
 ## Optional

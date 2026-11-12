@@ -29,6 +29,7 @@ coverage.xml
 
 # Frontend / Docs Site (Dependencies, Builds & Synced Outputs)
 node_modules/
+/pnpm-lock.yaml
 site/dist/
 site/.vite/
 *.tsbuildinfo

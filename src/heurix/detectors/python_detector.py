@@ -367,7 +367,7 @@ class PythonDetector(BaseDetector):
         # 3. Framework & Dependency Scanning
         framework: Optional[str] = None
         deps_text = ""
-        for fn in ["pyproject.toml", "requirements.txt", "Pipfile", "setup.py"]:
+        for fn in ["pyproject.toml", "requirements.txt", "requirements-dev.txt", "Pipfile", "setup.py"]:
             c = indexer.read_text(_join(base_dir, fn))
             if c:
                 deps_text += "\n" + c
@@ -403,16 +403,43 @@ class PythonDetector(BaseDetector):
         if framework:
             context.add_explain(f"Detected Framework{scope_label}: {framework}")
 
-        # 4. Test Runner & Linter
+        # 4. Test Runner, E2E Runner & Linter
         test_cmd = "pytest"
+        unit_test_runner: Optional[str] = None
         if "pytest" in deps_lower or indexer.has_file(_join(base_dir, "pytest.ini")) or has_tests_dir or "[tool.pytest" in deps_text:
             test_cmd = "pytest"
+            unit_test_runner = "pytest"
             context.add_explain(f"Detected Test Runner{scope_label}: pytest")
         elif "django" in deps_lower and indexer.has_file(_join(base_dir, "manage.py")):
             test_cmd = "python manage.py test"
             context.add_explain(f"Detected Test Runner{scope_label}: django manage.py test")
         else:
             test_cmd = "python -m unittest discover"
+
+        tests_e2e_prefix = "tests/e2e/" if base_dir == "." else f"{base_dir}/tests/e2e/"
+        e2e_dir_prefix = "e2e/" if base_dir == "." else f"{base_dir}/e2e/"
+        has_tests_e2e = indexer.has_file(_join(base_dir, "tests/e2e")) or any(
+            f.startswith(tests_e2e_prefix) for f in indexer.files
+        )
+        has_e2e_dir = indexer.has_file(_join(base_dir, "e2e")) or any(
+            f.startswith(e2e_dir_prefix) for f in indexer.files
+        )
+        e2e_test_runner: Optional[str] = None
+        e2e_cmd: Optional[str] = None
+        if (
+            "playwright" in deps_lower
+            or indexer.has_file(_join(base_dir, "playwright.config.py"))
+            or has_tests_e2e
+            or has_e2e_dir
+        ):
+            e2e_test_runner = "playwright"
+            if has_tests_e2e:
+                e2e_cmd = f"{cmd_prefix}pytest tests/e2e"
+            elif has_e2e_dir:
+                e2e_cmd = f"{cmd_prefix}pytest e2e"
+            else:
+                e2e_cmd = f"{cmd_prefix}pytest -k e2e"
+            context.add_explain(f"Detected E2E Test Runner{scope_label}: playwright ({e2e_cmd})")
 
         lint_cmd = None
         if "ruff" in deps_lower or "[tool.ruff" in deps_text or indexer.has_file(_join(base_dir, "ruff.toml")):
@@ -479,6 +506,9 @@ class PythonDetector(BaseDetector):
             install_cmd=install_cmd,
             test_cmd=test_cmd,
             lint_cmd=lint_cmd,
+            unit_test_runner=unit_test_runner,
+            e2e_test_runner=e2e_test_runner,
+            e2e_cmd=e2e_cmd,
             working_dir=base_dir,
             framework=framework,
             confidence=0.98 if version_source != "default" else 0.85,
@@ -504,6 +534,9 @@ class PythonDetector(BaseDetector):
                     build_cmd=None,
                     test_cmd=test_cmd,
                     lint_cmd=lint_cmd,
+                    unit_test_runner=unit_test_runner,
+                    e2e_test_runner=e2e_test_runner,
+                    e2e_cmd=e2e_cmd,
                     framework=framework,
                     cache_dependency_path=cache_dependency_path,
                     matrix_versions=list(matrix_versions),

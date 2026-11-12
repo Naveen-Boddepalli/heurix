@@ -126,6 +126,100 @@ def _detect_node_lockfile(indexer: RepoIndexer, base_dir: str) -> Optional[Tuple
     return None
 
 
+def _detect_node_unit_runner(
+    indexer: RepoIndexer,
+    base_dir: str,
+    deps: Dict[str, Any],
+    scripts: Dict[str, Any],
+) -> Optional[str]:
+    """Detect unit test runner ('vitest', 'jest', or 'mocha') from scripts, deps, and config files."""
+    raw_test = scripts.get("test")
+    test_lower = raw_test.lower() if isinstance(raw_test, str) else ""
+
+    for runner in ("vitest", "jest", "mocha"):
+        if runner in test_lower:
+            return runner
+
+    has_vitest_cfg = any(
+        indexer.has_file(_join(base_dir, f"vitest.config.{ext}"))
+        for ext in ("ts", "js", "mts", "mjs", "cts", "cjs")
+    )
+    if "vitest" in deps or has_vitest_cfg:
+        return "vitest"
+
+    has_jest_cfg = any(
+        indexer.has_file(_join(base_dir, f"jest.config.{ext}"))
+        for ext in ("ts", "js", "mts", "mjs", "cts", "cjs")
+    )
+    if "jest" in deps or "@jest/core" in deps or has_jest_cfg:
+        return "jest"
+
+    if "mocha" in deps:
+        return "mocha"
+
+    return None
+
+
+def _detect_node_e2e_runner(
+    indexer: RepoIndexer,
+    base_dir: str,
+    deps: Dict[str, Any],
+    scripts: Dict[str, Any],
+    package_manager: str,
+) -> Tuple[Optional[str], Optional[str]]:
+    """Detect E2E test runner ('playwright' or 'cypress') and resolved command without prompting."""
+    script_values = [val.lower() for val in scripts.values() if isinstance(val, str)]
+
+    has_playwright_cfg = any(
+        indexer.has_file(_join(base_dir, f"playwright.config.{ext}"))
+        for ext in ("ts", "js", "mts", "mjs")
+    )
+    has_playwright = (
+        "@playwright/test" in deps
+        or "playwright" in deps
+        or has_playwright_cfg
+        or any("playwright" in val for val in script_values)
+    )
+
+    has_cypress_cfg = indexer.has_file(_join(base_dir, "cypress.json")) or any(
+        indexer.has_file(_join(base_dir, f"cypress.config.{ext}"))
+        for ext in ("ts", "js", "mts", "mjs")
+    )
+    has_cypress = (
+        "cypress" in deps
+        or has_cypress_cfg
+        or any("cypress" in val for val in script_values)
+    )
+
+    if has_playwright:
+        e2e_runner = "playwright"
+        priority_keys = ("test:e2e", "e2e", "test:playwright", "playwright")
+        default_subcmd = "playwright test"
+    elif has_cypress:
+        e2e_runner = "cypress"
+        priority_keys = ("test:e2e", "e2e", "test:cypress", "cypress")
+        default_subcmd = "cypress run"
+    else:
+        return None, None
+
+    e2e_cmd: Optional[str] = None
+    for key in priority_keys:
+        val = scripts.get(key)
+        if isinstance(val, str) and val.strip():
+            e2e_cmd = f"{package_manager} run {key}"
+            break
+
+    if e2e_cmd is None:
+        exec_prefix = {
+            "pnpm": "pnpm exec",
+            "yarn": "yarn",
+            "bun": "bunx",
+        }.get(package_manager, "npx")
+        e2e_cmd = f"{exec_prefix} {default_subcmd}"
+
+    return e2e_runner, e2e_cmd
+
+
 class NodeDetector(BaseDetector):
     @property
     def name(self) -> str:
@@ -345,6 +439,16 @@ class NodeDetector(BaseDetector):
                 )
                 context.add_explain(f"Inferred Backing Service{scope_label}: MongoDB 6 (via mongoose/mongodb)")
 
+        unit_test_runner = _detect_node_unit_runner(indexer, base_dir, deps, scripts)
+        if unit_test_runner:
+            context.add_explain(f"Detected Unit Test Runner{scope_label}: {unit_test_runner}")
+
+        e2e_test_runner, e2e_cmd = _detect_node_e2e_runner(
+            indexer, base_dir, deps, scripts, package_manager
+        )
+        if e2e_test_runner:
+            context.add_explain(f"Detected E2E Test Runner{scope_label}: {e2e_test_runner} ({e2e_cmd})")
+
         lang_ctx = LanguageContext(
             language="node",
             runtime_version=node_version,
@@ -354,6 +458,9 @@ class NodeDetector(BaseDetector):
             build_cmd=build_cmd,
             test_cmd=test_cmd,
             lint_cmd=lint_cmd,
+            unit_test_runner=unit_test_runner,
+            e2e_test_runner=e2e_test_runner,
+            e2e_cmd=e2e_cmd,
             working_dir=base_dir,
             framework=framework,
             confidence=0.95,
@@ -379,6 +486,9 @@ class NodeDetector(BaseDetector):
                     build_cmd=build_cmd,
                     test_cmd=test_cmd,
                     lint_cmd=lint_cmd,
+                    unit_test_runner=unit_test_runner,
+                    e2e_test_runner=e2e_test_runner,
+                    e2e_cmd=e2e_cmd,
                     framework=framework,
                     cache_dependency_path=cache_dependency_path,
                     matrix_versions=list(matrix_versions),

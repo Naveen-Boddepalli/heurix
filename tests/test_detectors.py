@@ -1318,6 +1318,142 @@ python = "3.11"
     assert any("Warning: Failed to parse .heurix.toml" in msg for msg in ctx5.explain_log)
 
 
+def test_e2e_and_unit_runner_detection(tmp_path: Path):
+    from heurix.detectors import analyze_repository
 
+    # (a) Root Node repo with vitest + @playwright/test + scripts["test:e2e"]
+    node_root = tmp_path / "node_root"
+    node_root.mkdir()
+    (node_root / "package-lock.json").write_text("{}", encoding="utf-8")
+    (node_root / "package.json").write_text(
+        """{
+        "name": "node-e2e-app",
+        "scripts": {
+            "test": "vitest run",
+            "test:e2e": "playwright test"
+        },
+        "devDependencies": {
+            "vitest": "^2.0.0",
+            "@playwright/test": "^1.48.0"
+        }
+    }""",
+        encoding="utf-8",
+    )
+    node_ctx = analyze_repository(node_root)
+    assert node_ctx.split_e2e_jobs is None
+    node_lang = node_ctx.get_language("node")
+    assert node_lang is not None
+    assert node_lang.test_cmd == "npm test"
+    assert node_lang.unit_test_runner == "vitest"
+    assert node_lang.e2e_test_runner == "playwright"
+    assert node_lang.e2e_cmd == "npm run test:e2e"
 
+    # (b) pnpm monorepo package with jest + cypress.config.ts (fallback exec runner)
+    mono = tmp_path / "pnpm_mono_e2e"
+    (mono / "apps" / "web").mkdir(parents=True)
+    (mono / "pnpm-workspace.yaml").write_text("packages:\n  - 'apps/*'\n", encoding="utf-8")
+    (mono / "pnpm-lock.yaml").write_text("lockfileVersion: '9.0'\n", encoding="utf-8")
+    (mono / "package.json").write_text('{"name": "root", "private": true}', encoding="utf-8")
+    (mono / "apps" / "web" / "package.json").write_text(
+        """{
+        "name": "@acme/web",
+        "scripts": {
+            "test": "jest --ci"
+        },
+        "devDependencies": {
+            "jest": "^29.7.0"
+        }
+    }""",
+        encoding="utf-8",
+    )
+    (mono / "apps" / "web" / "cypress.config.ts").write_text(
+        "export default { e2e: {} };\n", encoding="utf-8"
+    )
+    mono_ctx = analyze_repository(mono)
+    web_pkg = next(p for p in mono_ctx.monorepo_packages if p.path == "apps/web")
+    assert web_pkg.test_cmd == "pnpm test"
+    assert web_pkg.unit_test_runner == "jest"
+    assert web_pkg.e2e_test_runner == "cypress"
+    assert web_pkg.e2e_cmd == "pnpm exec cypress run"
+
+    # (c) Python uv repo with pytest in pyproject.toml + pytest-playwright in requirements-dev.txt + tests/e2e/test_flow.py
+    py_repo = tmp_path / "py_uv_e2e"
+    (py_repo / "tests" / "e2e").mkdir(parents=True)
+    (py_repo / "uv.lock").write_text("", encoding="utf-8")
+    (py_repo / "pyproject.toml").write_text(
+        """
+[project]
+name = "py-e2e"
+dependencies = ["fastapi", "pytest"]
+""",
+        encoding="utf-8",
+    )
+    (py_repo / "requirements-dev.txt").write_text("pytest-playwright>=0.5.0\n", encoding="utf-8")
+    (py_repo / "tests" / "e2e" / "test_flow.py").write_text(
+        "def test_smoke(): pass\n", encoding="utf-8"
+    )
+    py_ctx = analyze_repository(py_repo)
+    py_lang = py_ctx.get_language("python")
+    assert py_lang is not None
+    assert py_lang.test_cmd == "uv run pytest"
+    assert py_lang.unit_test_runner == "pytest"
+    assert py_lang.e2e_test_runner == "playwright"
+    assert py_lang.e2e_cmd == "uv run pytest tests/e2e"
+
+    # (d) Additional edge cases: Python playwright.config.py fallback (-k e2e), e2e/ dir, Node mocha + E2E-only
+    py_cfg = tmp_path / "py_cfg_e2e"
+    py_cfg.mkdir()
+    (py_cfg / "requirements.txt").write_text("pytest\n", encoding="utf-8")
+    (py_cfg / "playwright.config.py").write_text("# playwright\n", encoding="utf-8")
+    py_cfg_ctx = analyze_repository(py_cfg)
+    py_cfg_lang = py_cfg_ctx.get_language("python")
+    assert py_cfg_lang is not None
+    assert py_cfg_lang.test_cmd == "pytest"
+    assert py_cfg_lang.unit_test_runner == "pytest"
+    assert py_cfg_lang.e2e_test_runner == "playwright"
+    assert py_cfg_lang.e2e_cmd == "pytest -k e2e"
+
+    py_e2e_dir = tmp_path / "py_e2e_dir"
+    (py_e2e_dir / "e2e").mkdir(parents=True)
+    (py_e2e_dir / "pyproject.toml").write_text('[project]\nname="app"\ndependencies=["pytest"]\n', encoding="utf-8")
+    (py_e2e_dir / "e2e" / "test_browser.py").write_text("def test_ok(): pass\n", encoding="utf-8")
+    py_dir_ctx = analyze_repository(py_e2e_dir)
+    py_dir_lang = py_dir_ctx.get_language("python")
+    assert py_dir_lang is not None
+    assert py_dir_lang.e2e_test_runner == "playwright"
+    assert py_dir_lang.e2e_cmd == "pytest e2e"
+
+    node_e2e_only = tmp_path / "node_e2e_only"
+    node_e2e_only.mkdir()
+    (node_e2e_only / "package.json").write_text(
+        '{"name": "e2e-only", "scripts": {"test": "playwright test"}, "devDependencies": {"@playwright/test": "^1.48.0"}}',
+        encoding="utf-8",
+    )
+    e2e_only_ctx = analyze_repository(node_e2e_only)
+    e2e_only_lang = e2e_only_ctx.get_language("node")
+    assert e2e_only_lang is not None
+    assert e2e_only_lang.unit_test_runner is None
+    assert e2e_only_lang.e2e_test_runner == "playwright"
+    assert e2e_only_lang.e2e_cmd == "npx playwright test"
+
+    node_mocha = tmp_path / "node_mocha"
+    node_mocha.mkdir()
+    (node_mocha / "package.json").write_text(
+        '{"name": "mocha-app", "scripts": {"test": "mocha"}, "devDependencies": {"mocha": "^10.0.0"}}',
+        encoding="utf-8",
+    )
+    mocha_ctx = analyze_repository(node_mocha)
+    mocha_lang = mocha_ctx.get_language("node")
+    assert mocha_lang is not None
+    assert mocha_lang.unit_test_runner == "mocha"
+    assert mocha_lang.e2e_test_runner is None
+    assert mocha_lang.e2e_cmd is None
+
+    # JSON round-trip preserves new IR fields
+    rehydrated = ProjectContext.model_validate_json(node_ctx.model_dump_json())
+    rehydrated_node = rehydrated.get_language("node")
+    assert rehydrated_node is not None
+    assert rehydrated_node.unit_test_runner == "vitest"
+    assert rehydrated_node.e2e_test_runner == "playwright"
+    assert rehydrated_node.e2e_cmd == "npm run test:e2e"
 

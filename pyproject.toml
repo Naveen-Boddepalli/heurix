@@ -49,6 +49,8 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0.0",
+    "setuptools>=61.0",
+    "wheel>=0.40.0",
 ]
 build = [
     "build>=1.0.0",

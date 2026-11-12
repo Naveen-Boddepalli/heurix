@@ -71,6 +71,9 @@ class _BuildUnit:
     framework: Optional[str]
     cache_dependency_path: Optional[str]
     matrix_versions: Tuple[str, ...]
+    unit_test_runner: Optional[str] = None
+    e2e_test_runner: Optional[str] = None
+    e2e_cmd: Optional[str] = None
 
 
 def _normalize_working_dir(raw_path: Optional[str]) -> str:
@@ -153,6 +156,9 @@ def _collect_build_units(context: ProjectContext) -> List[_BuildUnit]:
                 framework=pkg.framework,
                 cache_dependency_path=pkg.cache_dependency_path,
                 matrix_versions=tuple(str(v).strip() for v in pkg.matrix_versions if str(v).strip()),
+                unit_test_runner=pkg.unit_test_runner,
+                e2e_test_runner=pkg.e2e_test_runner,
+                e2e_cmd=pkg.e2e_cmd,
             )
         )
 
@@ -187,6 +193,9 @@ def _collect_build_units(context: ProjectContext) -> List[_BuildUnit]:
                 framework=lang.framework,
                 cache_dependency_path=lang.cache_dependency_path,
                 matrix_versions=tuple(str(v).strip() for v in lang.matrix_versions if str(v).strip()),
+                unit_test_runner=lang.unit_test_runner,
+                e2e_test_runner=lang.e2e_test_runner,
+                e2e_cmd=lang.e2e_cmd,
             )
         )
 
@@ -388,69 +397,97 @@ def _resolve_effective_env_and_secrets(
     return effective_env_vars, effective_test_secrets, deployment_secret_set
 
 
-def _build_test_job_vm(
-    unit: _BuildUnit,
-    context: ProjectContext,
-    runner: str,
-    action_shas: Dict[str, str],
-    job_id: str,
-    scoped_services: Sequence[ServiceRequirement],
-    *,
-    runner_override: Optional[str] = None,
-    pre_steps: Sequence[Dict[str, Any]] = (),
-    post_steps: Sequence[Dict[str, Any]] = (),
-    effective_env_vars: Optional[Dict[str, str]] = None,
-    effective_test_secrets: Optional[Sequence[str]] = None,
-    effective_deployment_secrets: Optional[Set[str]] = None,
-) -> Dict[str, Any]:
-    """Build a single CI test job view-model for a normalized _BuildUnit."""
+def _resolve_os_matrix(context: ProjectContext, runner_override: Optional[str]) -> List[str]:
+    """Resolve deduplicated OS build matrix when no per-job runner override is active."""
     if runner_override is not None:
-        os_matrix: List[str] = []
-    else:
-        raw_os = [str(o).strip() for o in getattr(context, "matrix_os", []) if str(o).strip()]
-        os_matrix = list(dict.fromkeys(raw_os))
-        os_matrix = os_matrix if len(os_matrix) > 1 else []
+        return []
+    raw_os = [str(o).strip() for o in getattr(context, "matrix_os", []) if str(o).strip()]
+    os_matrix = list(dict.fromkeys(raw_os))
+    return os_matrix if len(os_matrix) > 1 else []
 
-    matrix_key = MATRIX_VERSION_KEYS.get(unit.language)
-    raw_vers = [str(v).strip() for v in unit.matrix_versions if str(v).strip()]
-    ver_matrix = list(dict.fromkeys(raw_vers))
-    if unit.language == "node" and unit.package_manager == "bun":
-        ver_matrix = []
-    ver_matrix = ver_matrix if (matrix_key and len(ver_matrix) > 1) else []
 
-    matrix_dict: Dict[str, List[str]] = {}
-    if os_matrix:
-        matrix_dict["os"] = os_matrix
-    if ver_matrix and matrix_key:
-        matrix_dict[matrix_key] = ver_matrix
-
-    effective_runs_on = (
-        runner_override
-        if runner_override is not None
-        else ("${{ matrix.os }}" if os_matrix else runner)
+def _build_step_env(
+    context: ProjectContext,
+    effective_env_vars: Optional[Dict[str, str]],
+    effective_test_secrets: Optional[Sequence[str]],
+    effective_deployment_secrets: Optional[Set[str]],
+) -> Dict[str, str]:
+    """Build SEC-02/SEC-03 filtered environment dictionary for test and E2E steps."""
+    env_source = effective_env_vars if effective_env_vars is not None else context.env_vars
+    test_sec_source = (
+        effective_test_secrets if effective_test_secrets is not None else context.test_secrets
     )
-    effective_version = (
-        f"${{{{ matrix.{matrix_key} }}}}"
-        if (ver_matrix and matrix_key)
-        else unit.runtime_version
+    deployment_secret_set = (
+        effective_deployment_secrets
+        if effective_deployment_secrets is not None
+        else set(context.deployment_secrets)
     )
 
-    job: Dict[str, Any] = {
-        "name": None,
-        "needs": None,
-        "if": None,
-        "runs-on": effective_runs_on,
-        "defaults": {"run": {"working-directory": unit.working_dir}} if unit.working_dir != "." else None,
-        "strategy": {"fail-fast": False, "matrix": matrix_dict} if matrix_dict else None,
-        "services": _build_services_map_vm(scoped_services) if scoped_services else None,
-        "steps": [],
-    }
+    step_env: Dict[str, str] = {}
+    for k, v in env_source.items():
+        if not is_sensitive_env_key(k) and k not in deployment_secret_set:
+            step_env[k] = str(v)
+    for s in test_sec_source:
+        if s not in deployment_secret_set and not is_deployment_secret_key(s):
+            step_env[s] = f"${{{{ secrets.{s} }}}}"
+    return step_env
 
+
+def _playwright_install_cmd(unit: _BuildUnit) -> str:
+    """Return ecosystem-appropriate Playwright browser installation command."""
+    if unit.language == "python":
+        if unit.package_manager == "uv":
+            return "uv run playwright install --with-deps"
+        if unit.package_manager == "poetry":
+            return "poetry run playwright install --with-deps"
+        return "playwright install --with-deps"
+    if unit.package_manager == "pnpm":
+        return "pnpm exec playwright install --with-deps"
+    if unit.package_manager == "yarn":
+        return "yarn playwright install --with-deps"
+    if unit.package_manager == "bun":
+        return "bunx playwright install --with-deps"
+    return "npx playwright install --with-deps"
+
+
+def _build_e2e_steps(unit: _BuildUnit, step_env: Dict[str, str]) -> List[Dict[str, Any]]:
+    """Build browser setup (when Playwright) and E2E execution step with SEC-03 isolated env."""
+    e2e_steps: List[Dict[str, Any]] = []
+    if unit.e2e_test_runner == "playwright":
+        e2e_steps.append({
+            "name": "Install Playwright browsers",
+            "run": _playwright_install_cmd(unit),
+        })
+    if unit.e2e_cmd and unit.e2e_cmd.strip():
+        run_step: Dict[str, Any] = {
+            "name": f"Run E2E tests ({unit.e2e_test_runner})",
+            "run": unit.e2e_cmd.strip(),
+        }
+        if step_env:
+            run_step["env"] = dict(step_env)
+        e2e_steps.append(run_step)
+    return e2e_steps
+
+
+def _build_runtime_setup_steps(
+    unit: _BuildUnit,
+    *,
+    action_shas: Dict[str, str],
+    effective_version: str,
+    effective_runs_on: str,
+    ver_matrix: Sequence[str],
+    job_id: str,
+) -> List[Dict[str, Any]]:
+    """Build checkout, pinned runtime setup, package manager setup, and install steps."""
     steps: List[Dict[str, Any]] = [
         _build_action_step_vm("Checkout repository", "actions/checkout", action_shas)
     ]
 
-    install_cmd = unit.install_cmd.strip() if isinstance(unit.install_cmd, str) and unit.install_cmd.strip() else None
+    install_cmd = (
+        unit.install_cmd.strip()
+        if isinstance(unit.install_cmd, str) and unit.install_cmd.strip()
+        else None
+    )
     cache_dep_path = (
         unit.cache_dependency_path.strip()
         if isinstance(unit.cache_dependency_path, str) and unit.cache_dependency_path.strip()
@@ -699,6 +736,72 @@ def _build_test_job_vm(
                 "run": cpp_install_run,
             })
 
+    return steps
+
+
+def _build_test_job_vm(
+    unit: _BuildUnit,
+    context: ProjectContext,
+    runner: str,
+    action_shas: Dict[str, str],
+    job_id: str,
+    scoped_services: Sequence[ServiceRequirement],
+    *,
+    runner_override: Optional[str] = None,
+    pre_steps: Sequence[Dict[str, Any]] = (),
+    post_steps: Sequence[Dict[str, Any]] = (),
+    effective_env_vars: Optional[Dict[str, str]] = None,
+    effective_test_secrets: Optional[Sequence[str]] = None,
+    effective_deployment_secrets: Optional[Set[str]] = None,
+    include_combined_e2e: bool = False,
+) -> Dict[str, Any]:
+    """Build a single CI test job view-model for a normalized _BuildUnit."""
+    os_matrix = _resolve_os_matrix(context, runner_override)
+
+    matrix_key = MATRIX_VERSION_KEYS.get(unit.language)
+    raw_vers = [str(v).strip() for v in unit.matrix_versions if str(v).strip()]
+    ver_matrix = list(dict.fromkeys(raw_vers))
+    if unit.language == "node" and unit.package_manager == "bun":
+        ver_matrix = []
+    ver_matrix = ver_matrix if (matrix_key and len(ver_matrix) > 1) else []
+
+    matrix_dict: Dict[str, List[str]] = {}
+    if os_matrix:
+        matrix_dict["os"] = os_matrix
+    if ver_matrix and matrix_key:
+        matrix_dict[matrix_key] = ver_matrix
+
+    effective_runs_on = (
+        runner_override
+        if runner_override is not None
+        else ("${{ matrix.os }}" if os_matrix else runner)
+    )
+    effective_version = (
+        f"${{{{ matrix.{matrix_key} }}}}"
+        if (ver_matrix and matrix_key)
+        else unit.runtime_version
+    )
+
+    job: Dict[str, Any] = {
+        "name": None,
+        "needs": None,
+        "if": None,
+        "runs-on": effective_runs_on,
+        "defaults": {"run": {"working-directory": unit.working_dir}} if unit.working_dir != "." else None,
+        "strategy": {"fail-fast": False, "matrix": matrix_dict} if matrix_dict else None,
+        "services": _build_services_map_vm(scoped_services) if scoped_services else None,
+        "steps": [],
+    }
+
+    steps = _build_runtime_setup_steps(
+        unit,
+        action_shas=action_shas,
+        effective_version=effective_version,
+        effective_runs_on=effective_runs_on,
+        ver_matrix=ver_matrix,
+        job_id=job_id,
+    )
+
     if pre_steps:
         steps.extend(copy.deepcopy(step) for step in pre_steps)
 
@@ -744,40 +847,95 @@ def _build_test_job_vm(
                 "run": unit.build_cmd,
             })
 
+    step_env = _build_step_env(
+        context,
+        effective_env_vars,
+        effective_test_secrets,
+        effective_deployment_secrets,
+    )
+
     # Test step (SEC-02 env redaction + SEC-03 secret isolation)
     if unit.test_cmd:
         step_obj: Dict[str, Any] = {
             "name": f"Run tests ({unit.language})",
             "run": unit.test_cmd,
         }
-        env_source = effective_env_vars if effective_env_vars is not None else context.env_vars
-        test_sec_source = (
-            effective_test_secrets if effective_test_secrets is not None else context.test_secrets
-        )
-        deployment_secret_set = (
-            effective_deployment_secrets
-            if effective_deployment_secrets is not None
-            else set(context.deployment_secrets)
-        )
-
-        step_env: Dict[str, str] = {}
-        for k, v in env_source.items():
-            if not is_sensitive_env_key(k) and k not in deployment_secret_set:
-                step_env[k] = str(v)
-        for s in test_sec_source:
-            if s not in deployment_secret_set and not is_deployment_secret_key(s):
-                step_env[s] = f"${{{{ secrets.{s} }}}}"
-
         if step_env:
-            step_obj["env"] = step_env
+            step_obj["env"] = dict(step_env)
 
         steps.append(step_obj)
+
+    if (
+        include_combined_e2e
+        and unit.e2e_test_runner
+        and unit.e2e_cmd
+        and unit.e2e_cmd.strip() != (unit.test_cmd or "").strip()
+    ):
+        steps.extend(_build_e2e_steps(unit, step_env))
 
     if post_steps:
         steps.extend(copy.deepcopy(step) for step in post_steps)
 
     job["steps"] = steps
     return job
+
+
+def _build_e2e_job_vm(
+    unit: _BuildUnit,
+    context: ProjectContext,
+    runner: str,
+    action_shas: Dict[str, str],
+    job_id: str,
+    *,
+    runner_override: Optional[str] = None,
+    pre_steps: Sequence[Dict[str, Any]] = (),
+    post_steps: Sequence[Dict[str, Any]] = (),
+    effective_env_vars: Optional[Dict[str, str]] = None,
+    effective_test_secrets: Optional[Sequence[str]] = None,
+    effective_deployment_secrets: Optional[Set[str]] = None,
+) -> Dict[str, Any]:
+    """Build a parallel CI E2E job view-model with pinned runtime, browser setup, and SEC-03 isolation."""
+    os_matrix = _resolve_os_matrix(context, runner_override)
+    matrix_dict: Dict[str, List[str]] = {"os": os_matrix} if os_matrix else {}
+    effective_runs_on = (
+        runner_override
+        if runner_override is not None
+        else ("${{ matrix.os }}" if os_matrix else runner)
+    )
+
+    steps = _build_runtime_setup_steps(
+        unit,
+        action_shas=action_shas,
+        effective_version=unit.runtime_version,
+        effective_runs_on=effective_runs_on,
+        ver_matrix=[],
+        job_id=job_id,
+    )
+
+    if pre_steps:
+        steps.extend(copy.deepcopy(step) for step in pre_steps)
+
+    step_env = _build_step_env(
+        context,
+        effective_env_vars,
+        effective_test_secrets,
+        effective_deployment_secrets,
+    )
+    steps.extend(_build_e2e_steps(unit, step_env))
+
+    if post_steps:
+        steps.extend(copy.deepcopy(step) for step in post_steps)
+
+    return {
+        "name": None,
+        "needs": None,
+        "if": None,
+        "runs-on": effective_runs_on,
+        "defaults": {"run": {"working-directory": unit.working_dir}} if unit.working_dir != "." else None,
+        "strategy": {"fail-fast": False, "matrix": matrix_dict} if matrix_dict else None,
+        "services": None,
+        "steps": steps,
+    }
 
 
 def _build_deploy_jobs_vm(
@@ -917,7 +1075,7 @@ class GitHubActionsSynthesizer(BaseSynthesizer):
             for s in policy.ci.steps.post_test
         ]
 
-        def _job_steps_for(job_id: str) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        def _explicit_job_steps(job_id: str) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
             job_policy = policy.jobs.get(job_id)
             job_pre = [
                 _convert_custom_step_vm(s, action_shas, policy.ci.pin_actions)
@@ -927,6 +1085,10 @@ class GitHubActionsSynthesizer(BaseSynthesizer):
                 _convert_custom_step_vm(s, action_shas, policy.ci.pin_actions)
                 for s in (job_policy.post_steps if job_policy else ())
             ]
+            return job_pre, job_post
+
+        def _job_steps_for(job_id: str) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+            job_pre, job_post = _explicit_job_steps(job_id)
             return ([*global_pre_steps, *job_pre], [*job_post, *global_post_steps])
 
         path_filters: Optional[List[str]] = None
@@ -943,6 +1105,12 @@ class GitHubActionsSynthesizer(BaseSynthesizer):
                 }
             )
             path_filters = ["**"] if (has_root_unit or not sub_paths) else sub_paths
+
+        has_unit_runner = any(bool(u.unit_test_runner) for u in units)
+        e2e_units = [u for u in units if u.e2e_test_runner and u.e2e_cmd]
+        has_unit_and_e2e = has_unit_runner and bool(e2e_units)
+        split_e2e = getattr(context, "split_e2e_jobs", None)
+        combined_e2e = split_e2e is False
 
         jobs_vm: Dict[str, Dict[str, Any]] = {}
         test_job_ids: List[str] = []
@@ -986,6 +1154,7 @@ class GitHubActionsSynthesizer(BaseSynthesizer):
                     effective_env_vars=effective_env_vars,
                     effective_test_secrets=effective_test_secrets,
                     effective_deployment_secrets=effective_deployment_secrets,
+                    include_combined_e2e=combined_e2e,
                 )
                 test_job_ids.append("test")
             else:
@@ -1013,8 +1182,33 @@ class GitHubActionsSynthesizer(BaseSynthesizer):
                         effective_env_vars=effective_env_vars,
                         effective_test_secrets=effective_test_secrets,
                         effective_deployment_secrets=effective_deployment_secrets,
+                        include_combined_e2e=combined_e2e,
                     )
                     test_job_ids.append(job_id)
+
+            if has_unit_and_e2e and split_e2e is not False:
+                e2e_used_ids: Set[str] = set(jobs_vm.keys())
+                for e2e_unit in e2e_units:
+                    if len(e2e_units) == 1 and "test-e2e" not in e2e_used_ids:
+                        e2e_job_id = "test-e2e"
+                        e2e_used_ids.add(e2e_job_id)
+                    else:
+                        e2e_job_id = sanitize_job_id("e2e", e2e_used_ids)
+                    e2e_pre_steps, e2e_post_steps = _explicit_job_steps(e2e_job_id)
+                    jobs_vm[e2e_job_id] = _build_e2e_job_vm(
+                        e2e_unit,
+                        context,
+                        fallback_runner,
+                        action_shas,
+                        e2e_job_id,
+                        runner_override=_resolve_job_runner_override(policy, e2e_job_id),
+                        pre_steps=e2e_pre_steps,
+                        post_steps=e2e_post_steps,
+                        effective_env_vars=effective_env_vars,
+                        effective_test_secrets=effective_test_secrets,
+                        effective_deployment_secrets=effective_deployment_secrets,
+                    )
+                    test_job_ids.append(e2e_job_id)
 
         deploy_needs: Any = test_job_ids[0] if test_job_ids == ["test"] else list(test_job_ids)
         deploy_if = f"github.ref == 'refs/heads/{default_branch}' && github.event_name == 'push'"
@@ -1042,5 +1236,3 @@ class GitHubActionsSynthesizer(BaseSynthesizer):
             templates_dir=policy.engine.templates_dir,
         )
         return {".github/workflows/ci.yml": rendered}
-
-

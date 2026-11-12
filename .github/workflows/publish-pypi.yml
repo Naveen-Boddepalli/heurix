@@ -41,6 +41,20 @@ jobs:
       - name: Validate package metadata
         run: python -m twine check dist/*
 
+      - name: Smoke test built wheel
+        run: |
+          set -euo pipefail
+          SMOKE_DIR=$(mktemp -d)
+          trap 'rm -rf "$SMOKE_DIR"' EXIT
+          python -m venv "${SMOKE_DIR}/venv"
+          "${SMOKE_DIR}/venv/bin/pip" install --quiet dist/*.whl
+          "${SMOKE_DIR}/venv/bin/hx" --version | grep -q "Heurix (hx)"
+          "${SMOKE_DIR}/venv/bin/hx" --help | grep -q "Deterministic Codebase Scanner"
+          mkdir -p "${SMOKE_DIR}/repo"
+          printf '[project]\nname = "smoke-demo"\nversion = "0.1.0"\n' > "${SMOKE_DIR}/repo/pyproject.toml"
+          "${SMOKE_DIR}/venv/bin/hx" scan --path "${SMOKE_DIR}/repo" | grep -q '"python"'
+          "${SMOKE_DIR}/venv/bin/hx" generate --path "${SMOKE_DIR}/repo" --dry-run --yes
+
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:

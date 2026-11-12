@@ -4,7 +4,7 @@ Tests for PreflightValidator against valid and malformed YAML schemas.
 
 from __future__ import annotations
 
-from heurix.core.validator import PreflightValidator
+from heurix.core.validator import PreflightValidator, ValidationOutcome
 
 
 def test_validator_syntax_error():
@@ -337,3 +337,148 @@ jobs:
     is_valid, errors = validator.validate(".github/workflows/ci.yml", bad_strategy)
     assert not is_valid
     assert any("GitHub Workflow Schema Error" in e for e in errors)
+
+
+def test_validator_batch_optional_manifest_classification():
+    assert PreflightValidator.is_optional_manifest("k8s/deployment.yaml") is True
+    assert PreflightValidator.is_optional_manifest("./k8s/service.yml") is True
+    assert PreflightValidator.is_optional_manifest("././k8s\\deployment.yaml") is True
+    assert PreflightValidator.is_optional_manifest("deploy/app.k8s.yaml") is True
+    assert PreflightValidator.is_optional_manifest("deploy\\app.k8s.yml") is True
+
+    assert PreflightValidator.is_optional_manifest(".github/workflows/ci.yml") is False
+    assert PreflightValidator.is_optional_manifest(".github\\workflows\\ci.yml") is False
+    assert PreflightValidator.is_optional_manifest(".github/dependabot.yml") is False
+    assert PreflightValidator.is_optional_manifest(".github/dependabot.yaml") is False
+    assert PreflightValidator.is_optional_manifest(".github/workflows/evil.k8s.yaml") is False
+
+    validator = PreflightValidator()
+    valid_ci = (
+        "name: CI\n"
+        "on: [push]\n"
+        "jobs:\n"
+        "  test:\n"
+        "    runs-on: ubuntu-latest\n"
+        "    steps:\n"
+        "      - run: pytest\n"
+    )
+    valid_dependabot = (
+        "version: 2\n"
+        "updates:\n"
+        "  - package-ecosystem: pip\n"
+        "    directory: /\n"
+        "    schedule:\n"
+        "      interval: weekly\n"
+    )
+    valid_k8s_svc = (
+        "apiVersion: v1\n"
+        "kind: Service\n"
+        "metadata:\n"
+        "  name: app-svc\n"
+    )
+    invalid_k8s_deploy = "kind: Deployment\nmetadata:\n  name: broken-app\n"
+    invalid_k8s_syntax = "apiVersion: apps/v1\nkind: [unclosed\n"
+
+    outcome = validator.validate_batch(
+        {
+            ".github/workflows/ci.yml": valid_ci,
+            ".github/dependabot.yml": valid_dependabot,
+            "k8s/service.yaml": valid_k8s_svc,
+            "k8s/deployment.yaml": invalid_k8s_deploy,
+            "./deploy/broken.k8s.yml": invalid_k8s_syntax,
+        },
+        strict=False,
+    )
+
+    assert isinstance(outcome, ValidationOutcome)
+    assert outcome.is_ok is True
+    assert outcome.has_critical_errors is False
+    assert outcome.has_warnings is True
+    assert outcome.critical_errors == {}
+    assert set(outcome.valid_files.keys()) == {
+        ".github/workflows/ci.yml",
+        ".github/dependabot.yml",
+        "k8s/service.yaml",
+    }
+    assert set(outcome.optional_warnings.keys()) == {
+        "k8s/deployment.yaml",
+        "./deploy/broken.k8s.yml",
+    }
+    assert outcome.excluded_files == {
+        "k8s/deployment.yaml": invalid_k8s_deploy,
+        "./deploy/broken.k8s.yml": invalid_k8s_syntax,
+    }
+    assert any(
+        "Kubernetes Manifest Schema Error" in msg
+        for msg in outcome.optional_warnings["k8s/deployment.yaml"]
+    )
+    assert any(
+        "YAML Syntax Error" in msg
+        for msg in outcome.optional_warnings["./deploy/broken.k8s.yml"]
+    )
+
+    # Empty & all-valid batches stay clean
+    empty_outcome = validator.validate_batch({})
+    assert empty_outcome.is_ok is True
+    assert empty_outcome.has_critical_errors is False
+    assert empty_outcome.has_warnings is False
+    assert empty_outcome.valid_files == {}
+
+
+def test_validator_batch_strict_and_critical_errors():
+    validator = PreflightValidator()
+    valid_ci = (
+        "name: CI\n"
+        "on: [push]\n"
+        "jobs:\n"
+        "  test:\n"
+        "    runs-on: ubuntu-latest\n"
+        "    steps:\n"
+        "      - run: pytest\n"
+    )
+    invalid_k8s = "kind: Deployment\nmetadata:\n  name: broken-app\n"
+    invalid_ci = "name: Broken CI\non: push\n"
+    invalid_dependabot = "version: 2\nupdates: []\n"
+    invalid_dependabot_missing_fields = "version: 2\nupdates:\n  - package-ecosystem: npm\n"
+
+    # strict=True promotes optional k8s failures into critical_errors
+    strict_outcome = validator.validate_batch(
+        {
+            ".github/workflows/ci.yml": valid_ci,
+            "k8s/deployment.yaml": invalid_k8s,
+        },
+        strict=True,
+    )
+    assert strict_outcome.is_ok is False
+    assert strict_outcome.has_critical_errors is True
+    assert strict_outcome.has_warnings is False
+    assert strict_outcome.optional_warnings == {}
+    assert strict_outcome.excluded_files == {}
+    assert set(strict_outcome.valid_files.keys()) == {".github/workflows/ci.yml"}
+    assert "k8s/deployment.yaml" in strict_outcome.critical_errors
+
+    # Critical CI and Dependabot failures always fail regardless of strict=False
+    critical_outcome = validator.validate_batch(
+        {
+            ".github/workflows/ci.yml": invalid_ci,
+            ".github/dependabot.yml": invalid_dependabot_missing_fields,
+            "k8s/deployment.yaml": invalid_k8s,
+        },
+        strict=False,
+    )
+    assert critical_outcome.is_ok is False
+    assert critical_outcome.has_critical_errors is True
+    assert critical_outcome.has_warnings is True
+    assert critical_outcome.valid_files == {}
+    assert set(critical_outcome.critical_errors.keys()) == {
+        ".github/workflows/ci.yml",
+        ".github/dependabot.yml",
+    }
+    assert set(critical_outcome.optional_warnings.keys()) == {"k8s/deployment.yaml"}
+    assert set(critical_outcome.excluded_files.keys()) == {"k8s/deployment.yaml"}
+
+    # Existing validate() tuple signature remains intact
+    is_valid, errors = validator.validate(".github/dependabot.yml", invalid_dependabot)
+    assert is_valid is True
+    assert errors == []
+

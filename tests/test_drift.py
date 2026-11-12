@@ -1381,4 +1381,140 @@ jobs:
     assert any("macos-latest" in f.issue for f in partial_findings)
 
 
+def test_e2e_split_and_combined_zero_drift(tmp_path: Path):
+    from heurix.core.context import MonorepoPackage
+    from heurix.core.drift import _is_e2e_job_id
+    from heurix.synthesizers.github_actions import GitHubActionsSynthesizer
 
+    assert _is_e2e_job_id("test-e2e") is True
+    assert _is_e2e_job_id("test-e2e-2") is True
+    assert _is_e2e_job_id("test-apps-web-e2e") is True
+    assert _is_e2e_job_id("test-apps-web-e2e-2") is True
+    assert _is_e2e_job_id("web-e2e") is True
+    assert _is_e2e_job_id("test") is False
+    assert _is_e2e_job_id("test-apps-web") is False
+    assert _is_e2e_job_id("e2e") is False
+
+    wf_dir = tmp_path / ".github" / "workflows"
+    wf_dir.mkdir(parents=True)
+    ci_file = wf_dir / "ci.yml"
+    detector = DriftDetector(tmp_path)
+    syn = GitHubActionsSynthesizer()
+
+    # 1. Split mode with [[ci.steps.pre_test]] and [[ci.steps.post_test]] + matrix_os -> zero drift
+    split_ctx = ProjectContext(
+        repo_name="e2e-drift-app",
+        repo_root=str(tmp_path),
+        matrix_os=["ubuntu-latest", "macos-latest"],
+        split_e2e_jobs=True,
+        languages=[
+            LanguageContext(
+                language="node",
+                runtime_version="20.x",
+                version_source=".nvmrc",
+                package_manager="npm",
+                install_cmd="npm ci",
+                test_cmd="npm test",
+                unit_test_runner="vitest",
+                e2e_test_runner="playwright",
+                e2e_cmd="npm run test:e2e",
+            )
+        ],
+        policy_config={
+            "ci": {
+                "steps": {
+                    "pre_test": [{"name": "DB migrate", "run": "npm run db:migrate"}],
+                    "post_test": [{"name": "Cleanup", "run": "echo done"}],
+                }
+            }
+        },
+    )
+
+    split_files = syn.synthesize(split_ctx)
+    ci_file.write_text(split_files[".github/workflows/ci.yml"], encoding="utf-8")
+    assert detector.check_drift(split_ctx, split_files) == []
+    # Also zero drift when hx check runs with split_e2e_jobs=None
+    assert (
+        detector.check_drift(split_ctx.model_copy(update={"split_e2e_jobs": None}), split_files)
+        == []
+    )
+
+    # 2. Combined mode with [[ci.steps.pre_test]] + matrix_os -> zero drift
+    combined_ctx = split_ctx.model_copy(update={"split_e2e_jobs": False})
+    combined_files = syn.synthesize(combined_ctx)
+    ci_file.write_text(combined_files[".github/workflows/ci.yml"], encoding="utf-8")
+    assert detector.check_drift(combined_ctx, combined_files) == []
+    assert (
+        detector.check_drift(
+            combined_ctx.model_copy(update={"split_e2e_jobs": None}), combined_files
+        )
+        == []
+    )
+
+    # 3. Explicit [jobs.test-e2e] pre_steps / runner override and OS matrix drift enforcement
+    explicit_e2e_ctx = ProjectContext(
+        repo_name="e2e-explicit",
+        repo_root=str(tmp_path),
+        is_monorepo=True,
+        matrix_os=["ubuntu-latest", "macos-latest"],
+        monorepo_packages=[
+            MonorepoPackage(
+                name="apps/web",
+                path="apps/web",
+                language="node",
+                package_manager="pnpm",
+                runtime_version="20.x",
+                version_source=".nvmrc",
+                install_cmd="pnpm i --frozen-lockfile",
+                test_cmd="pnpm test",
+                unit_test_runner="vitest",
+                e2e_test_runner="playwright",
+                e2e_cmd="pnpm run test:e2e",
+            ),
+            MonorepoPackage(
+                name="apps/admin",
+                path="apps/admin",
+                language="node",
+                package_manager="pnpm",
+                runtime_version="20.x",
+                version_source=".nvmrc",
+                install_cmd="pnpm i --frozen-lockfile",
+                test_cmd="pnpm test",
+                unit_test_runner="jest",
+                e2e_test_runner="cypress",
+                e2e_cmd="pnpm exec cypress run",
+            ),
+        ],
+        policy_config={
+            "ci": {
+                "runners": {"test-e2e": "ubuntu-24.04"},
+                "steps": {
+                    "pre_test": [{"name": "Unit pre", "run": "echo unit"}],
+                },
+            },
+            "jobs": {
+                "test-e2e": {
+                    "pre_steps": [{"name": "Seed E2E", "run": "echo seed"}],
+                }
+            },
+        },
+    )
+    explicit_files = syn.synthesize(explicit_e2e_ctx)
+    ci_file.write_text(explicit_files[".github/workflows/ci.yml"], encoding="utf-8")
+    assert detector.check_drift(explicit_e2e_ctx, explicit_files) == []
+
+    # Removing Seed E2E from test-e2e, changing test-e2e runner, or dropping macos-latest from test-e2e-2 triggers drift
+    head_yml, tail_yml = explicit_files[".github/workflows/ci.yml"].split("  test-e2e-2:", 1)
+    mutated_tail = tail_yml.replace("          - macos-latest\n", "", 1)
+    ci_file.write_text(
+        (head_yml + "  test-e2e-2:" + mutated_tail)
+        .replace("      - name: Seed E2E\n        run: echo seed\n", "")
+        .replace("runs-on: ubuntu-24.04", "runs-on: ubuntu-latest"),
+        encoding="utf-8",
+    )
+    e2e_drift = detector.check_drift(explicit_e2e_ctx, {".github/workflows/ci.yml": "dummy"})
+    e2e_issues = [f.issue for f in e2e_drift]
+    assert any("Seed E2E" in i and "test-e2e" in i for i in e2e_issues)
+    assert any("test-e2e" in i and "ubuntu-24.04" in i for i in e2e_issues)
+    assert any("macos-latest" in i for i in e2e_issues)
+    assert not any("Unit pre" in i and "test-e2e" in i for i in e2e_issues)

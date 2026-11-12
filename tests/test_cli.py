@@ -792,3 +792,445 @@ include_k8s = true
         assert isinstance(err_res.exception, SystemExit)
         assert "Traceback" not in err_res.stdout
         assert "Path traversal security violation" in " ".join(err_res.stdout.split())
+
+
+def test_cli_interactive_ambiguity_and_non_interactive_flags(tmp_path: Path, monkeypatch):
+    import json
+    from ruamel.yaml import YAML
+
+    def _create_ambiguous_repo(repo_dir: Path) -> None:
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        (repo_dir / ".nvmrc").write_text("20\n", encoding="utf-8")
+        (repo_dir / "package.json").write_text(
+            json.dumps(
+                {
+                    "name": "ambiguous-app",
+                    "scripts": {"test": "vitest run", "test:e2e": "playwright test"},
+                    "dependencies": {"pg": "^8.11.0", "redis": "^4.6.0"},
+                    "devDependencies": {"vitest": "^1.5.0", "@playwright/test": "^1.48.0"},
+                }
+            ),
+            encoding="utf-8",
+        )
+        (repo_dir / "vercel.json").write_text('{"name": "ambig-vercel"}', encoding="utf-8")
+        (repo_dir / "firebase.json").write_text('{"hosting": {"public": "dist"}}', encoding="utf-8")
+        (repo_dir / ".firebaserc").write_text('{"projects": {"default": "ambig-fb"}}', encoding="utf-8")
+        (repo_dir / "Dockerfile").write_text("FROM node:20-alpine\nEXPOSE 3000\n", encoding="utf-8")
+
+    # 1a. Interactive prompt hooks resolved via monkeypatch in CliRunner (filtering services, targets, E2E split, and k8s)
+    interactive_repo = tmp_path / "interactive_repo"
+    _create_ambiguous_repo(interactive_repo)
+
+    called_prompts: list[str] = []
+
+    def mock_e2e_split(unit_runners, e2e_runners, *, non_interactive=False):
+        called_prompts.append("e2e")
+        assert unit_runners == ["vitest"]
+        assert e2e_runners == ["playwright"]
+        assert non_interactive is False
+        return False  # Choose combined mode
+
+    def mock_targets(targets, *, non_interactive=False):
+        called_prompts.append("targets")
+        assert non_interactive is False
+        return [t for t in targets if t.platform == "vercel"]  # Deselect firebase
+
+    def mock_services(services, *, non_interactive=False):
+        called_prompts.append("services")
+        assert non_interactive is False
+        return [s for s in services if s.name == "postgres"]  # Exclude redis
+
+    def mock_k8s(*, default=True, non_interactive=False):
+        called_prompts.append("k8s")
+        assert non_interactive is False
+        return False  # Skip k8s manifests
+
+    monkeypatch.setattr("heurix.cli.prompt_e2e_split", mock_e2e_split)
+    monkeypatch.setattr("heurix.cli.prompt_deployment_targets", mock_targets)
+    monkeypatch.setattr("heurix.cli.prompt_backing_services", mock_services)
+    monkeypatch.setattr("heurix.cli.prompt_k8s_generation", mock_k8s)
+
+    res = runner.invoke(app, ["generate", "--path", str(interactive_repo)])
+    assert res.exit_code == 0, res.stdout
+    assert called_prompts == ["e2e", "targets", "services", "k8s"]
+
+    yaml = YAML(typ="safe")
+    ci_text = (interactive_repo / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    ci_doc = yaml.load(ci_text)
+    assert "test-e2e" not in ci_doc["jobs"]
+    assert "deploy_vercel" in ci_doc["jobs"]
+    assert "deploy_firebase" not in ci_doc["jobs"]
+    assert "postgres" in ci_doc["jobs"]["test"]["services"]
+    assert "redis" not in ci_doc["jobs"]["test"]["services"]
+    assert "FIREBASE_SERVICE_ACCOUNT" not in ci_text
+    assert any(
+        s.get("name") == "Run E2E tests (playwright)"
+        for s in ci_doc["jobs"]["test"]["steps"]
+    )
+    assert not (interactive_repo / "k8s").exists()
+
+    # 1b. Interactive choices consistent with codebase services pass hx check with zero drift
+    (interactive_repo / ".heurix.toml").write_text(
+        '[services]\nexclude = ["redis"]\n',
+        encoding="utf-8",
+    )
+    # Policy-explicit services & --no-k8s skip services & k8s prompts even in interactive mode
+    called_prompts.clear()
+    explicit_res = runner.invoke(app, ["generate", "--path", str(interactive_repo), "--no-k8s", "--yes"])
+    assert explicit_res.exit_code == 0, explicit_res.stdout
+    check_interactive = runner.invoke(app, ["check", "--path", str(interactive_repo)])
+    assert check_interactive.exit_code == 0, check_interactive.stdout
+    assert "Zero Drift Detected" in check_interactive.stdout
+
+    # Verify policy-explicit suppression without --yes skips services & k8s prompts
+    monkeypatch.setattr(
+        "heurix.cli.prompt_conflict_resolution",
+        lambda rel_path, non_interactive=False: "apply",
+    )
+    monkeypatch.setattr(
+        "heurix.cli.prompt_backing_services",
+        lambda *a, **kw: (_ for _ in ()).throw(AssertionError("services prompt should be skipped when policy excludes services")),
+    )
+    monkeypatch.setattr(
+        "heurix.cli.prompt_k8s_generation",
+        lambda *a, **kw: (_ for _ in ()).throw(AssertionError("k8s prompt should be skipped when --no-k8s is passed")),
+    )
+    policy_res = runner.invoke(app, ["generate", "--path", str(interactive_repo), "--no-k8s"])
+    assert policy_res.exit_code == 0, policy_res.stdout
+    assert called_prompts == ["e2e", "targets"]
+    check_after_interactive = runner.invoke(app, ["check", "--path", str(interactive_repo)])
+    assert check_after_interactive.exit_code == 0, check_after_interactive.stdout
+
+    # 2. --non-interactive skips all prompts and uses deterministic defaults
+    headless_repo = tmp_path / "headless_repo"
+    _create_ambiguous_repo(headless_repo)
+
+    def _forbid_prompt(*args, **kwargs):
+        raise AssertionError("Interactive prompt should not be called when --non-interactive is set")
+
+    monkeypatch.setattr("heurix.cli.prompt_e2e_split", _forbid_prompt)
+    monkeypatch.setattr("heurix.cli.prompt_deployment_targets", _forbid_prompt)
+    monkeypatch.setattr("heurix.cli.prompt_backing_services", _forbid_prompt)
+    monkeypatch.setattr("heurix.cli.prompt_k8s_generation", _forbid_prompt)
+    monkeypatch.setattr("heurix.cli.prompt_conflict_resolution", _forbid_prompt)
+
+    headless_res = runner.invoke(app, ["generate", "--path", str(headless_repo), "--non-interactive"])
+    assert headless_res.exit_code == 0, headless_res.stdout
+
+    headless_doc = yaml.load(
+        (headless_repo / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    )
+    assert "test-e2e" in headless_doc["jobs"]
+    assert "deploy_vercel" in headless_doc["jobs"]
+    assert "deploy_firebase" in headless_doc["jobs"]
+    assert "postgres" in headless_doc["jobs"]["test"]["services"]
+    assert "redis" in headless_doc["jobs"]["test"]["services"]
+    assert (headless_repo / "k8s" / "deployment.yaml").exists()
+
+    check_headless = runner.invoke(app, ["check", "--path", str(headless_repo)])
+    assert check_headless.exit_code == 0, check_headless.stdout
+    assert "Zero Drift Detected" in check_headless.stdout
+
+
+def test_cli_side_by_side_and_auto_diff_modes(tmp_path: Path):
+    ci_dir = tmp_path / ".github" / "workflows"
+    ci_dir.mkdir(parents=True)
+    ci_file = ci_dir / "ci.yml"
+    ci_file.write_text("name: Old CI\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps: []\n", encoding="utf-8")
+    (tmp_path / ".python-version").write_text("3.12\n", encoding="utf-8")
+    (tmp_path / "requirements.txt").write_text("pytest\n", encoding="utf-8")
+
+    # 1. hx diff --side-by-side renders Rich.Table side-by-side preview
+    sbs_res = runner.invoke(
+        app,
+        ["diff", "--path", str(tmp_path), "--side-by-side"],
+        env={"COLUMNS": "140", "NO_COLOR": "1"},
+    )
+    assert sbs_res.exit_code == 0, sbs_res.stdout
+    assert "(side-by-side)" in sbs_res.stdout
+    assert "Current" in sbs_res.stdout
+    assert "Synthesized" in sbs_res.stdout
+    assert "│" in sbs_res.stdout
+
+    # 2. hx diff --diff-style auto adapts to COLUMNS >= 120 vs < 120
+    auto_wide = runner.invoke(
+        app,
+        ["diff", "--path", str(tmp_path), "--diff-style", "auto"],
+        env={"COLUMNS": "140", "NO_COLOR": "1"},
+    )
+    assert auto_wide.exit_code == 0, auto_wide.stdout
+    assert "(side-by-side)" in auto_wide.stdout
+    assert "│" in auto_wide.stdout
+
+    auto_narrow = runner.invoke(
+        app,
+        ["diff", "--path", str(tmp_path), "--diff-style", "auto"],
+        env={"COLUMNS": "80", "NO_COLOR": "1"},
+    )
+    assert auto_narrow.exit_code == 0, auto_narrow.stdout
+    assert "(side-by-side)" not in auto_narrow.stdout
+    assert "Diff Preview:" in auto_narrow.stdout
+    assert "@@" in auto_narrow.stdout
+
+    # 3. hx generate --diff --side-by-side --yes writes updates after showing side-by-side diff
+    gen_sbs = runner.invoke(
+        app,
+        ["generate", "--path", str(tmp_path), "--diff", "--side-by-side", "--yes"],
+        env={"COLUMNS": "140", "NO_COLOR": "1"},
+    )
+    assert gen_sbs.exit_code == 0, gen_sbs.stdout
+    assert "(side-by-side)" in gen_sbs.stdout
+    assert "actions/setup-python@v5" in ci_file.read_text(encoding="utf-8")
+
+    # 4. Invalid --diff-style exits cleanly with code 1 and no traceback
+    for bad_cmd in (
+        ["generate", "--path", str(tmp_path), "--diff-style", "bogus", "--yes"],
+        ["diff", "--path", str(tmp_path), "--diff-style", "bogus"],
+    ):
+        bad_res = runner.invoke(app, bad_cmd)
+        assert bad_res.exit_code == 1
+        assert "Traceback" not in bad_res.stdout
+        assert "Unsupported diff style" in " ".join(bad_res.stdout.split())
+
+
+def test_cli_partial_validation_optional_k8s_and_strict(tmp_path: Path, monkeypatch):
+    valid_ci = (
+        "name: CI\n"
+        "on:\n"
+        "  push:\n"
+        "    branches: [main]\n"
+        "jobs:\n"
+        "  test:\n"
+        "    runs-on: ubuntu-latest\n"
+        "    steps:\n"
+        "      - uses: actions/checkout@v4\n"
+    )
+    valid_dependabot = (
+        "version: 2\n"
+        "updates:\n"
+        "  - package-ecosystem: pip\n"
+        "    directory: /\n"
+        "    schedule:\n"
+        "      interval: weekly\n"
+    )
+    valid_k8s_svc = (
+        "apiVersion: v1\n"
+        "kind: Service\n"
+        "metadata:\n"
+        "  name: demo\n"
+    )
+    broken_k8s_dep = "apiVersion: apps/v1\nkind: Deployment\n"  # missing required metadata
+    broken_ci = "name: CI\njobs:\n  test:\n    runs-on: ubuntu-latest\n"  # missing required steps
+
+    # 1. Optional k8s failure (strict=False): warns in yellow panel, excludes k8s file, writes valid CI files (exit 0)
+    partial_repo = tmp_path / "partial_repo"
+    partial_repo.mkdir()
+    (partial_repo / ".python-version").write_text("3.12\n", encoding="utf-8")
+    (partial_repo / "requirements.txt").write_text("pytest\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        "heurix.cli.synthesize_all",
+        lambda context, include_k8s=True, include_dependabot=True: {
+            ".github/workflows/ci.yml": valid_ci,
+            ".github/dependabot.yml": valid_dependabot,
+            "k8s/deployment.yaml": broken_k8s_dep,
+        },
+    )
+    partial_res = runner.invoke(app, ["generate", "--path", str(partial_repo), "--yes"])
+    assert partial_res.exit_code == 0, partial_res.stdout
+    normalized_partial = " ".join(partial_res.stdout.split())
+    assert "Optional Manifest Warnings (Excluded)" in normalized_partial
+    assert "k8s/deployment.yaml" in normalized_partial
+    assert "--strict" in normalized_partial
+    assert (partial_repo / ".github" / "workflows" / "ci.yml").exists()
+    assert (partial_repo / ".github" / "dependabot.yml").exists()
+    assert not (partial_repo / "k8s" / "deployment.yaml").exists()
+
+    # 2. Only optional k8s file fails (no valid files remain): exits 0 cleanly with warning
+    only_opt_repo = tmp_path / "only_opt_repo"
+    only_opt_repo.mkdir()
+    (only_opt_repo / ".python-version").write_text("3.12\n", encoding="utf-8")
+    monkeypatch.setattr(
+        "heurix.cli.synthesize_all",
+        lambda context, include_k8s=True, include_dependabot=True: {
+            "k8s/deployment.yaml": broken_k8s_dep,
+        },
+    )
+    only_opt_res = runner.invoke(app, ["generate", "--path", str(only_opt_repo), "--yes"])
+    assert only_opt_res.exit_code == 0, only_opt_res.stdout
+    assert not (only_opt_repo / "k8s" / "deployment.yaml").exists()
+
+    # 3. --strict aborts all writes on optional k8s failure (exit 1, 0 files written)
+    strict_repo = tmp_path / "strict_repo"
+    strict_repo.mkdir()
+    (strict_repo / ".python-version").write_text("3.12\n", encoding="utf-8")
+    monkeypatch.setattr(
+        "heurix.cli.synthesize_all",
+        lambda context, include_k8s=True, include_dependabot=True: {
+            ".github/workflows/ci.yml": valid_ci,
+            "k8s/deployment.yaml": broken_k8s_dep,
+        },
+    )
+    strict_res = runner.invoke(app, ["generate", "--path", str(strict_repo), "--yes", "--strict"])
+    assert strict_res.exit_code == 1
+    assert "Traceback" not in strict_res.stdout
+    assert not (strict_repo / ".github" / "workflows" / "ci.yml").exists()
+    assert not (strict_repo / "k8s" / "deployment.yaml").exists()
+
+    # 4. Critical CI workflow failure aborts all writes even without --strict (exit 1)
+    crit_repo = tmp_path / "crit_repo"
+    crit_repo.mkdir()
+    (crit_repo / ".python-version").write_text("3.12\n", encoding="utf-8")
+    monkeypatch.setattr(
+        "heurix.cli.synthesize_all",
+        lambda context, include_k8s=True, include_dependabot=True: {
+            ".github/workflows/ci.yml": broken_ci,
+            "k8s/service.yaml": valid_k8s_svc,
+        },
+    )
+    crit_res = runner.invoke(app, ["generate", "--path", str(crit_repo), "--yes"])
+    assert crit_res.exit_code == 1
+    assert "Traceback" not in crit_res.stdout
+    assert not (crit_repo / ".github" / "workflows" / "ci.yml").exists()
+    assert not (crit_repo / "k8s" / "service.yaml").exists()
+
+
+def test_cli_init_pre_commit_hooks_lifecycle(tmp_path: Path, monkeypatch):
+    import os
+    import stat
+    from heurix.core.hooks import HOOK_END_MARKER, HOOK_START_MARKER
+
+    # 1. Fresh git repo with --hooks creates .heurix.toml + executable pre-commit hook
+    fresh_repo = tmp_path / "fresh_git_repo"
+    (fresh_repo / ".git").mkdir(parents=True)
+    res_fresh = runner.invoke(app, ["init", "--path", str(fresh_repo), "--hooks"])
+    assert res_fresh.exit_code == 0, res_fresh.stdout
+    assert (fresh_repo / ".heurix.toml").exists()
+    hook_path = fresh_repo / ".git" / "hooks" / "pre-commit"
+    assert hook_path.is_file()
+    assert stat.S_IMODE(hook_path.stat().st_mode) == 0o755
+    hook_text = hook_path.read_text(encoding="utf-8")
+    assert HOOK_START_MARKER in hook_text
+    assert HOOK_END_MARKER in hook_text
+    assert "hx check --path ." in hook_text
+
+    # 2. Re-running hx init --hooks on existing .heurix.toml + custom hook preserves both idempotently
+    existing_repo = tmp_path / "existing_repo"
+    (existing_repo / ".git" / "hooks").mkdir(parents=True)
+    custom_toml = "# custom user policy\n[engine]\nrunner = 'ubuntu-24.04'\n"
+    (existing_repo / ".heurix.toml").write_text(custom_toml, encoding="utf-8")
+    existing_hook = existing_repo / ".git" / "hooks" / "pre-commit"
+    existing_hook.write_text(
+        "#!/usr/bin/env sh\n"
+        "echo 'user-before'\n\n"
+        f"{HOOK_START_MARKER}\n"
+        "echo 'stale-block'\n"
+        f"{HOOK_END_MARKER}\n\n"
+        "echo 'user-after'\n",
+        encoding="utf-8",
+    )
+    existing_hook.chmod(0o644)
+
+    res_existing = runner.invoke(app, ["init", "--path", str(existing_repo), "--hooks"])
+    assert res_existing.exit_code == 0, res_existing.stdout
+    assert ".heurix.toml already exists." in res_existing.stdout
+    assert (existing_repo / ".heurix.toml").read_text(encoding="utf-8") == custom_toml
+    assert stat.S_IMODE(existing_hook.stat().st_mode) == 0o755
+    updated_hook_text = existing_hook.read_text(encoding="utf-8")
+    assert "echo 'user-before'" in updated_hook_text
+    assert "echo 'user-after'" in updated_hook_text
+    assert "stale-block" not in updated_hook_text
+    assert HOOK_START_MARKER in updated_hook_text
+
+    res_repeat = runner.invoke(app, ["init", "--path", str(existing_repo), "--hooks"])
+    assert res_repeat.exit_code == 0, res_repeat.stdout
+    assert existing_hook.read_text(encoding="utf-8") == updated_hook_text
+
+    # 3. --no-hooks skips hook installation and prompt
+    no_hooks_repo = tmp_path / "no_hooks_repo"
+    (no_hooks_repo / ".git").mkdir(parents=True)
+    monkeypatch.setattr(
+        "heurix.cli.prompt_install_hooks",
+        lambda **kw: (_ for _ in ()).throw(AssertionError("prompt_install_hooks must not run with --no-hooks")),
+    )
+    res_no_hooks = runner.invoke(app, ["init", "--path", str(no_hooks_repo), "--no-hooks"])
+    assert res_no_hooks.exit_code == 0, res_no_hooks.stdout
+    assert (no_hooks_repo / ".heurix.toml").exists()
+    assert not (no_hooks_repo / ".git" / "hooks" / "pre-commit").exists()
+
+    # 4. Interactive confirmation via monkeypatched prompt_install_hooks vs --yes / --non-interactive
+    prompt_repo = tmp_path / "prompt_repo"
+    (prompt_repo / ".git").mkdir(parents=True)
+    monkeypatch.setattr("heurix.cli.prompt_install_hooks", lambda non_interactive=False: True)
+    res_prompt = runner.invoke(app, ["init", "--path", str(prompt_repo)])
+    assert res_prompt.exit_code == 0, res_prompt.stdout
+    assert (prompt_repo / ".git" / "hooks" / "pre-commit").is_file()
+
+    headless_repo = tmp_path / "headless_init_repo"
+    (headless_repo / ".git").mkdir(parents=True)
+    monkeypatch.setattr(
+        "heurix.cli.prompt_install_hooks",
+        lambda **kw: (_ for _ in ()).throw(AssertionError("prompt_install_hooks must not run with --non-interactive")),
+    )
+    res_headless = runner.invoke(app, ["init", "--path", str(headless_repo), "--non-interactive"])
+    assert res_headless.exit_code == 0, res_headless.stdout
+    assert not (headless_repo / ".git" / "hooks" / "pre-commit").exists()
+
+    # 5. --hooks without .git warns cleanly without crashing
+    no_git_repo = tmp_path / "no_git_repo"
+    no_git_repo.mkdir()
+    res_no_git = runner.invoke(app, ["init", "--path", str(no_git_repo), "--hooks"])
+    assert res_no_git.exit_code == 0, res_no_git.stdout
+    assert "No .git directory" in " ".join(res_no_git.stdout.split())
+    assert "Traceback" not in res_no_git.stdout
+
+    # 6. SEC-01 symlinked .git/hooks traversal blocked with exit 1 and no traceback
+    outside_dir = tmp_path / "outside_hooks"
+    outside_dir.mkdir()
+    escape_repo = tmp_path / "escape_hooks_repo"
+    (escape_repo / ".git").mkdir(parents=True)
+    (escape_repo / ".git" / "hooks").symlink_to(outside_dir)
+
+    res_escape = runner.invoke(app, ["init", "--path", str(escape_repo), "--hooks"])
+    assert res_escape.exit_code == 1
+    assert "Traceback" not in res_escape.stdout
+    assert "Path traversal security violation" in " ".join(res_escape.stdout.split())
+    assert not (outside_dir / "pre-commit").exists()
+
+    # 7. Read-only .git/hooks / PermissionError handled cleanly without traceback
+    ro_repo = tmp_path / "ro_hooks_repo"
+    ro_hooks_dir = ro_repo / ".git" / "hooks"
+    ro_hooks_dir.mkdir(parents=True)
+    if os.geteuid() != 0:
+        ro_hooks_dir.chmod(0o555)
+        try:
+            res_ro = runner.invoke(app, ["init", "--path", str(ro_repo), "--hooks"])
+            assert res_ro.exit_code == 1
+            assert "Traceback" not in res_ro.stdout
+            assert "Pre-Commit Hook Error" in " ".join(res_ro.stdout.split())
+        finally:
+            ro_hooks_dir.chmod(0o755)
+
+    # Deterministic OSError simulation via monkeypatched install_pre_commit_hook / write_text
+    ro_perm_repo = tmp_path / "ro_perm_repo"
+    (ro_perm_repo / ".git" / "hooks").mkdir(parents=True)
+    orig_write_text = Path.write_text
+
+    def _deny_hook_write(self: Path, data: str, *args, **kwargs):
+        if self.name == "pre-commit":
+            raise PermissionError("Permission denied: read-only .git/hooks")
+        return orig_write_text(self, data, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", _deny_hook_write)
+    res_perm_explicit = runner.invoke(app, ["init", "--path", str(ro_perm_repo), "--hooks"])
+    assert res_perm_explicit.exit_code == 1
+    assert "Traceback" not in res_perm_explicit.stdout
+    assert "Permission denied" in " ".join(res_perm_explicit.stdout.split())
+
+    # Optional interactive confirmation failure warns cleanly without traceback
+    monkeypatch.setattr("heurix.cli.prompt_install_hooks", lambda non_interactive=False: True)
+    res_perm_opt = runner.invoke(app, ["init", "--path", str(ro_perm_repo)])
+    assert res_perm_opt.exit_code == 0, res_perm_opt.stdout
+    assert "Traceback" not in res_perm_opt.stdout
+    assert "Pre-Commit Hook Warning" in " ".join(res_perm_opt.stdout.split())
+

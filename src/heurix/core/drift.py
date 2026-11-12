@@ -19,10 +19,21 @@ from heurix.core.policy import HeurixPolicy, StepPolicy, normalize_service_name
 _MATRIX_REF_RE = re.compile(r"\bmatrix\.([A-Za-z0-9_-]+)\b")
 _ENV_REF_RE = re.compile(r"\benv\.([A-Za-z0-9_-]+)\b")
 _ENV_ASSIGN_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+_E2E_JOB_SUFFIX_RE = re.compile(r"-e2e-\d+$")
 
 _SHELL_WRAPPERS = frozenset({"sudo", "env", "time", "command", "nohup", "corepack", "npx", "bunx"})
 _SHELL_KEYWORDS = frozenset({"then", "do", "else", "elif", "!"})
 _KNOWN_PM_COMMANDS = frozenset({"uv", "pnpm", "poetry", "bun", "yarn", "npm", "pip"})
+
+
+def _is_e2e_job_id(job_id: str) -> bool:
+    """Return True for parallel E2E job IDs ('test-e2e', 'test-e2e-*', '*-e2e', '*-e2e-<N>')."""
+    return (
+        job_id == "test-e2e"
+        or job_id.startswith("test-e2e-")
+        or job_id.endswith("-e2e")
+        or bool(_E2E_JOB_SUFFIX_RE.search(job_id))
+    )
 
 # action_name -> (language, version_with_keys, requires_pinned_version)
 SETUP_ACTION_SPECS: Dict[str, Tuple[str, Tuple[str, ...], bool]] = {
@@ -731,7 +742,7 @@ class DriftDetector:
                         )
                     )
 
-            # 2. Check OS matrix targets when multi-OS matrix is configured and unoverridden test jobs exist
+            # 2. Check OS matrix targets when multi-OS matrix is configured and unoverridden test/E2E jobs exist
             dedup_os = [
                 o
                 for o in dict.fromkeys(_normalize_version(item) for item in getattr(context, "matrix_os", []))
@@ -739,26 +750,39 @@ class DriftDetector:
             ]
             test_job_ids = [
                 jid for jid in ast_info.job_runs_on
-                if jid == "test" or jid.startswith("test-")
+                if jid == "test" or jid.startswith("test-") or _is_e2e_job_id(jid)
             ]
-            if test_job_ids:
-                has_unoverridden_test_job = any(jid not in runner_overrides for jid in test_job_ids)
-            else:
-                has_unoverridden_test_job = (
+            unoverridden_test_jobs = [jid for jid in test_job_ids if jid not in runner_overrides]
+            if len(dedup_os) > 1:
+                if test_job_ids:
+                    if unoverridden_test_jobs:
+                        for os_name in dedup_os:
+                            if not all(
+                                os_name in ast_info.job_runs_on.get(jid, set())
+                                for jid in unoverridden_test_jobs
+                            ):
+                                findings.append(
+                                    DriftFinding(
+                                        file_path=rel_path,
+                                        issue=f"OS matrix mismatch: codebase requires runner '{os_name}', not found in workflow runs-on targets.",
+                                        severity="WARNING",
+                                        recommendation="Run 'hx generate' to update workflow OS build matrix.",
+                                    )
+                                )
+                elif (
                     not ast_info.job_runs_on
                     or any(jid not in runner_overrides for jid in ast_info.job_runs_on)
-                )
-            if len(dedup_os) > 1 and has_unoverridden_test_job:
-                for os_name in dedup_os:
-                    if os_name not in ast_info.runs_on_oses:
-                        findings.append(
-                            DriftFinding(
-                                file_path=rel_path,
-                                issue=f"OS matrix mismatch: codebase requires runner '{os_name}', not found in workflow runs-on targets.",
-                                severity="WARNING",
-                                recommendation="Run 'hx generate' to update workflow OS build matrix.",
+                ):
+                    for os_name in dedup_os:
+                        if os_name not in ast_info.runs_on_oses:
+                            findings.append(
+                                DriftFinding(
+                                    file_path=rel_path,
+                                    issue=f"OS matrix mismatch: codebase requires runner '{os_name}', not found in workflow runs-on targets.",
+                                    severity="WARNING",
+                                    recommendation="Run 'hx generate' to update workflow OS build matrix.",
+                                )
                             )
-                        )
 
             # 2b. Check explicit per-job runner overrides ([ci.runners] and [jobs.<id>].runner)
             for job_id, expected_runner in runner_overrides.items():
@@ -780,7 +804,10 @@ class DriftDetector:
             # 2c. Check policy-injected workflow steps (pre_test, post_test, pre_steps, post_steps)
             for job_id, actual_steps in ast_info.job_steps.items():
                 job_policy = policy.jobs.get(job_id)
-                if job_id == "test" or job_id.startswith("test-"):
+                is_unit_test_job = job_id == "test" or (
+                    job_id.startswith("test-") and not _is_e2e_job_id(job_id)
+                )
+                if is_unit_test_job:
                     expected_steps: List[StepPolicy] = [
                         *policy.ci.steps.pre_test,
                         *policy.ci.steps.post_test,

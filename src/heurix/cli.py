@@ -10,19 +10,34 @@ from pathlib import Path
 from typing import Optional
 import typer
 from rich.console import Console
+from rich.markup import escape
 from rich.panel import Panel
 
 from heurix import __version__
 from heurix.core.context import ProjectContext
 from heurix.core.drift import DriftDetector
+from heurix.core.hooks import install_pre_commit_hook
 from heurix.core.merger import SmartMerger, YamlSyntaxError
 from heurix.core.policy import HeurixPolicy
 from heurix.core.validator import PreflightValidator
 from heurix.detectors import analyze_repository
 from heurix.synthesizers import synthesize_all
-from heurix.ui.console import print_banner, print_explain_tree, print_summary_table
-from heurix.ui.differ import show_diff
-from heurix.ui.prompts import prompt_conflict_resolution
+from heurix.ui.console import (
+    print_banner,
+    print_explain_tree,
+    print_summary_table,
+    print_validation_warnings,
+)
+from heurix.ui.differ import resolve_diff_style, show_diff
+from heurix.ui.prompts import (
+    prompt_backing_services,
+    prompt_conflict_resolution,
+    prompt_deployment_targets,
+    prompt_e2e_split,
+    prompt_install_hooks,
+    prompt_k8s_generation,
+    resolve_context_ambiguities,
+)
 
 app = typer.Typer(
     name="hx",
@@ -92,40 +107,33 @@ def version_callback(value: bool):
         raise typer.Exit()
 
 
-@app.callback(invoke_without_command=True)
-def main(
-    ctx: typer.Context,
-    version: Optional[bool] = typer.Option(
-        None, "--version", "-v", callback=version_callback, is_eager=True, help="Show version."
-    ),
-):
-    """
-    Heurix CLI (alias: hx). Run 'hx generate' to scan and synthesize YAML configs.
-    """
-    if ctx.invoked_subcommand is None:
-        # Default behavior when running 'hx' without subcommand
-        generate(
-            path=".",
-            explain=True,
-            dry_run=False,
-            diff=False,
-            yes=False,
-            k8s=True,
+def _run_generate(
+    *,
+    path: str = ".",
+    explain: bool = True,
+    dry_run: bool = False,
+    diff: bool = False,
+    yes: bool = False,
+    non_interactive: bool = False,
+    k8s: bool = True,
+    side_by_side: bool = False,
+    diff_style: str = "unified",
+    strict: bool = False,
+) -> None:
+    """Core generate/diff workflow using pure Python arguments (safe from Typer OptionInfo)."""
+    effective_diff_style = ("side-by-side" if side_by_side else (diff_style or "unified")).strip().lower()
+    try:
+        resolve_diff_style(effective_diff_style)
+    except ValueError as e:
+        console.print(
+            Panel.fit(
+                f"[bold red]Invalid Diff Style:[/bold red] {escape(str(e))}",
+                title="Invalid Argument",
+                border_style="red",
+            )
         )
+        raise typer.Exit(code=1)
 
-
-@app.command()
-def generate(
-    path: str = typer.Option(".", "--path", "-p", help="Root directory of the repository to scan."),
-    explain: bool = typer.Option(True, "--explain/--no-explain", help="Show step-by-step heuristic reasoning log."),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Preview synthesized files without writing to disk."),
-    diff: bool = typer.Option(False, "--diff", "-d", help="Show terminal diff of proposed changes."),
-    yes: bool = typer.Option(False, "--yes", "-y", help="Non-interactive mode (auto-apply without prompts)."),
-    k8s: bool = typer.Option(True, "--k8s/--no-k8s", help="Synthesize Kubernetes manifests if containerized."),
-):
-    """
-    Scan codebase and synthesize deterministic CI/CD and infrastructure YAML files.
-    """
     print_banner()
 
     repo_path = Path(path).resolve()
@@ -141,11 +149,26 @@ def generate(
     if explain:
         print_explain_tree(context)
 
-    # 3. Synthesize YAML outputs
+    # 3. Resolve policy and interactive ambiguities
     policy = HeurixPolicy.from_raw(context.policy_config)
     include_dependabot = policy.ci.include_dependabot
     include_k8s = (policy.ci.include_k8s if policy.ci.include_k8s is not None else k8s) if k8s else False
+    headless = yes or non_interactive
 
+    if not headless:
+        context, include_k8s = resolve_context_ambiguities(
+            context,
+            include_k8s=include_k8s,
+            k8s_policy_explicit=(not k8s or policy.ci.include_k8s is not None),
+            services_policy_explicit=bool(policy.services.exclude),
+            non_interactive=headless,
+            e2e_prompt=prompt_e2e_split,
+            targets_prompt=prompt_deployment_targets,
+            services_prompt=prompt_backing_services,
+            k8s_prompt=prompt_k8s_generation,
+        )
+
+    # 4. Synthesize YAML outputs
     synthesized = _synthesize_or_exit(
         context,
         include_k8s=include_k8s,
@@ -159,22 +182,34 @@ def generate(
     for rel_path in synthesized:
         _resolve_or_exit(repo_path, rel_path)
 
-    # 4. Pre-Flight Validation
+    # 5. Granular Pre-Flight Validation
     validator = PreflightValidator()
-    all_valid = True
-    for rel_path, content in synthesized.items():
-        is_valid, errors = validator.validate(rel_path, content)
-        if not is_valid:
-            all_valid = False
-            console.print(f"[bold red]Validation failed for '{rel_path}':[/bold red]")
-            for err in errors:
-                console.print(f"  [red]✖ {err}[/red]")
+    outcome = validator.validate_batch(synthesized, strict=strict)
 
-    if not all_valid:
+    if outcome.has_critical_errors:
+        for rel_path, errors in outcome.critical_errors.items():
+            console.print(f"[bold red]Validation failed for '{escape(rel_path)}':[/bold red]")
+            for err in errors:
+                console.print(f"  [red]✖ {escape(err)}[/red]")
         console.print("[bold red]Pre-flight validation failed. Aborting write to protect repository.[/bold red]")
         raise typer.Exit(code=1)
 
-    # 5. Diff preview or smart merge
+    if outcome.has_warnings:
+        print_validation_warnings(outcome.optional_warnings)
+        synthesized = dict(outcome.valid_files)
+        if not synthesized:
+            console.print(
+                "[yellow]No valid configurations remain after excluding optional manifests with warnings.[/yellow]"
+            )
+            return
+
+    def _render_diff(rel_path: str, old_text: str, new_text: str) -> None:
+        if effective_diff_style == "unified":
+            show_diff(rel_path, old_text, new_text)
+        else:
+            show_diff(rel_path, old_text, new_text, style=effective_diff_style)
+
+    # 6. Diff preview or smart merge
     merger = SmartMerger()
     files_to_write: dict[str, str] = {}
     non_destructive = policy.engine.non_destructive
@@ -201,13 +236,13 @@ def generate(
                 raise typer.Exit(code=1)
 
             if diff:
-                show_diff(rel_path, existing_content, merged_content)
+                _render_diff(rel_path, existing_content, merged_content)
 
-            if not dry_run and not yes:
+            if not dry_run and not headless:
                 while True:
-                    choice = prompt_conflict_resolution(rel_path, non_interactive=yes)
+                    choice = prompt_conflict_resolution(rel_path, non_interactive=headless)
                     if choice == "diff":
-                        show_diff(rel_path, existing_content, merged_content)
+                        _render_diff(rel_path, existing_content, merged_content)
                         continue
                     break
 
@@ -222,13 +257,13 @@ def generate(
             files_to_write[rel_path] = merged_content
         else:
             if diff:
-                show_diff(rel_path, "", new_content)
+                _render_diff(rel_path, "", new_content)
             files_to_write[rel_path] = new_content
 
-    # 6. Summary Table
+    # 7. Summary Table
     print_summary_table(files_to_write, dry_run=dry_run)
 
-    # 7. Write to disk if not dry_run
+    # 8. Write to disk if not dry_run
     if dry_run:
         console.print("\n[yellow]Dry run completed. No files were written to disk.[/yellow]")
         return
@@ -248,15 +283,92 @@ def generate(
     )
 
 
+@app.callback(invoke_without_command=True)
+def main(
+    ctx: typer.Context,
+    version: Optional[bool] = typer.Option(
+        None, "--version", "-v", callback=version_callback, is_eager=True, help="Show version."
+    ),
+):
+    """
+    Heurix CLI (alias: hx). Run 'hx generate' to scan and synthesize YAML configs.
+    """
+    if ctx.invoked_subcommand is None:
+        # Default behavior when running 'hx' without subcommand
+        _run_generate(
+            path=".",
+            explain=True,
+            dry_run=False,
+            diff=False,
+            yes=False,
+            non_interactive=False,
+            k8s=True,
+            side_by_side=False,
+            diff_style="unified",
+            strict=False,
+        )
+
+
+@app.command()
+def generate(
+    path: str = typer.Option(".", "--path", "-p", help="Root directory of the repository to scan."),
+    explain: bool = typer.Option(True, "--explain/--no-explain", help="Show step-by-step heuristic reasoning log."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Preview synthesized files without writing to disk."),
+    diff: bool = typer.Option(False, "--diff", "-d", help="Show terminal diff of proposed changes."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Non-interactive mode (auto-apply without prompts)."),
+    non_interactive: bool = typer.Option(
+        False, "--non-interactive", help="Disable interactive prompts and use deterministic defaults."
+    ),
+    k8s: bool = typer.Option(True, "--k8s/--no-k8s", help="Synthesize Kubernetes manifests if containerized."),
+    side_by_side: bool = typer.Option(False, "--side-by-side", help="Render side-by-side diff tables."),
+    diff_style: str = typer.Option(
+        "unified", "--diff-style", help="Diff style: unified, side-by-side, or auto."
+    ),
+    strict: bool = typer.Option(
+        False, "--strict", help="Treat optional manifest validation warnings as fatal errors."
+    ),
+):
+    """
+    Scan codebase and synthesize deterministic CI/CD and infrastructure YAML files.
+    """
+    _run_generate(
+        path=path,
+        explain=explain,
+        dry_run=dry_run,
+        diff=diff,
+        yes=yes,
+        non_interactive=non_interactive,
+        k8s=k8s,
+        side_by_side=side_by_side,
+        diff_style=diff_style,
+        strict=strict,
+    )
+
+
 @app.command()
 def diff(
     path: str = typer.Option(".", "--path", "-p", help="Root directory of repository."),
     k8s: bool = typer.Option(True, "--k8s/--no-k8s", help="Include Kubernetes manifests."),
+    side_by_side: bool = typer.Option(False, "--side-by-side", help="Render side-by-side diff tables."),
+    diff_style: str = typer.Option(
+        "unified", "--diff-style", help="Diff style: unified, side-by-side, or auto."
+    ),
 ):
     """
     Compare current repository state with synthesized configs without writing changes.
     """
-    generate(path=path, explain=False, dry_run=True, diff=True, yes=True, k8s=k8s)
+    _run_generate(
+        path=path,
+        explain=False,
+        dry_run=True,
+        diff=True,
+        yes=True,
+        non_interactive=True,
+        k8s=k8s,
+        side_by_side=side_by_side,
+        diff_style=diff_style,
+        strict=False,
+    )
 
 
 @app.command()
@@ -309,6 +421,22 @@ def scan(
 @app.command()
 def init(
     path: str = typer.Option(".", "--path", "-p", help="Root directory of repository."),
+    hooks: Optional[bool] = typer.Option(
+        None,
+        "--hooks/--no-hooks",
+        help="Install an idempotent Git pre-commit hook running 'hx check'.",
+    ),
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        "-y",
+        help="Non-interactive mode (accept defaults without prompting).",
+    ),
+    non_interactive: bool = typer.Option(
+        False,
+        "--non-interactive",
+        help="Disable interactive prompts.",
+    ),
 ):
     """
     Initialize a minimal .heurix.toml policy configuration for power users.
@@ -317,9 +445,8 @@ def init(
     config_file = _resolve_or_exit(repo_path, ".heurix.toml")
     if config_file.exists():
         console.print("[yellow].heurix.toml already exists.[/yellow]")
-        return
-
-    content = """# Heurix Configuration Policy (.heurix.toml)
+    else:
+        content = """# Heurix Configuration Policy (.heurix.toml)
 # Deterministic CI/CD, Dependabot, and Kubernetes policy configuration.
 
 [engine]
@@ -419,8 +546,61 @@ include_k8s = true
 # max_replicas = 10
 # target_cpu_utilization = 80
 """
-    config_file.write_text(content, encoding="utf-8")
-    console.print("[bold green]✔ Initialized .heurix.toml policy file.[/bold green]")
+        config_file.write_text(content, encoding="utf-8")
+        console.print("[bold green]✔ Initialized .heurix.toml policy file.[/bold green]")
+
+    headless = yes or non_interactive
+    install_hooks = False
+    if hooks is False:
+        install_hooks = False
+    elif hooks is True:
+        install_hooks = True
+    else:
+        raw_git = repo_path / ".git"
+        if raw_git.exists() or raw_git.is_symlink():
+            git_entry = _resolve_or_exit(repo_path, ".git")
+            if git_entry.is_dir() and not headless:
+                install_hooks = bool(prompt_install_hooks(non_interactive=False))
+
+    if install_hooks:
+        try:
+            hook_result = install_pre_commit_hook(repo_path, resolve_safe_path)
+        except ValueError as e:
+            console.print(
+                Panel.fit(
+                    f"[bold red]Security Error:[/bold red] {e}",
+                    title="Path Traversal Blocked",
+                    border_style="red",
+                )
+            )
+            raise typer.Exit(code=1)
+
+        if hook_result.status == "created":
+            console.print(
+                f"[bold green]✔ Installed pre-commit hook:[/bold green] [cyan]{escape(str(hook_result.hook_path))}[/cyan]"
+            )
+        elif hook_result.status == "updated":
+            console.print(
+                f"[bold green]✔ Updated pre-commit hook:[/bold green] [cyan]{escape(str(hook_result.hook_path))}[/cyan]"
+            )
+        elif hook_result.status == "unchanged":
+            console.print(
+                f"[green]✔ Pre-commit hook already up to date:[/green] [cyan]{escape(str(hook_result.hook_path))}[/cyan]"
+            )
+        elif hook_result.status == "skipped_no_git":
+            console.print(f"[yellow]⚠ {escape(hook_result.message)}[/yellow]")
+        elif hook_result.status == "error":
+            border = "red" if hooks is True else "yellow"
+            title = "Pre-Commit Hook Error" if hooks is True else "Pre-Commit Hook Warning"
+            console.print(
+                Panel.fit(
+                    f"[bold {border}]{title}:[/bold {border}] {escape(hook_result.message)}",
+                    title=title,
+                    border_style=border,
+                )
+            )
+            if hooks is True:
+                raise typer.Exit(code=1)
 
 
 if __name__ == "__main__":

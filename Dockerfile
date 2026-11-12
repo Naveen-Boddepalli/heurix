@@ -13,7 +13,7 @@ COPY pyproject.toml README.md ./
 COPY src ./src
 
 # Build wheel package
-RUN pip wheel --no-deps --no-cache-dir -w /app/dist .
+RUN pip wheel --no-deps --no-build-isolation --no-cache-dir -w /app/dist .
 
 # ==============================================================================
 # Production Runtime Stage

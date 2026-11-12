@@ -4,9 +4,11 @@ Rich Terminal Console and Explainability Tree Renderer.
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
+from rich.text import Text
 from rich.tree import Tree
 from heurix.core.context import ProjectContext
 
@@ -66,3 +68,33 @@ def print_summary_table(synthesized_files: dict[str, str], dry_run: bool = False
         table.add_row(path, target, str(lines_count), action)
 
     console.print(table)
+
+
+def print_validation_warnings(warnings_by_file: Mapping[str, Sequence[str]]) -> None:
+    """
+    Render a yellow Rich warning Panel listing excluded optional manifests and errors.
+    """
+    if not warnings_by_file:
+        return
+
+    body = Text()
+    for idx, (rel_path, errors) in enumerate(warnings_by_file.items()):
+        if idx > 0:
+            body.append("\n")
+        body.append(f"• {rel_path}\n", style="bold yellow")
+        for err in errors:
+            body.append(f"  ⚠ {err}\n", style="yellow")
+
+    body.append(
+        "\nExcluded failing optional manifest(s). Re-run with --strict to treat optional warnings as fatal.",
+        style="dim",
+    )
+
+    console.print(
+        Panel(
+            body,
+            title="[bold yellow]Optional Manifest Warnings (Excluded)[/bold yellow]",
+            border_style="yellow",
+        )
+    )
+

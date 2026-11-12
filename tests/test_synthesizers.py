@@ -1872,5 +1872,305 @@ def test_dependabot_template_decoupling(tmp_path: Path):
         MaintenanceSynthesizer().synthesize(bad_ctx)
 
 
+def test_e2e_parallel_job_synthesis_and_combined_mode():
+    from ruamel.yaml import YAML
+    from heurix.core.context import MonorepoPackage
+    from heurix.core.validator import PreflightValidator
 
+    yaml = YAML(typ="safe")
+    syn = GitHubActionsSynthesizer()
+    validator = PreflightValidator()
 
+    # 1. Single-root Node (vitest + playwright) splits into parallel test + test-e2e
+    base_ctx = ProjectContext(
+        repo_name="e2e-web",
+        repo_root="/demo",
+        matrix_os=["ubuntu-latest", "macos-latest"],
+        languages=[
+            LanguageContext(
+                language="node",
+                runtime_version="20.x",
+                version_source=".nvmrc",
+                package_manager="npm",
+                install_cmd="npm ci",
+                test_cmd="npm test",
+                unit_test_runner="vitest",
+                e2e_test_runner="playwright",
+                e2e_cmd="npm run test:e2e",
+            )
+        ],
+        deployment_targets=[
+            DeploymentTarget(
+                platform="vercel",
+                config_file="vercel.json",
+                project_id="e2e-web",
+                required_secrets=["VERCEL_TOKEN"],
+            )
+        ],
+        env_vars={
+            "APP_ENV": "ci",
+            "DATABASE_URL": "postgres://blocked",
+            "VERCEL_TOKEN": "leaked-env",
+        },
+        test_secrets=["E2E_API_KEY", "VERCEL_TOKEN"],
+        deployment_secrets=["VERCEL_TOKEN", "FIREBASE_SERVICE_ACCOUNT"],
+        policy_config={
+            "ci": {
+                "runners": {"test-e2e": "ubuntu-24.04"},
+                "steps": {
+                    "pre_test": [{"name": "Unit pre-step", "run": "echo unit-pre"}],
+                },
+            },
+            "jobs": {
+                "test-e2e": {
+                    "pre_steps": [{"name": "E2E pre-step", "run": "echo e2e-pre"}],
+                    "post_steps": [{"name": "E2E post-step", "run": "echo e2e-post"}],
+                }
+            },
+        },
+    )
+
+    split_yaml = syn.synthesize(base_ctx)[".github/workflows/ci.yml"]
+    ok, errs = validator.validate(".github/workflows/ci.yml", split_yaml)
+    assert ok, f"Split E2E validation failed: {errs}"
+    doc = yaml.load(split_yaml)
+    jobs = doc["jobs"]
+
+    assert "test" in jobs
+    assert "test-e2e" in jobs
+    assert jobs["deploy_vercel"]["needs"] == ["test", "test-e2e"]
+
+    e2e_job = jobs["test-e2e"]
+    assert e2e_job["runs-on"] == "ubuntu-24.04"
+    assert "strategy" not in e2e_job
+    setup_node = next(s for s in e2e_job["steps"] if "actions/setup-node" in s.get("uses", ""))
+    assert setup_node["with"]["node-version"] == "20.x"
+
+    e2e_step_names = [s.get("name") for s in e2e_job["steps"]]
+    assert "Unit pre-step" not in e2e_step_names
+    assert e2e_step_names == [
+        "Checkout repository",
+        "Set up Node.js 20.x",
+        "Install dependencies",
+        "E2E pre-step",
+        "Install Playwright browsers",
+        "Run E2E tests (playwright)",
+        "E2E post-step",
+    ]
+    pw_step = next(s for s in e2e_job["steps"] if s.get("name") == "Install Playwright browsers")
+    assert pw_step["run"] == "npx playwright install --with-deps"
+
+    e2e_run_step = next(s for s in e2e_job["steps"] if s.get("name") == "Run E2E tests (playwright)")
+    assert e2e_run_step["run"] == "npm run test:e2e"
+    assert e2e_run_step["env"] == {
+        "APP_ENV": "ci",
+        "E2E_API_KEY": "${{ secrets.E2E_API_KEY }}",
+    }
+    for forbidden in ("DATABASE_URL", "VERCEL_TOKEN", "FIREBASE_SERVICE_ACCOUNT"):
+        assert forbidden not in str(e2e_job)
+
+    # Without runner override, test-e2e inherits matrix_os
+    matrix_ctx = base_ctx.model_copy(update={"policy_config": {}, "split_e2e_jobs": True})
+    matrix_doc = yaml.load(syn.synthesize(matrix_ctx)[".github/workflows/ci.yml"])
+    assert matrix_doc["jobs"]["test-e2e"]["runs-on"] == "${{ matrix.os }}"
+    assert matrix_doc["jobs"]["test-e2e"]["strategy"] == {
+        "fail-fast": False,
+        "matrix": {"os": ["ubuntu-latest", "macos-latest"]},
+    }
+
+    # 2. Combined mode (split_e2e_jobs=False) runs E2E inside test without test-e2e job
+    combined_ctx = base_ctx.model_copy(update={"split_e2e_jobs": False})
+    combined_yaml = syn.synthesize(combined_ctx)[".github/workflows/ci.yml"]
+    ok_comb, errs_comb = validator.validate(".github/workflows/ci.yml", combined_yaml)
+    assert ok_comb, f"Combined E2E validation failed: {errs_comb}"
+    comb_doc = yaml.load(combined_yaml)
+    assert "test-e2e" not in comb_doc["jobs"]
+    assert comb_doc["jobs"]["deploy_vercel"]["needs"] == "test"
+
+    comb_steps = comb_doc["jobs"]["test"]["steps"]
+    comb_names = [s.get("name") for s in comb_steps]
+    assert "Install Playwright browsers" in comb_names
+    assert "Run E2E tests (playwright)" in comb_names
+    assert comb_names.index("Run tests (node)") < comb_names.index("Install Playwright browsers")
+    assert comb_names.index("Install Playwright browsers") < comb_names.index("Run E2E tests (playwright)")
+    comb_e2e_step = next(s for s in comb_steps if s.get("name") == "Run E2E tests (playwright)")
+    assert comb_e2e_step["run"] == "npm run test:e2e"
+    assert comb_e2e_step["env"] == {
+        "APP_ENV": "ci",
+        "E2E_API_KEY": "${{ secrets.E2E_API_KEY }}",
+    }
+
+    # Same test_cmd and e2e_cmd in combined mode must not emit duplicate E2E run step
+    same_cmd_ctx = ProjectContext(
+        repo_name="same-cmd",
+        repo_root="/demo",
+        split_e2e_jobs=False,
+        languages=[
+            LanguageContext(
+                language="node",
+                runtime_version="20.x",
+                version_source=".nvmrc",
+                package_manager="npm",
+                install_cmd="npm ci",
+                test_cmd="npx playwright test",
+                unit_test_runner="vitest",
+                e2e_test_runner="playwright",
+                e2e_cmd="npx playwright test",
+            )
+        ],
+    )
+    same_doc = yaml.load(syn.synthesize(same_cmd_ctx)[".github/workflows/ci.yml"])
+    assert not any(
+        s.get("name") == "Run E2E tests (playwright)"
+        for s in same_doc["jobs"]["test"]["steps"]
+    )
+
+    # 3. Multi-E2E polyglot monorepo + cross-unit coexistence + pm-specific Playwright install cmds
+    mono_ctx = ProjectContext(
+        repo_name="poly-e2e",
+        repo_root="/mono",
+        is_monorepo=True,
+        monorepo_packages=[
+            MonorepoPackage(
+                name="apps/web",
+                path="apps/web",
+                language="node",
+                package_manager="pnpm",
+                runtime_version="20.x",
+                install_cmd="pnpm i --frozen-lockfile",
+                test_cmd="pnpm test",
+                unit_test_runner="vitest",
+                e2e_test_runner="playwright",
+                e2e_cmd="pnpm run test:e2e",
+            ),
+            MonorepoPackage(
+                name="apps/admin",
+                path="apps/admin",
+                language="node",
+                package_manager="yarn",
+                runtime_version="20.x",
+                install_cmd="yarn install --frozen-lockfile",
+                test_cmd="yarn test",
+                unit_test_runner="jest",
+                e2e_test_runner="cypress",
+                e2e_cmd="yarn cypress run",
+            ),
+            MonorepoPackage(
+                name="services/api",
+                path="services/api",
+                language="python",
+                package_manager="uv",
+                runtime_version="3.12",
+                install_cmd="uv sync --frozen",
+                test_cmd="uv run pytest",
+                unit_test_runner="pytest",
+                e2e_test_runner="playwright",
+                e2e_cmd="uv run pytest tests/e2e",
+            ),
+        ],
+        deployment_targets=[
+            DeploymentTarget(
+                platform="vercel",
+                config_file="vercel.json",
+                project_id="poly-e2e",
+                required_secrets=["VERCEL_TOKEN"],
+            )
+        ],
+    )
+    mono_yaml = syn.synthesize(mono_ctx)[".github/workflows/ci.yml"]
+    ok_mono, errs_mono = validator.validate(".github/workflows/ci.yml", mono_yaml)
+    assert ok_mono, f"Mono E2E validation failed: {errs_mono}"
+    mono_doc = yaml.load(mono_yaml)
+    assert set(mono_doc["jobs"].keys()) == {
+        "test-apps-admin",
+        "test-apps-web",
+        "test-services-api",
+        "test-e2e",
+        "test-e2e-2",
+        "test-e2e-3",
+        "deploy_vercel",
+    }
+    assert mono_doc["jobs"]["deploy_vercel"]["needs"] == [
+        "test-apps-admin",
+        "test-apps-web",
+        "test-services-api",
+        "test-e2e",
+        "test-e2e-2",
+        "test-e2e-3",
+    ]
+    # apps/admin uses cypress -> no Playwright install step
+    assert mono_doc["jobs"]["test-e2e"]["defaults"]["run"]["working-directory"] == "apps/admin"
+    assert not any(
+        "playwright install" in s.get("run", "")
+        for s in mono_doc["jobs"]["test-e2e"]["steps"]
+    )
+    # apps/web uses pnpm -> pnpm exec playwright install --with-deps
+    assert mono_doc["jobs"]["test-e2e-2"]["defaults"]["run"]["working-directory"] == "apps/web"
+    assert any(
+        s.get("run") == "pnpm exec playwright install --with-deps"
+        for s in mono_doc["jobs"]["test-e2e-2"]["steps"]
+    )
+    # services/api uses uv -> uv run playwright install --with-deps
+    assert mono_doc["jobs"]["test-e2e-3"]["defaults"]["run"]["working-directory"] == "services/api"
+    assert any(
+        s.get("run") == "uv run playwright install --with-deps"
+        for s in mono_doc["jobs"]["test-e2e-3"]["steps"]
+    )
+
+    # Cross-unit unit+E2E coexistence (Python pytest unit + Node bun playwright E2E)
+    cross_ctx = ProjectContext(
+        repo_name="cross-e2e",
+        repo_root="/mono",
+        is_monorepo=True,
+        monorepo_packages=[
+            MonorepoPackage(
+                name="services/api",
+                path="services/api",
+                language="python",
+                package_manager="pip",
+                runtime_version="3.12",
+                install_cmd="pip install -r requirements.txt",
+                test_cmd="pytest",
+                unit_test_runner="pytest",
+            ),
+            MonorepoPackage(
+                name="apps/e2e",
+                path="apps/e2e",
+                language="node",
+                package_manager="bun",
+                runtime_version="20.x",
+                install_cmd="bun install --frozen-lockfile",
+                e2e_test_runner="playwright",
+                e2e_cmd="bunx playwright test",
+            ),
+        ],
+    )
+    cross_doc = yaml.load(syn.synthesize(cross_ctx)[".github/workflows/ci.yml"])
+    assert "test-e2e" in cross_doc["jobs"]
+    assert any(
+        s.get("run") == "bunx playwright install --with-deps"
+        for s in cross_doc["jobs"]["test-e2e"]["steps"]
+    )
+
+    # 4. Baseline parity when no e2e_test_runner exists
+    plain_ctx = ProjectContext(
+        repo_name="plain-py",
+        repo_root="/demo",
+        languages=[
+            LanguageContext(
+                language="python",
+                runtime_version="3.12",
+                version_source=".python-version",
+                package_manager="pip",
+                install_cmd="pip install -r requirements.txt",
+                test_cmd="pytest",
+                unit_test_runner="pytest",
+            )
+        ],
+    )
+    plain_default = syn.synthesize(plain_ctx)[".github/workflows/ci.yml"]
+    plain_false = syn.synthesize(plain_ctx.model_copy(update={"split_e2e_jobs": False}))[
+        ".github/workflows/ci.yml"
+    ]
+    assert plain_default == plain_false
+    assert "test-e2e" not in plain_default

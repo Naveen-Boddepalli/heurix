@@ -27,6 +27,9 @@ class LanguageContext(BaseModel):
     build_cmd: Optional[str] = None
     test_cmd: Optional[str] = None
     lint_cmd: Optional[str] = None
+    unit_test_runner: Optional[str] = None
+    e2e_test_runner: Optional[str] = None
+    e2e_cmd: Optional[str] = None
     working_dir: str = "."
     framework: Optional[str] = None
     confidence: float = 1.0
@@ -64,6 +67,9 @@ class MonorepoPackage(BaseModel):
     build_cmd: Optional[str] = None
     test_cmd: Optional[str] = None
     lint_cmd: Optional[str] = None
+    unit_test_runner: Optional[str] = None
+    e2e_test_runner: Optional[str] = None
+    e2e_cmd: Optional[str] = None
     framework: Optional[str] = None
     cache_dependency_path: Optional[str] = None
     matrix_versions: List[str] = Field(default_factory=list)
@@ -87,6 +93,7 @@ class ProjectContext(BaseModel):
     confidence: float = 1.0
     runner: str = "ubuntu-latest"
     matrix_os: List[str] = Field(default_factory=list)
+    split_e2e_jobs: Optional[bool] = None
     policy_config: Dict[str, Any] = Field(default_factory=dict)
 
     def sync_required_secrets(self) -> None:

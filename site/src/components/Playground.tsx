@@ -30,7 +30,9 @@ export function Playground() {
   );
   const [activeTab, setActiveTab] = useState<OutputTab>('generate');
   const [selectedOutputFile, setSelectedOutputFile] = useState<string>('.github/workflows/ci.yml');
-  const [driftMode, setDriftMode] = useState<'clean' | 'stale-ci'>('stale-ci');
+  const [simulatedCi, setSimulatedCi] = useState<string | null>(null);
+  const [driftNotice, setDriftNotice] = useState<string | null>(null);
+  const [showWorkflowYaml, setShowWorkflowYaml] = useState(false);
 
   // Add File state
   const [isAddingFile, setIsAddingFile] = useState(false);
@@ -46,6 +48,8 @@ export function Playground() {
     setSelectedFilePath(next.files[0]?.path ?? '');
     setSelectedOutputFile('.github/workflows/ci.yml');
     setIsAddingFile(false);
+    setSimulatedCi(null);
+    setDriftNotice(null);
   }
 
   function toggleFile(path: string) {
@@ -151,17 +155,148 @@ export function Playground() {
   );
 
   const staleBaselineCi = useMemo(() => {
-    // Construct a baseline workflow that intentionally misses services or uses an older version
-    return `name: CI\non:\n  push:\n    branches: [main]\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - name: Legacy setup\n        run: echo "Outdated workflow"`;
+    return `name: CI\non:\n  push:\n    branches: [main]\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - name: Legacy test\n        run: echo "Outdated workflow missing detected services and runtimes"`;
   }, []);
 
+  const activeCheckedWorkflow = simulatedCi ?? staleBaselineCi;
+
   const driftFindings = useMemo(() => {
-    const targetCi =
-      driftMode === 'clean'
-        ? scanResult.synthesized['.github/workflows/ci.yml'] ?? null
-        : staleBaselineCi;
-    return checkDrift(scanResult.context, targetCi);
-  }, [driftMode, scanResult.context, scanResult.synthesized, staleBaselineCi]);
+    return checkDrift(scanResult.context, activeCheckedWorkflow);
+  }, [scanResult.context, activeCheckedWorkflow]);
+
+  const cliCheckOutput = useMemo(() => {
+    if (driftFindings.length === 0) {
+      return `$ hx check\n✔ Zero Drift Detected: CI/CD workflows are completely synchronized with the codebase!\n\nExit code: 0 (PASS)`;
+    }
+    const lines = [
+      `$ hx check`,
+      `⚠️ Drift Detected (${driftFindings.length} issue(s)):`,
+      '',
+    ];
+    for (const f of driftFindings) {
+      lines.push(`[${f.severity}] ${f.file_path}: ${f.issue}`);
+      lines.push(`  ↳ Recommendation: ${f.recommendation}`);
+      lines.push('');
+    }
+    lines.push(`Error: Process completed with exit code 1.`);
+    return lines.join('\n');
+  }, [driftFindings]);
+
+  function handleInjectRedis() {
+    setFiles((prev) => {
+      if (prev.some((f) => f.path === 'pyproject.toml')) {
+        return prev.map((f) => {
+          if (f.path === 'pyproject.toml' && !f.content.includes('redis')) {
+            const updated = f.content.replace(
+              /dependencies\s*=\s*\[/,
+              'dependencies = [\n    "redis>=5.0.0",'
+            );
+            return { ...f, content: updated, enabled: true };
+          }
+          return f;
+        });
+      }
+      if (prev.some((f) => f.path === 'package.json')) {
+        return prev.map((f) => {
+          if (f.path === 'package.json' && !f.content.includes('redis')) {
+            const updated = f.content.replace(
+              /"dependencies":\s*\{/,
+              '"dependencies": {\n    "redis": "^4.6.0",'
+            );
+            return { ...f, content: updated, enabled: true };
+          }
+          return f;
+        });
+      }
+      const compose = prev.find((f) => f.path === 'docker-compose.yml');
+      if (compose) {
+        if (!compose.content.includes('redis')) {
+          return prev.map((f) =>
+            f.path === 'docker-compose.yml'
+              ? { ...f, content: `${f.content.trimEnd()}\n  redis:\n    image: redis:7-alpine\n    ports:\n      - "6379:6379"\n`, enabled: true }
+              : f
+          );
+        }
+        return prev;
+      }
+      return [
+        ...prev,
+        {
+          path: 'docker-compose.yml',
+          enabled: true,
+          content: 'services:\n  redis:\n    image: redis:7-alpine\n    ports:\n      - "6379:6379"\n',
+        },
+      ];
+    });
+    setDriftNotice('⚡ Injected Redis into codebase dependencies. Workflow is missing Redis service!');
+  }
+
+  function handleBumpRuntime() {
+    setFiles((prev) => {
+      if (prev.some((f) => f.path === '.python-version' || f.path === 'pyproject.toml')) {
+        const hasVersionFile = prev.some((f) => f.path === '.python-version');
+        if (hasVersionFile) {
+          return prev.map((f) => (f.path === '.python-version' ? { ...f, content: '3.13\n', enabled: true } : f));
+        }
+        return [...prev, { path: '.python-version', enabled: true, content: '3.13\n' }];
+      }
+      if (prev.some((f) => f.path === '.nvmrc' || f.path === 'package.json')) {
+        const hasNvm = prev.some((f) => f.path === '.nvmrc');
+        if (hasNvm) {
+          return prev.map((f) => (f.path === '.nvmrc' ? { ...f, content: '22\n', enabled: true } : f));
+        }
+        return [...prev, { path: '.nvmrc', enabled: true, content: '22\n' }];
+      }
+      return [...prev, { path: '.python-version', enabled: true, content: '3.13\n' }];
+    });
+    setDriftNotice('⚡ Bumped runtime version in codebase. Workflow does not match new runtime requirement!');
+  }
+
+  function handleInjectUv() {
+    setFiles((prev) => {
+      if (prev.some((f) => f.path === 'uv.lock')) return prev;
+      return [...prev, { path: 'uv.lock', enabled: true, content: '# uv lockfile v1\nversion = 1\n' }];
+    });
+    setDriftNotice('⚡ Added uv.lock! Heurix detected uv, but workflow does not use setup-uv.');
+  }
+
+  function handleInjectPostgres() {
+    setFiles((prev) => {
+      const compose = prev.find((f) => f.path === 'docker-compose.yml');
+      if (compose) {
+        if (!compose.content.includes('postgres')) {
+          return prev.map((f) =>
+            f.path === 'docker-compose.yml'
+              ? { ...f, content: `${f.content.trimEnd()}\n  postgres:\n    image: postgres:16-alpine\n    ports:\n      - "5432:5432"\n`, enabled: true }
+              : f
+          );
+        }
+        return prev;
+      }
+      return [
+        ...prev,
+        {
+          path: 'docker-compose.yml',
+          enabled: true,
+          content: 'services:\n  postgres:\n    image: postgres:16-alpine\n    ports:\n      - "5432:5432"\n',
+        },
+      ];
+    });
+    setDriftNotice('⚡ Injected PostgreSQL service requirement. Workflow is missing postgres container!');
+  }
+
+  function handleReconcile() {
+    const currentGenerated = scanResult.synthesized['.github/workflows/ci.yml'];
+    if (currentGenerated) {
+      setSimulatedCi(currentGenerated);
+      setDriftNotice('✔ Reconciled! Ran simulated hx generate — workflow now matches all codebase requirements.');
+    }
+  }
+
+  function handleResetStale() {
+    setSimulatedCi(staleBaselineCi);
+    setDriftNotice('Reset workflow to stale baseline (Exit code 1).');
+  }
 
   function handleTabKeyDown(e: React.KeyboardEvent<HTMLButtonElement>, index: number) {
     let next = -1;
@@ -509,57 +644,94 @@ export function Playground() {
                 tabIndex={activeTab === 'drift' ? 0 : undefined}
               >
                 <div className="output-body">
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem', alignItems: 'center' }}>
+                  {driftNotice && (
+                    <div className="drift-notice">
+                      <span aria-hidden="true">💡</span>
+                      <span>{driftNotice}</span>
+                    </div>
+                  )}
+
+                  <div className="drift-scenarios-bar">
+                    <div className="drift-scenario-group" role="group" aria-label="Inject drift scenarios">
+                      <span style={{ fontSize: '0.78125rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
+                        Inject Drift:
+                      </span>
+                      <button
+                        type="button"
+                        className="drift-scenario-btn"
+                        onClick={handleInjectRedis}
+                        title="Add Redis dependency to codebase manifest"
+                      >
+                        + Redis Dependency
+                      </button>
+                      <button
+                        type="button"
+                        className="drift-scenario-btn"
+                        onClick={handleBumpRuntime}
+                        title="Bump runtime version in codebase"
+                      >
+                        + Bump Runtime
+                      </button>
+                      <button
+                        type="button"
+                        className="drift-scenario-btn"
+                        onClick={handleInjectUv}
+                        title="Add uv.lock package manager file"
+                      >
+                        + uv Package Manager
+                      </button>
+                      <button
+                        type="button"
+                        className="drift-scenario-btn"
+                        onClick={handleInjectPostgres}
+                        title="Add PostgreSQL container in compose"
+                      >
+                        + Postgres Service
+                      </button>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                      <button
+                        type="button"
+                        className="drift-reconcile-btn"
+                        onClick={handleReconcile}
+                        title="Reconcile workflow by running simulated hx generate"
+                      >
+                        ⚡ Reconcile Workflow (hx generate)
+                      </button>
+                      <button
+                        type="button"
+                        className="drift-scenario-btn"
+                        onClick={handleResetStale}
+                        title="Reset to stale workflow baseline"
+                      >
+                        Reset to Stale
+                      </button>
+                    </div>
+                  </div>
+
+                  <CodeBlock
+                    title="Terminal Simulation: hx check"
+                    code={cliCheckOutput}
+                    badge={driftFindings.length === 0 ? '✔ Exit Code 0 (Pass)' : `⚠ Exit Code 1 (${driftFindings.length} drift)`}
+                  />
+
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginBlockStart: '-0.25rem' }}>
                     <button
                       type="button"
-                      className="preset-btn"
-                      aria-pressed={driftMode === 'stale-ci'}
-                      onClick={() => setDriftMode('stale-ci')}
+                      className="code-copy-btn"
+                      onClick={() => setShowWorkflowYaml((prev) => !prev)}
+                      aria-expanded={showWorkflowYaml}
                     >
-                      Simulate Stale Workflow (Exit 1)
-                    </button>
-                    <button
-                      type="button"
-                      className="preset-btn"
-                      aria-pressed={driftMode === 'clean'}
-                      onClick={() => setDriftMode('clean')}
-                    >
-                      Simulate Synced Workflow (Exit 0)
+                      {showWorkflowYaml ? 'Hide Active Workflow YAML' : 'Inspect Checked .github/workflows/ci.yml'}
                     </button>
                   </div>
 
-                  {driftFindings.length === 0 ? (
-                    <div className="drift-alert is-clean">
-                      <strong style={{ color: 'var(--success)' }}>
-                        ✔ Exit Code 0 — Zero Drift Detected
-                      </strong>
-                      <span>
-                        Existing CI/CD workflows are completely synchronized with {currentPreset.repoName}&apos;s
-                        dependencies, pinned runtime versions, and package managers.
-                      </span>
-                    </div>
-                  ) : (
-                    <div style={{ display: 'grid', gap: '0.75rem' }}>
-                      <div className="drift-alert">
-                        <strong style={{ color: 'var(--warning)' }}>
-                          ⚠ Exit Code 1 — Drift Detected ({driftFindings.length} issue(s))
-                        </strong>
-                        <span>
-                          Run <code>hx check</code> in CI or pre-commit hooks to catch these mismatches before merge:
-                        </span>
-                      </div>
-                      {driftFindings.map((finding, idx) => (
-                        <div key={idx} className="explain-box" style={{ display: 'grid', gap: '0.35rem' }}>
-                          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.84375rem', fontWeight: 700 }}>
-                            [{finding.severity}] {finding.file_path}
-                          </div>
-                          <div style={{ fontSize: '0.9rem' }}>{finding.issue}</div>
-                          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8125rem', color: 'var(--accent)' }}>
-                            ↳ {finding.recommendation}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
+                  {showWorkflowYaml && (
+                    <CodeBlock
+                      title="Active .github/workflows/ci.yml (Workflow Under Inspection)"
+                      code={activeCheckedWorkflow}
+                    />
                   )}
                 </div>
               </div>

@@ -722,6 +722,59 @@ code {
   font-size: inherit;
 }
 
+/* Syntax token highlights */
+.tok-key {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.tok-colon {
+  color: var(--text-secondary);
+}
+
+.tok-comment {
+  color: var(--text-secondary);
+  opacity: 0.82;
+  font-style: italic;
+}
+
+.tok-preserve {
+  background-color: color-mix(in oklab, var(--accent) 20%, transparent);
+  color: var(--text-primary);
+  font-weight: 700;
+  padding-inline: 0.25em;
+  border-radius: var(--radius-sm);
+  border: 1px solid color-mix(in oklab, var(--accent) 35%, transparent);
+}
+
+.tok-secret {
+  color: var(--warning);
+  font-weight: 600;
+}
+
+.tok-bool {
+  color: var(--success);
+  font-weight: 600;
+}
+
+.tok-action {
+  color: #a855f7;
+  font-weight: 500;
+}
+
+.tok-str {
+  color: var(--success);
+}
+
+.tok-num {
+  color: var(--warning);
+}
+
+.tok-cmd {
+  color: var(--accent);
+  font-weight: 600;
+}
+
 /* ==========================================================================
    Interactive Playground Workbench
    ========================================================================== */

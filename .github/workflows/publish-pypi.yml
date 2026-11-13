@@ -74,7 +74,7 @@ jobs:
       url: ${{ inputs.repository == 'testpypi' && 'https://test.pypi.org/p/heurix' || 'https://pypi.org/p/heurix' }}
     steps:
       - name: Download distribution artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: python-package-distributions
           path: dist/

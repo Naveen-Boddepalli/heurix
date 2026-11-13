@@ -28,7 +28,14 @@ check:
 	$(HX) check
 
 build:
+	$(PYTHON) -c "from setuptools.build_meta import build_sdist; build_sdist('dist')"
 	$(PIP) wheel --no-deps --no-build-isolation -w dist .
+
+measure-size:
+	@echo "=== Distribution Artifact Sizes ==="
+	@ls -lh dist/ 2>/dev/null || echo "No dist/ directory found. Run 'make build' first."
+	@echo "\n=== Source Tree Size ==="
+	@du -sh src/heurix
 
 docker-build:
 	docker build -t heurix:latest .

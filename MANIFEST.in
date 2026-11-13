@@ -1,0 +1,18 @@
+include README.md
+include pyproject.toml
+recursive-include src/heurix/templates *.j2
+prune site
+prune tests
+prune docs
+prune packaging
+prune .planning
+prune .github
+prune build
+prune dist
+exclude heurix_source_dump.txt
+exclude heurix.md
+exclude hx
+exclude Makefile
+exclude Dockerfile
+exclude .dockerignore
+global-exclude *.py[cod] __pycache__ *.so *.dylib .DS_Store

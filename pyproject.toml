@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Deterministic Codebase Scanner & Automated YAML Synthesizer"
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "MIT" }
+license = "MIT"
 authors = [
     { name = "Heurix Contributors" }
 ]
@@ -25,7 +25,6 @@ classifiers = [
     "Development Status :: 4 - Beta",
     "Environment :: Console",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
@@ -69,6 +68,8 @@ heurix = "heurix.cli:app"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+include = ["heurix*"]
+exclude = ["tests*", "docs*", "site*", "packaging*"]
 
 [tool.setuptools.package-data]
 heurix = ["templates/**/*.j2", "templates/*.j2"]

@@ -6,10 +6,29 @@ Ensures zero invalid YAML is written to disk.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Mapping, Tuple
+from typing import TYPE_CHECKING, Dict, List, Mapping, Tuple
 
-import jsonschema
+if TYPE_CHECKING:
+    import jsonschema
+
 from ruamel.yaml import YAML
+
+_jsonschema = None
+
+
+def _get_jsonschema():
+    """Lazily load jsonschema, referencing, and rpds on demand."""
+    global _jsonschema
+    if _jsonschema is None:
+        import jsonschema as _jsonschema
+    return _jsonschema
+
+
+def __getattr__(name: str):
+    """Module-level attribute fallback for external consumers/mocking."""
+    if name == "jsonschema":
+        return _get_jsonschema()
+    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 
 # Lightweight structural schema for GitHub Actions workflow
 GITHUB_WORKFLOW_SCHEMA = {
@@ -129,9 +148,10 @@ class PreflightValidator:
 
             if schema_entry is not None:
                 label, schema = schema_entry
+                js = _get_jsonschema()
                 try:
-                    jsonschema.validate(instance=doc, schema=schema)
-                except jsonschema.ValidationError as ve:
+                    js.validate(instance=doc, schema=schema)
+                except js.ValidationError as ve:
                     errors.append(f"{label}{doc_suffix}: {ve.message}")
 
         return (len(errors) == 0), errors

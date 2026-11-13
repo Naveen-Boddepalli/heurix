@@ -5,14 +5,37 @@ Interactive Ambiguity Resolution and Hook Prompts with Non-TTY / EOFError Safety
 from __future__ import annotations
 
 import sys
-from typing import Callable, Dict, List, Optional, Sequence, Tuple
+from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Sequence, Tuple
 
-import questionary
+if TYPE_CHECKING:
+    import questionary
+
 from rich.console import Console
 
 from heurix.core.context import DeploymentTarget, ProjectContext, ServiceRequirement
 
 console = Console()
+
+
+_questionary = None
+
+
+def _get_questionary():
+    """Lazily load questionary and prompt_toolkit on demand to eliminate CLI startup overhead."""
+    global _questionary
+    if "questionary" in globals() and globals()["questionary"] is not None:
+        return globals()["questionary"]
+    if _questionary is None:
+        import questionary
+        _questionary = questionary
+    return _questionary
+
+
+def __getattr__(name: str):
+    """Module-level attribute fallback for external consumers/mocking."""
+    if name == "questionary":
+        return _get_questionary()
+    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 
 
 def is_interactive_tty() -> bool:
@@ -31,16 +54,17 @@ def prompt_conflict_resolution(file_path: str, non_interactive: bool = False) ->
     if non_interactive or not is_interactive_tty():
         return "apply"
 
+    q = _get_questionary()
     try:
-        choice = questionary.select(
+        choice = q.select(
             f"File '{file_path}' already exists. What would you like to do?",
             choices=[
-                questionary.Choice(
+                q.Choice(
                     title="[A] Apply changes (non-destructive smart merge)", value="apply"
                 ),
-                questionary.Choice(title="[D] View diff preview", value="diff"),
-                questionary.Choice(title="[B] Backup & overwrite", value="backup"),
-                questionary.Choice(title="[S] Skip file", value="skip"),
+                q.Choice(title="[D] View diff preview", value="diff"),
+                q.Choice(title="[B] Backup & overwrite", value="backup"),
+                q.Choice(title="[S] Skip file", value="skip"),
             ],
         ).ask()
         return choice or "apply"
@@ -61,8 +85,9 @@ def prompt_e2e_split(
     if non_interactive or not is_interactive_tty():
         return True
 
+    q = _get_questionary()
     try:
-        answer = questionary.confirm(
+        answer = q.confirm(
             f"Detected both unit ({', '.join(unit_runners)}) and E2E ({', '.join(e2e_runners)}) "
             "test runners. Isolate E2E tests into a parallel 'test-e2e' CI job?",
             default=True,
@@ -84,6 +109,7 @@ def prompt_deployment_targets(
     if non_interactive or not is_interactive_tty() or len(targets) < 2:
         return list(targets)
 
+    q = _get_questionary()
     seen_platforms: set[str] = set()
     choices = []
     for target in targets:
@@ -92,7 +118,7 @@ def prompt_deployment_targets(
             continue
         seen_platforms.add(platform_key)
         choices.append(
-            questionary.Choice(
+            q.Choice(
                 title=f"{target.platform} ({target.config_file}, project: {target.project_id or 'auto'})",
                 value=target.platform,
                 checked=True,
@@ -100,7 +126,7 @@ def prompt_deployment_targets(
         )
 
     try:
-        selected = questionary.checkbox(
+        selected = q.checkbox(
             "Multiple cloud deployment targets detected. Select targets to synthesize:",
             choices=choices,
         ).ask()
@@ -124,6 +150,7 @@ def prompt_backing_services(
     if non_interactive or not is_interactive_tty() or len(services) < 2:
         return list(services)
 
+    q = _get_questionary()
     grouped: Dict[str, Tuple[str, List[int]]] = {}
     for svc in services:
         key = svc.name.lower()
@@ -137,7 +164,7 @@ def prompt_backing_services(
     for display_name, ports in grouped.values():
         ports_summary = ", ".join(str(p) for p in ports) if ports else "default"
         choices.append(
-            questionary.Choice(
+            q.Choice(
                 title=f"{display_name} (ports: {ports_summary})",
                 value=display_name,
                 checked=True,
@@ -145,7 +172,7 @@ def prompt_backing_services(
         )
 
     try:
-        selected = questionary.checkbox(
+        selected = q.checkbox(
             "Multiple backing services detected. Select services to include:",
             choices=choices,
         ).ask()
@@ -166,8 +193,9 @@ def prompt_k8s_generation(
     if non_interactive or not is_interactive_tty():
         return default
 
+    q = _get_questionary()
     try:
-        answer = questionary.confirm(
+        answer = q.confirm(
             "Container configuration detected without explicit Kubernetes policy. "
             "Generate Kubernetes manifests (k8s/)?",
             default=default,
@@ -185,8 +213,9 @@ def prompt_install_hooks(*, non_interactive: bool = False) -> bool:
     if non_interactive or not is_interactive_tty():
         return False
 
+    q = _get_questionary()
     try:
-        answer = questionary.confirm(
+        answer = q.confirm(
             "Git repository detected. Install an idempotent pre-commit hook running 'hx check'?",
             default=True,
         ).ask()

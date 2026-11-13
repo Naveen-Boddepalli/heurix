@@ -48,11 +48,14 @@ jobs:
           trap 'rm -rf "$SMOKE_DIR"' EXIT
           python -m venv "${SMOKE_DIR}/venv"
           "${SMOKE_DIR}/venv/bin/pip" install --quiet dist/*.whl
-          "${SMOKE_DIR}/venv/bin/hx" --version | grep -q "Heurix (hx)"
-          "${SMOKE_DIR}/venv/bin/hx" --help | grep -q "Deterministic Codebase Scanner"
+          VER_OUT=$("${SMOKE_DIR}/venv/bin/hx" --version)
+          echo "$VER_OUT" | grep -q "Heurix (hx)"
+          HELP_OUT=$("${SMOKE_DIR}/venv/bin/hx" --help)
+          echo "$HELP_OUT" | grep -q "Deterministic Codebase Scanner"
           mkdir -p "${SMOKE_DIR}/repo"
           printf '[project]\nname = "smoke-demo"\nversion = "0.1.0"\n' > "${SMOKE_DIR}/repo/pyproject.toml"
-          "${SMOKE_DIR}/venv/bin/hx" scan --path "${SMOKE_DIR}/repo" | grep -q '"python"'
+          SCAN_OUT=$("${SMOKE_DIR}/venv/bin/hx" scan --path "${SMOKE_DIR}/repo")
+          echo "$SCAN_OUT" | grep -q '"python"'
           "${SMOKE_DIR}/venv/bin/hx" generate --path "${SMOKE_DIR}/repo" --dry-run --yes
 
       - name: Upload build artifacts

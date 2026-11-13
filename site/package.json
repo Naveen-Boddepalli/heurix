@@ -2,7 +2,7 @@
   "name": "heurix-site",
   "private": true,
   "type": "module",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "scripts": {
     "sync": "node scripts/sync-llms.mjs",
     "dev": "node scripts/sync-llms.mjs && vite",

@@ -14,7 +14,7 @@ runner = CliRunner()
 def test_cli_version():
     result = runner.invoke(app, ["--version"])
     assert result.exit_code == 0
-    assert "0.1.0" in result.stdout
+    assert "0.2.0" in result.stdout
 
 
 def test_cli_init(tmp_path: Path):

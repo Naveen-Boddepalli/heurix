@@ -3,7 +3,7 @@ class Heurix < Formula
 
   desc "Deterministic Codebase Scanner & Automated YAML Synthesizer"
   homepage "https://github.com/Naveen-Boddepalli/heurix"
-  url "https://files.pythonhosted.org/packages/source/h/heurix/heurix-0.1.0.tar.gz"
+  url "https://files.pythonhosted.org/packages/source/h/heurix/heurix-0.2.0.tar.gz"
   # Release tag automation / homebrew-pypi-poet populates the tarball sha256
   # and Python dependency resource stanzas at PyPI publish time.
   sha256 "REPLACE_WITH_RELEASE_TARBALL_SHA256"

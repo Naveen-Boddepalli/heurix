@@ -156,7 +156,7 @@ def test_packaging_wheel_homebrew_docker_and_workflows(tmp_path: Path) -> None:
     pyproject_data = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     project = pyproject_data["project"]
     assert project["name"] == "heurix"
-    assert project["version"] == "0.1.0"
+    assert project["version"] == "0.2.0"
     assert project["requires-python"] == ">=3.10"
     assert project["scripts"] == {"hx": "heurix.cli:app", "heurix": "heurix.cli:app"}
     assert "jinja2>=3.1.6" in project["dependencies"]

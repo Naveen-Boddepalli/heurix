@@ -17,3 +17,5 @@ site/
 .planning/
 docs/
 heurix_source_dump.txt
+heurix.md
+packaging/

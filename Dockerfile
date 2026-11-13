@@ -28,17 +28,22 @@ LABEL org.opencontainers.image.title="Heurix" \
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
     PATH="/home/heurix/.local/bin:${PATH}"
 
 # Install git for repo detection & create non-root user
 RUN apt-get update && \
     apt-get install -y --no-install-recommends git ca-certificates && \
-    rm -rf /var/lib/apt/lists/* && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/* /var/cache/apt/* /var/log/* /tmp/* && \
     useradd -u 10001 -m -s /bin/bash heurix
 
 # Copy wheel from builder and install
 COPY --from=builder /app/dist/*.whl /tmp/
-RUN pip install --no-cache-dir /tmp/*.whl && rm -rf /tmp/*.whl
+RUN pip install --no-cache-dir /tmp/*.whl && \
+    rm -rf /tmp/*.whl && \
+    find /usr/local/lib/python3.12 -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true && \
+    find /usr/local/lib/python3.12 -type f -name "*.pyc" -delete
 
 # Setup workspace mount target
 USER heurix

@@ -105,7 +105,7 @@ jobs:
 
       - name: Attach artifacts to GitHub Release
         if: github.event_name == 'release' || startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: dist/*
           fail_on_unmatched_files: false

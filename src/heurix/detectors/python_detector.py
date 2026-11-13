@@ -21,14 +21,59 @@ from heurix.core.indexer import RepoIndexer
 from heurix.core.monorepo import NON_PACKAGE_DIRS, discover_monorepo_topology
 from heurix.detectors.base import BaseDetector
 
-PYTHON_MOCK_SERVICES = {"fakeredis", "mockredispy", "testing.postgresql", "pgmock"}
+PYTHON_MOCK_SERVICES = {"fakeredis", "mockredispy", "testing.postgresql", "pgmock", "mongomock"}
 
 _MOCK_DEP_PATTERN = re.compile(
-    r"(?:testing[._-]postgresql|fakeredis|mockredispy|pgmock)(?:\[[^\]]*\])?",
+    r"(?:testing[._-]postgresql|fakeredis|mockredispy|pgmock|mongomock)(?:\[[^\]]*\])?",
     re.IGNORECASE,
 )
 _CLASSIFIER_PYTHON_RE = re.compile(r"Programming Language :: Python :: (3\.\d+)")
 _TOX_PY_FACTOR_RE = re.compile(r"^(?:py)?(3)\.?(\d+)$", re.IGNORECASE)
+
+def _extract_pg_credentials(
+    context: ProjectContext, indexer: Optional[RepoIndexer] = None
+) -> Tuple[str, str, str]:
+    """Extract postgres user, password, db from context.env_vars, .env templates, or parsed DATABASE_URL."""
+    user = context.env_vars.get("POSTGRES_USER")
+    password = context.env_vars.get("POSTGRES_PASSWORD")
+    db = context.env_vars.get("POSTGRES_DB")
+
+    db_url = context.env_vars.get("DATABASE_URL")
+    if indexer:
+        for ef in [".env.example", ".env.template", ".env.sample", ".env.dist", ".env.local.example"]:
+            if indexer.has_file(ef):
+                content = indexer.read_text(ef) or ""
+                for line in content.splitlines():
+                    line = line.strip()
+                    if not line or line.startswith("#"):
+                        continue
+                    if "=" in line:
+                        k, v = line.split("=", 1)
+                        k = k.strip()
+                        v = v.strip().strip("'\"")
+                        if k == "DATABASE_URL" and not db_url:
+                            db_url = v
+                        elif k == "POSTGRES_USER" and not user:
+                            user = v
+                        elif k == "POSTGRES_PASSWORD" and not password:
+                            password = v
+                        elif k == "POSTGRES_DB" and not db:
+                            db = v
+
+    if db_url:
+        m = re.match(
+            r"^(?:postgres(?:ql)?|pg)://(?:([^:]+)(?::([^@]+))?@)?([^:/]+)(?::(\d+))?/(.+)$",
+            db_url.strip(),
+        )
+        if m:
+            if not user and m.group(1):
+                user = m.group(1)
+            if not password and m.group(2):
+                password = m.group(2)
+            if not db and m.group(5):
+                db = m.group(5).split("?")[0]
+
+    return user or "test_user", password or "test_password", db or "test_db"
 
 _ROOT_INDICATORS = (
     "pyproject.toml",
@@ -321,11 +366,39 @@ class PythonDetector(BaseDetector):
         req_txt = _join(base_dir, "requirements.txt")
         req_dev_txt = _join(base_dir, "requirements-dev.txt")
 
+        has_uv_tool = False
+        has_dep_groups = False
+        opt_deps: Dict[str, Any] = {}
+        if pyproject_data:
+            tool = pyproject_data.get("tool")
+            if isinstance(tool, dict) and "uv" in tool:
+                has_uv_tool = True
+            if "dependency-groups" in pyproject_data:
+                has_uv_tool = True
+                has_dep_groups = True
+            project_sec = pyproject_data.get("project")
+            if isinstance(project_sec, dict):
+                raw_opt = project_sec.get("optional-dependencies")
+                if isinstance(raw_opt, dict):
+                    opt_deps = raw_opt
+
+        sync_flags = []
+        if opt_deps:
+            sync_flags.append("--all-extras")
+        if has_dep_groups:
+            sync_flags.append("--all-groups")
+        extra_args = f" {' '.join(sync_flags)}" if sync_flags else ""
+
         if indexer.has_file(uv_lock):
             package_manager = "uv"
-            install_cmd = "uv sync --frozen"
+            install_cmd = f"uv sync --frozen{extra_args}"
             cache_dependency_path = uv_lock
             context.add_explain(f"Detected Package Manager: uv (via {uv_lock})")
+        elif has_uv_tool:
+            package_manager = "uv"
+            install_cmd = f"uv sync{extra_args}"
+            cache_dependency_path = pyproject_path
+            context.add_explain(f"Detected Package Manager: uv (via {pyproject_path} [tool.uv])")
         elif indexer.has_file(poetry_lock):
             package_manager = "poetry"
             install_cmd = "poetry install --no-interaction"
@@ -463,15 +536,16 @@ class PythonDetector(BaseDetector):
         )
         if has_real_postgres:
             if not any(s.name == "postgres" and s.package_path == pkg_path for s in context.services):
+                pg_user, pg_password, pg_db = _extract_pg_credentials(context, indexer=indexer)
                 context.services.append(
                     ServiceRequirement(
                         name="postgres",
                         image="postgres:16-alpine",
                         ports=[5432],
                         env={
-                            "POSTGRES_USER": "test_user",
-                            "POSTGRES_PASSWORD": "test_password",
-                            "POSTGRES_DB": "test_db",
+                            "POSTGRES_USER": pg_user,
+                            "POSTGRES_PASSWORD": pg_password,
+                            "POSTGRES_DB": pg_db,
                         },
                         source_file=service_source,
                         package_path=pkg_path,
@@ -497,6 +571,25 @@ class PythonDetector(BaseDetector):
                 context.add_explain(f"Inferred Backing Service{scope_label}: Redis 7 (via python redis client/celery)")
         elif any(m in {"fakeredis", "mockredispy"} for m in found_mocks):
             context.add_explain(f"Filtered mock redis dependency from backing services{scope_label}")
+
+        has_real_mongo = any(
+            m in deps_clean for m in ["pymongo", "motor", "mongoengine", "beanie"]
+        )
+        if has_real_mongo:
+            if not any(s.name == "mongodb" and s.package_path == pkg_path for s in context.services):
+                context.services.append(
+                    ServiceRequirement(
+                        name="mongodb",
+                        image="mongo:7",
+                        ports=[27017],
+                        env={},
+                        source_file=service_source,
+                        package_path=pkg_path,
+                    )
+                )
+                context.add_explain(f"Inferred Backing Service{scope_label}: MongoDB 7 (via python mongo client)")
+        elif any(m in {"mongomock"} for m in found_mocks):
+            context.add_explain(f"Filtered mock mongodb dependency from backing services{scope_label}")
 
         lang_ctx = LanguageContext(
             language="python",

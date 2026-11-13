@@ -1234,3 +1234,22 @@ def test_cli_init_pre_commit_hooks_lifecycle(tmp_path: Path, monkeypatch):
     assert "Traceback" not in res_perm_opt.stdout
     assert "Pre-Commit Hook Warning" in " ".join(res_perm_opt.stdout.split())
 
+
+def test_cli_generate_empty_directory_refusal(tmp_path: Path):
+    runner = CliRunner()
+    empty_dir = tmp_path / "empty_repo"
+    empty_dir.mkdir()
+
+    # 1. By default, hx generate refuses to write into empty directory
+    res = runner.invoke(app, ["generate", "--path", str(empty_dir), "--yes"])
+    assert res.exit_code == 0
+    assert "Empty Repository" in res.stdout
+    assert "Refusing to generate empty workflows" in res.stdout
+    assert not (empty_dir / ".github").exists()
+
+    # 2. Overriding with --allow-empty bypasses refusal
+    res_override = runner.invoke(app, ["generate", "--path", str(empty_dir), "--yes", "--allow-empty"])
+    assert res_override.exit_code == 0
+    assert "Refusing to generate empty workflows" not in res_override.stdout
+
+

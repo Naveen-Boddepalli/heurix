@@ -10,7 +10,7 @@
 **Heurix** (CLI alias: `hx`) is an offline-capable, pure-logic codebase scanner and infrastructure YAML synthesizer. It inspects `.gitignore`-filtered repository files once via `RepoIndexer` into a strongly-typed Pydantic `ProjectContext` Intermediate Representation (IR), cross-references lockfiles, manifests, Dockerfiles, compose configurations, `.env` templates, and cloud deployment targets, and deterministically synthesizes schema-validated CI/CD workflows, Dependabot maintenance files, and Kubernetes manifests.
 
 ### Why Pure Logic?
-- **100% Deterministic & Reproducible:** No LLM hallucinations, non-determinism, or stale action versions.
+- **100% Deterministic & Reproducible:** No LLM hallucinations or non-determinism; vetted action pins with least-privilege `permissions: contents: read` and customizable action versions/commit SHAs via `.heurix.toml`.
 - **Instantaneous & Offline:** Runs locally in milliseconds without network calls or API keys.
 - **Non-Destructive AST Smart Merge:** Traverses `ruamel.yaml` ASTs recursively to preserve comments, custom user jobs, triggers, and any step tagged with `# @heurix:preserve` or `# @autoyaml:preserve` across repeated runs.
 - **Pre-Flight Schema Validation:** Validates single- and multi-document YAML outputs against JSON schemas (`PreflightValidator`) before writing a single byte to disk, with symlink/path-traversal protection.
@@ -143,14 +143,14 @@ Supported `.heurix.toml` sections:
 ## Deep Heuristic Capabilities
 
 1. **Weighted Polyglot Ecosystem Detection:** Scores root manifests and source file counts across Python, Node.js/TypeScript, Rust, Go, and C/C++ so primary language selection is deterministic and resilient to polyglot repos.
-2. **Exact Version Pinning:** Discovers runtime pins from `.python-version`, `.tool-versions`, `pyproject.toml`, `.nvmrc`, `.node-version`, `package.json`, `rust-toolchain.toml`, `go.mod`, and `CMakeLists.txt` (`CMAKE_CXX_STANDARD`).
+2. **Exact Version Pinning:** Discovers runtime pins from `.python-version`, `.tool-versions`, `pyproject.toml`, `.nvmrc` (preserving exact semver pins), `.node-version`, `package.json`, `rust-toolchain.toml`, `go.mod`, and `CMakeLists.txt` (`CMAKE_CXX_STANDARD`).
 3. **Lockfile & Virtualenv-Aware Commands:** Selects install, lint, build, and test commands plus caching for `uv` (`uv run ...`), `poetry` (`poetry run ...`), `pipenv`, `pip`, `pnpm`, `yarn`, `bun`, `npm`, `cargo`, `go`, `cmake`, `conan`, `vcpkg`, and `make` (guarding `Makefile` detection so non-C/C++ repos are never misclassified, and sequencing `clang-tidy` after CMake builds only when `.clang-tidy` exists).
-4. **Automatic Backing Service Provisioning:** Infers `postgres`, `redis`, and `mongodb` from dependency manifests (`psycopg2`, `asyncpg`, `prisma`, `ioredis`, `mongoose`, etc.) and external `docker-compose.yml` services (skipping local `build:` app containers) to configure GitHub Actions `services:` with health checks and ports.
-5. **Environment & Secret Isolation:** Parses `.env.example` / `.env.template` / `.env.sample` / `.env.dist` / `.env.local.example`, separating non-sensitive defaults (`env:` and `k8s/configmap.yaml`) from sensitive keys (`test_secrets` wired to `${{ secrets.KEY }}`, `deployment_secrets` isolated to deploy jobs).
+4. **Automatic Backing Service Provisioning:** Infers `postgres`, `redis`, and `mongodb` from dependency manifests (Python: `psycopg2`, `asyncpg`, `pymongo`, `motor`, `mongoengine`, `beanie`; Node.js: `prisma`, `ioredis`, `mongoose`, `mongodb`) and external `docker-compose.yml` services, aligning test credentials and configuring health checks and ports.
+5. **Environment & Secret Isolation:** Parses `.env.example` / `.env.template` / `.env.sample` / `.env.dist` / `.env.local.example`, separating non-sensitive defaults (`env:` and `k8s/configmap.yaml`) from sensitive keys (`test_secrets` wired to `${{ secrets.KEY }}`, `deployment_secrets` isolated to deploy jobs), and enforcing top-level `permissions: contents: read`.
 6. **Cloud Deployment Target Detection (`CloudDetector`):** Detects **Vercel** (`vercel.json`, `.vercel`, serverless `api/` routes) and **Firebase** (`firebase.json`, `.firebaserc` project ID and features), wiring required secrets and generating conditional `deploy_vercel` / `deploy_firebase` jobs.
 7. **Monorepo Topology:** Detects `pnpm-workspace.yaml`, `turbo.json`, `nx.json`, and `package.json` `workspaces`, enumerating sub-packages and adding Dependabot entries.
-8. **Hardened Kubernetes & Kind Manifests (`k8s/`):** Parses `Dockerfile` (`EXPOSE`, final-stage base image, build target, `HEALTHCHECK`) and framework defaults (`FastAPI` `8000`, `Next.js`/`Express` `3000`, `Streamlit` `8501` with HTTP `/_stcore/health` readiness probe) to generate `k8s/deployment.yaml` (with `envFrom` referencing `configmap.yaml` and `optional: true` secrets), `k8s/service.yaml`, `k8s/ingress.yaml` (`ingressClassName: nginx`), `k8s/configmap.yaml`, and `k8s/kind-config.yaml` (with `ingress-ready=true` and host ports `80`/`443`).
-9. **Maintenance Automation:** Synthesizes `.github/dependabot.yml` covering `github-actions` and every detected package and container ecosystem.
+8. **Hardened Kubernetes & Kind Manifests (`k8s/`):** Generates production-hardened manifests with pod and container `securityContext` (`runAsNonRoot: true`, `allowPrivilegeEscalation: false`, `readOnlyRootFilesystem: true`, `drop: [ALL]` capabilities), `k8s/deployment.yaml`, `k8s/service.yaml`, `k8s/ingress.yaml` (`ingressClassName: nginx`), `k8s/configmap.yaml`, `k8s/secret.yaml`, and `k8s/kind-config.yaml`.
+9. **Maintenance & Safety Controls:** Synthesizes `.github/dependabot.yml` covering `github-actions` and every detected ecosystem, with empty directory guards that prevent generating hollow workflows on repos with no code.
 
 ---
 
@@ -195,7 +195,7 @@ heurix/
 │           ├── console.py          # Rich explain-tree and summary tables
 │           ├── differ.py           # Colorized terminal diff viewer
 │           └── prompts.py          # Interactive conflict resolution prompts
-└── tests/                          # Full test suite (85 tests across 7 test modules)
+└── tests/                          # Full test suite (168 tests across 14 test modules)
 ```
 
 ---
@@ -203,7 +203,7 @@ heurix/
 ## Running Tests & Site Build
 
 ```bash
-# Run full test suite (85 tests)
+# Run full test suite (168 tests)
 .venv/bin/pytest -v
 
 # Check repository CI drift

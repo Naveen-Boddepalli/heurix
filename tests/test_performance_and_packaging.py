@@ -190,7 +190,7 @@ def test_packaging_wheel_homebrew_docker_and_workflows(tmp_path: Path) -> None:
         path.relative_to(REPO_ROOT / "src").as_posix()
         for path in template_root.rglob("*.j2")
     )
-    assert len(disk_templates) == 9
+    assert len(disk_templates) == 10
     expected_templates = {
         "heurix/templates/workflows/ci.yml.j2",
         "heurix/templates/dependabot/dependabot.yml.j2",
@@ -198,6 +198,7 @@ def test_packaging_wheel_homebrew_docker_and_workflows(tmp_path: Path) -> None:
         "heurix/templates/k8s/service.yaml.j2",
         "heurix/templates/k8s/ingress.yaml.j2",
         "heurix/templates/k8s/configmap.yaml.j2",
+        "heurix/templates/k8s/secret.yaml.j2",
         "heurix/templates/k8s/hpa.yaml.j2",
         "heurix/templates/k8s/kind-config.yaml.j2",
         "heurix/templates/macros/actions.j2",

@@ -495,6 +495,20 @@ class KubernetesSynthesizer(BaseSynthesizer):
                 templates_dir=templates_dir,
             )
 
+        if declared_secrets:
+            secret_vm: Dict[str, Any] = {
+                "app_name": app_name,
+                "secret_name": f"{app_name}-secrets",
+                "namespace": namespace,
+                "secret_keys": sorted(declared_secrets),
+            }
+            outputs["k8s/secret.yaml"] = render_yaml_template(
+                "k8s/secret.yaml.j2",
+                secret_vm,
+                repo_root=repo_root,
+                templates_dir=templates_dir,
+            )
+
         if k8s_policy.hpa.enabled:
             hpa_vm: Dict[str, Any] = {
                 "app_name": app_name,

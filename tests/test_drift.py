@@ -1518,3 +1518,70 @@ def test_e2e_split_and_combined_zero_drift(tmp_path: Path):
     assert any("test-e2e" in i and "ubuntu-24.04" in i for i in e2e_issues)
     assert any("macos-latest" in i for i in e2e_issues)
     assert not any("Unit pre" in i and "test-e2e" in i for i in e2e_issues)
+
+
+def test_drift_mongodb_service_missing_when_pymongo_in_codebase(tmp_path: Path):
+    from heurix.core.context import ProjectContext, ServiceRequirement, LanguageContext
+    from heurix.core.drift import DriftDetector
+
+    wf_dir = tmp_path / ".github" / "workflows"
+    wf_dir.mkdir(parents=True)
+    ci_file = wf_dir / "ci.yml"
+    ci_file.write_text(
+        """name: CI
+on:
+  push:
+    branches: [main]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        ports:
+          - 5432:5432
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - run: pytest
+""",
+        encoding="utf-8",
+    )
+
+    ctx = ProjectContext(
+        repo_name="mongo-app",
+        repo_root=str(tmp_path),
+        languages=[
+            LanguageContext(
+                language="python",
+                runtime_version="3.12",
+                version_source="default",
+                package_manager="pip",
+                install_cmd="pip install -r requirements.txt",
+                test_cmd="pytest",
+            )
+        ],
+        services=[
+            ServiceRequirement(
+                name="postgres",
+                image="postgres:16-alpine",
+                ports=[5432],
+                source_file="requirements.txt",
+            ),
+            ServiceRequirement(
+                name="mongodb",
+                image="mongo:7",
+                ports=[27017],
+                source_file="requirements.txt",
+            ),
+        ],
+    )
+
+    detector = DriftDetector(str(tmp_path))
+    findings = detector.check_drift(ctx, {".github/workflows/ci.yml": "dummy"})
+    issues = [f.issue for f in findings]
+    assert any("Service 'mongodb' is required by codebase dependencies" in i for i in issues)
+

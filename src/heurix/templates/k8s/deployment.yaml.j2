@@ -18,9 +18,19 @@ spec:
       labels:
         app: {{ app_name | yaml_scalar }}
     spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: {{ container.name | yaml_scalar }}
           image: {{ container.image | yaml_scalar }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
           ports:
 {% for p in container.ports %}
             - containerPort: {{ p.containerPort }}

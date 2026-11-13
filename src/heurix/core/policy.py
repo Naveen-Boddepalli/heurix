@@ -189,6 +189,8 @@ class CiPolicy(_PolicyBase):
     default_branch: _NonEmptyStr = "main"
     pin_actions: bool = True
     action_shas: Dict[str, str] = Field(default_factory=dict)
+    action_versions: Dict[str, str] = Field(default_factory=dict)
+    permissions: Dict[str, str] = Field(default_factory=dict)
     runners: Dict[str, _NonEmptyStr] = Field(default_factory=dict)
     steps: CiStepsPolicy = Field(default_factory=CiStepsPolicy)
 

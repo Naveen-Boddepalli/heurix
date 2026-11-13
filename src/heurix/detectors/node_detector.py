@@ -11,6 +11,7 @@ from heurix.core.context import LanguageContext, MonorepoPackage, ProjectContext
 from heurix.core.indexer import RepoIndexer
 from heurix.core.monorepo import discover_monorepo_topology
 from heurix.detectors.base import BaseDetector
+from heurix.detectors.python_detector import _extract_pg_credentials
 
 NODE_MOCK_SERVICES = {"redis-mock", "ioredis-mock", "pg-mem"}
 SQLITE_ADAPTERS = {"sqlite3", "better-sqlite3", "sqlite", "@libsql/client", "sql.js"}
@@ -257,15 +258,23 @@ class NodeDetector(BaseDetector):
         node_ver_path = _join(base_dir, ".node-version")
         if indexer.has_file(nvmrc_path):
             raw = (indexer.read_text(nvmrc_path) or "").strip().lstrip("v")
-            match = re.search(r"^(\d+)", raw)
-            if match:
-                node_version = f"{match.group(1)}.x"
+            match_full = re.search(r"^(\d+\.\d+(?:\.\d+)?)", raw)
+            match_major = re.search(r"^(\d+)", raw)
+            if match_full:
+                node_version = match_full.group(1)
+                version_source = ".nvmrc"
+            elif match_major:
+                node_version = f"{match_major.group(1)}.x"
                 version_source = ".nvmrc"
         elif indexer.has_file(node_ver_path):
             raw = (indexer.read_text(node_ver_path) or "").strip().lstrip("v")
-            match = re.search(r"^(\d+)", raw)
-            if match:
-                node_version = f"{match.group(1)}.x"
+            match_full = re.search(r"^(\d+\.\d+(?:\.\d+)?)", raw)
+            match_major = re.search(r"^(\d+)", raw)
+            if match_full:
+                node_version = match_full.group(1)
+                version_source = ".node-version"
+            elif match_major:
+                node_version = f"{match_major.group(1)}.x"
                 version_source = ".node-version"
 
         # 2. Parse package.json
@@ -386,15 +395,16 @@ class NodeDetector(BaseDetector):
         )
         if _has_real_postgres_adapter(indexer, active_deps, base_dir, exclude_dirs):
             if not any(s.name == "postgres" and s.package_path == pkg_scope for s in context.services):
+                pg_user, pg_password, pg_db = _extract_pg_credentials(context, indexer=indexer)
                 context.services.append(
                     ServiceRequirement(
                         name="postgres",
                         image="postgres:16-alpine",
                         ports=[5432],
                         env={
-                            "POSTGRES_USER": "test_user",
-                            "POSTGRES_PASSWORD": "test_password",
-                            "POSTGRES_DB": "test_db",
+                            "POSTGRES_USER": pg_user,
+                            "POSTGRES_PASSWORD": pg_password,
+                            "POSTGRES_DB": pg_db,
                         },
                         source_file=svc_source,
                         package_path=pkg_scope,

@@ -78,7 +78,7 @@ def test_node_detector_pnpm_monorepo(tmp_path: Path):
     assert context.is_monorepo is True
     assert len(context.languages) == 1
     node = context.languages[0]
-    assert node.runtime_version == "20.x"
+    assert node.runtime_version == "20.10.0"
     assert node.package_manager == "pnpm"
     assert node.install_cmd == "pnpm i --frozen-lockfile"
     assert node.test_cmd == "pnpm test"
@@ -653,7 +653,7 @@ def test_workspace_topology_pnpm_and_npm_subpackages(tmp_path: Path):
     web = pkg_by_path["apps/web"]
     assert web.language == "node"
     assert web.package_manager == "pnpm"
-    assert web.runtime_version == "20.x"
+    assert web.runtime_version == "20.11.0"
     assert web.install_cmd == "pnpm i --frozen-lockfile"
     assert web.build_cmd == "pnpm run build"
     assert web.test_cmd == "pnpm test"
@@ -710,7 +710,7 @@ def test_workspace_topology_pnpm_and_npm_subpackages(tmp_path: Path):
     sub_ctx = ProjectContext(repo_name="node_sub_only", repo_root=str(sub_only))
     detector.analyze(sub_indexer, sub_ctx)
     assert len(sub_ctx.monorepo_packages) == 1
-    assert sub_ctx.monorepo_packages[0].runtime_version == "22.x"
+    assert sub_ctx.monorepo_packages[0].runtime_version == "22.0.0"
     assert sub_ctx.monorepo_packages[0].cache_dependency_path == "apps/web/package-lock.json"
     rep = sub_ctx.get_language("node")
     assert rep is not None
@@ -1456,4 +1456,110 @@ dependencies = ["fastapi", "pytest"]
     assert rehydrated_node.unit_test_runner == "vitest"
     assert rehydrated_node.e2e_test_runner == "playwright"
     assert rehydrated_node.e2e_cmd == "npm run test:e2e"
+
+
+def test_python_detector_mongodb_inference_and_mongomock_filter(tmp_path: Path):
+    # 1. Real driver: pymongo produces MongoDB service
+    py_mongo_dir = tmp_path / "py_mongo"
+    py_mongo_dir.mkdir()
+    (py_mongo_dir / "pyproject.toml").write_text(
+        '[project]\nname = "mongo-app"\ndependencies = ["pymongo", "fastapi"]\n',
+        encoding="utf-8",
+    )
+    indexer = RepoIndexer(py_mongo_dir)
+    context = ProjectContext(repo_name="mongo-app", repo_root=str(py_mongo_dir))
+    detector = PythonDetector()
+    detector.analyze(indexer, context)
+
+    mongo_svc = next((s for s in context.services if s.name == "mongodb"), None)
+    assert mongo_svc is not None
+    assert mongo_svc.image == "mongo:7"
+    assert mongo_svc.ports == [27017]
+
+    # 2. Mock driver: mongomock is filtered out
+    py_mock_dir = tmp_path / "py_mock"
+    py_mock_dir.mkdir()
+    (py_mock_dir / "pyproject.toml").write_text(
+        '[project]\nname = "mock-app"\ndependencies = ["mongomock", "pytest"]\n',
+        encoding="utf-8",
+    )
+    indexer_mock = RepoIndexer(py_mock_dir)
+    context_mock = ProjectContext(repo_name="mock-app", repo_root=str(py_mock_dir))
+    detector.analyze(indexer_mock, context_mock)
+    assert not any(s.name == "mongodb" for s in context_mock.services)
+
+
+def test_python_detector_uv_dependency_groups_and_extras(tmp_path: Path):
+    uv_dir = tmp_path / "uv_app"
+    uv_dir.mkdir()
+    (uv_dir / "uv.lock").write_text("", encoding="utf-8")
+    (uv_dir / "pyproject.toml").write_text(
+        """[project]
+name = "uv-app"
+dependencies = ["fastapi", "ruff"]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[dependency-groups]
+test = ["pytest-cov"]
+""",
+        encoding="utf-8",
+    )
+    indexer = RepoIndexer(uv_dir)
+    context = ProjectContext(repo_name="uv-app", repo_root=str(uv_dir))
+    detector = PythonDetector()
+    detector.analyze(indexer, context)
+
+    assert len(context.languages) == 1
+    py = context.languages[0]
+    assert py.package_manager == "uv"
+    assert py.install_cmd == "uv sync --frozen --all-extras --all-groups"
+    assert py.test_cmd == "uv run pytest"
+    assert py.lint_cmd == "uv run ruff check ."
+
+
+def test_python_detector_custom_postgres_credentials_from_env_example(tmp_path: Path):
+    pg_dir = tmp_path / "pg_app"
+    pg_dir.mkdir()
+    (pg_dir / ".env.example").write_text(
+        "DATABASE_URL=postgres://my_user:secret_pass@localhost:5432/my_production_db\n",
+        encoding="utf-8",
+    )
+    (pg_dir / "pyproject.toml").write_text(
+        '[project]\nname = "pg-app"\ndependencies = ["psycopg2-binary"]\n',
+        encoding="utf-8",
+    )
+    # Env detector runs first in normal scan
+    from heurix.detectors.env_detector import EnvDetector
+    indexer = RepoIndexer(pg_dir)
+    context = ProjectContext(repo_name="pg-app", repo_root=str(pg_dir))
+    env_det = EnvDetector()
+    env_det.analyze(indexer, context)
+
+    py_det = PythonDetector()
+    py_det.analyze(indexer, context)
+
+    pg_svc = next((s for s in context.services if s.name == "postgres"), None)
+    assert pg_svc is not None
+    assert pg_svc.env["POSTGRES_USER"] == "my_user"
+    assert pg_svc.env["POSTGRES_PASSWORD"] == "secret_pass"
+    assert pg_svc.env["POSTGRES_DB"] == "my_production_db"
+
+
+def test_node_detector_exact_nvmrc_and_node_version(tmp_path: Path):
+    node_dir = tmp_path / "node_exact"
+    node_dir.mkdir()
+    (node_dir / ".nvmrc").write_text("v20.11.0\n", encoding="utf-8")
+    (node_dir / "package.json").write_text('{"name": "exact-node"}', encoding="utf-8")
+
+    indexer = RepoIndexer(node_dir)
+    context = ProjectContext(repo_name="exact-node", repo_root=str(node_dir))
+    detector = NodeDetector()
+    detector.analyze(indexer, context)
+
+    node = context.get_language("node")
+    assert node is not None
+    assert node.runtime_version == "20.11.0"
+
 

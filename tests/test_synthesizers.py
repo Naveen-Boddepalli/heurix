@@ -2174,3 +2174,106 @@ def test_e2e_parallel_job_synthesis_and_combined_mode():
     ]
     assert plain_default == plain_false
     assert "test-e2e" not in plain_default
+
+
+def test_github_actions_permissions_block_and_action_versions_policy():
+    syn = GitHubActionsSynthesizer()
+    ctx = ProjectContext(
+        repo_name="perms-test",
+        repo_root="/demo",
+        languages=[
+            LanguageContext(
+                language="python",
+                runtime_version="3.12",
+                version_source=".python-version",
+                package_manager="pip",
+                install_cmd="pip install -r requirements.txt",
+                test_cmd="pytest",
+            )
+        ],
+    )
+
+    from ruamel.yaml import YAML
+    yaml_parser = YAML(typ="safe")
+
+    # 1. Default permissions: contents: read
+    default_out = syn.synthesize(ctx)[".github/workflows/ci.yml"]
+    default_doc = yaml_parser.load(default_out)
+    assert default_doc["permissions"] == {"contents": "read"}
+    assert "actions/setup-python@v5" in default_out
+
+    # 2. Custom permissions and action_versions overrides via policy
+    custom_ctx = ctx.model_copy(
+        update={
+            "policy_config": {
+                "ci": {
+                    "permissions": {"contents": "read", "pull-requests": "write"},
+                    "action_versions": {
+                        "actions/setup-python": "v7.1.0",
+                        "actions/checkout": "v4.2.0",
+                    },
+                }
+            }
+        }
+    )
+    custom_out = syn.synthesize(custom_ctx)[".github/workflows/ci.yml"]
+    custom_doc = yaml_parser.load(custom_out)
+    assert custom_doc["permissions"] == {"contents": "read", "pull-requests": "write"}
+    assert "actions/setup-python@v7.1.0" in custom_out
+    assert "actions/checkout@v4.2.0" in custom_out
+
+
+def test_kubernetes_hardened_security_context_and_secret_wiring():
+    from ruamel.yaml import YAML
+    yaml_parser = YAML(typ="safe")
+    k8s_syn = KubernetesSynthesizer()
+    ctx = ProjectContext(
+        repo_name="secure-app",
+        repo_root="/demo",
+        languages=[
+            LanguageContext(
+                language="python",
+                runtime_version="3.12",
+                version_source="default",
+                package_manager="pip",
+                install_cmd="pip install -r requirements.txt",
+                framework="FastAPI",
+            )
+        ],
+        containers=[
+            ContainerContext(
+                dockerfile_path="Dockerfile",
+                exposed_ports=[8000],
+            )
+        ],
+        required_secrets=["DATABASE_PASSWORD", "API_KEY"],
+        env_vars={"APP_ENV": "production", "PORT": "8000"},
+    )
+
+    manifests = k8s_syn.synthesize(ctx)
+    assert "k8s/deployment.yaml" in manifests
+    assert "k8s/secret.yaml" in manifests
+    assert "k8s/configmap.yaml" in manifests
+
+    dep_doc = yaml_parser.load(manifests["k8s/deployment.yaml"])
+    pod_sec = dep_doc["spec"]["template"]["spec"]["securityContext"]
+    assert pod_sec["runAsNonRoot"] is True
+    assert pod_sec["seccompProfile"]["type"] == "RuntimeDefault"
+
+    container = dep_doc["spec"]["template"]["spec"]["containers"][0]
+    c_sec = container["securityContext"]
+    assert c_sec["allowPrivilegeEscalation"] is False
+    assert c_sec["readOnlyRootFilesystem"] is True
+    assert c_sec["capabilities"]["drop"] == ["ALL"]
+
+    # envFrom wiring
+    env_from = container["envFrom"]
+    assert any("configMapRef" in ef for ef in env_from)
+    assert any("secretRef" in ef for ef in env_from)
+
+    # Secret manifest verification
+    sec_doc = yaml_parser.load(manifests["k8s/secret.yaml"])
+    assert sec_doc["kind"] == "Secret"
+    assert "DATABASE_PASSWORD" in sec_doc["stringData"]
+    assert "API_KEY" in sec_doc["stringData"]
+

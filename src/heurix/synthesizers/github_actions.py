@@ -282,6 +282,10 @@ def _build_services_map_vm(scoped_services: Sequence[ServiceRequirement]) -> Dic
             svc_entry["options"] = (
                 '--health-cmd "redis-cli ping" --health-interval 10s --health-timeout 5s --health-retries 5'
             )
+        elif "mongo" in svc_key or "mongo" in svc.image.lower():
+            svc_entry["options"] = (
+                '--health-cmd "mongosh --eval \'db.adminCommand(\\"ping\\")\'" --health-interval 10s --health-timeout 5s --health-retries 5'
+            )
 
         services_dict[svc_key] = svc_entry
     return services_dict
@@ -292,9 +296,10 @@ def _build_action_step_vm(
     action_repo: str,
     action_shas: Dict[str, str],
     with_cfg: Optional[Dict[str, Any]] = None,
+    action_versions: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     """Build a plain workflow step view-model referencing a pinned tag or 40-char commit SHA."""
-    default_ref = ACTION_VERSIONS[action_repo]
+    default_ref = (action_versions or {}).get(action_repo) or ACTION_VERSIONS.get(action_repo, "v4")
     step: Dict[str, Any] = {"name": name}
     pinned_sha = action_shas.get(action_repo, "").strip()
     if pinned_sha and _SHA40_RE.match(pinned_sha):
@@ -411,6 +416,7 @@ def _build_step_env(
     effective_env_vars: Optional[Dict[str, str]],
     effective_test_secrets: Optional[Sequence[str]],
     effective_deployment_secrets: Optional[Set[str]],
+    scoped_services: Optional[Sequence[ServiceRequirement]] = None,
 ) -> Dict[str, str]:
     """Build SEC-02/SEC-03 filtered environment dictionary for test and E2E steps."""
     env_source = effective_env_vars if effective_env_vars is not None else context.env_vars
@@ -430,6 +436,32 @@ def _build_step_env(
     for s in test_sec_source:
         if s not in deployment_secret_set and not is_deployment_secret_key(s):
             step_env[s] = f"${{{{ secrets.{s} }}}}"
+
+    for svc in (scoped_services or []):
+        svc_name = svc.name.lower()
+        if "postgres" in svc_name or "postgres" in svc.image.lower():
+            pg_user = svc.env.get("POSTGRES_USER", "test_user") if svc.env else "test_user"
+            pg_pass = svc.env.get("POSTGRES_PASSWORD", "test_password") if svc.env else "test_password"
+            pg_db = svc.env.get("POSTGRES_DB", "test_db") if svc.env else "test_db"
+            if "DATABASE_URL" in step_env and not step_env["DATABASE_URL"].startswith("${{"):
+                step_env["DATABASE_URL"] = f"postgresql://{pg_user}:{pg_pass}@localhost:5432/{pg_db}"
+            elif "DATABASE_URL" in env_source and not str(env_source["DATABASE_URL"]).startswith("${{"):
+                step_env["DATABASE_URL"] = f"postgresql://{pg_user}:{pg_pass}@localhost:5432/{pg_db}"
+        elif "mongo" in svc_name or "mongo" in svc.image.lower():
+            if "MONGO_URL" in step_env and not step_env["MONGO_URL"].startswith("${{"):
+                step_env["MONGO_URL"] = "mongodb://localhost:27017/test_db"
+            elif "MONGO_URL" in env_source and not str(env_source["MONGO_URL"]).startswith("${{"):
+                step_env["MONGO_URL"] = "mongodb://localhost:27017/test_db"
+            if "MONGODB_URI" in step_env and not step_env["MONGODB_URI"].startswith("${{"):
+                step_env["MONGODB_URI"] = "mongodb://localhost:27017/test_db"
+            elif "MONGODB_URI" in env_source and not str(env_source["MONGODB_URI"]).startswith("${{"):
+                step_env["MONGODB_URI"] = "mongodb://localhost:27017/test_db"
+        elif "redis" in svc_name or "redis" in svc.image.lower():
+            if "REDIS_URL" in step_env and not step_env["REDIS_URL"].startswith("${{"):
+                step_env["REDIS_URL"] = "redis://localhost:6379"
+            elif "REDIS_URL" in env_source and not str(env_source["REDIS_URL"]).startswith("${{"):
+                step_env["REDIS_URL"] = "redis://localhost:6379"
+
     return step_env
 
 
@@ -477,10 +509,14 @@ def _build_runtime_setup_steps(
     effective_runs_on: str,
     ver_matrix: Sequence[str],
     job_id: str,
+    action_versions: Optional[Dict[str, str]] = None,
 ) -> List[Dict[str, Any]]:
     """Build checkout, pinned runtime setup, package manager setup, and install steps."""
+    def _action(name: str, repo: str, with_cfg: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        return _build_action_step_vm(name, repo, action_shas, with_cfg, action_versions=action_versions)
+
     steps: List[Dict[str, Any]] = [
-        _build_action_step_vm("Checkout repository", "actions/checkout", action_shas)
+        _action("Checkout repository", "actions/checkout")
     ]
 
     install_cmd = (
@@ -503,10 +539,9 @@ def _build_runtime_setup_steps(
             if ver_matrix and effective_version:
                 uv_with["python-version"] = effective_version
             steps.append(
-                _build_action_step_vm(
+                _action(
                     "Install uv",
                     "astral-sh/setup-uv",
-                    action_shas,
                     uv_with,
                 )
             )
@@ -514,10 +549,9 @@ def _build_runtime_setup_steps(
             if effective_version:
                 py_with["python-version"] = effective_version
             steps.append(
-                _build_action_step_vm(
+                _action(
                     py_label,
                     "actions/setup-python",
-                    action_shas,
                     py_with or None,
                 )
             )
@@ -533,18 +567,16 @@ def _build_runtime_setup_steps(
             if cache_dep_path:
                 py_with["cache-dependency-path"] = cache_dep_path
             steps.append(
-                _build_action_step_vm(
+                _action(
                     py_label,
                     "actions/setup-python",
-                    action_shas,
                     py_with,
                 )
             )
             steps.append(
-                _build_action_step_vm(
+                _action(
                     "Install Poetry",
                     "snok/install-poetry",
-                    action_shas,
                     {"virtualenvs-create": True, "virtualenvs-in-project": True},
                 )
             )
@@ -563,10 +595,9 @@ def _build_runtime_setup_steps(
                 py_with.setdefault("cache", "pip")
                 py_with["cache-dependency-path"] = cache_dep_path
             steps.append(
-                _build_action_step_vm(
+                _action(
                     py_label,
                     "actions/setup-python",
-                    action_shas,
                     py_with or None,
                 )
             )
@@ -580,10 +611,9 @@ def _build_runtime_setup_steps(
         node_label = f"Set up Node.js {effective_version}" if effective_version else "Set up Node.js"
         if unit.package_manager == "pnpm":
             steps.append(
-                _build_action_step_vm(
+                _action(
                     "Install pnpm",
                     "pnpm/action-setup",
-                    action_shas,
                     {"version": "9"},
                 )
             )
@@ -593,10 +623,9 @@ def _build_runtime_setup_steps(
             if cache_dep_path:
                 node_with["cache-dependency-path"] = cache_dep_path
             steps.append(
-                _build_action_step_vm(
+                _action(
                     node_label,
                     "actions/setup-node",
-                    action_shas,
                     node_with,
                 )
             )
@@ -612,10 +641,9 @@ def _build_runtime_setup_steps(
             if cache_dep_path:
                 node_with["cache-dependency-path"] = cache_dep_path
             steps.append(
-                _build_action_step_vm(
+                _action(
                     node_label,
                     "actions/setup-node",
-                    action_shas,
                     node_with,
                 )
             )
@@ -626,10 +654,9 @@ def _build_runtime_setup_steps(
                 })
         elif unit.package_manager == "bun":
             steps.append(
-                _build_action_step_vm(
+                _action(
                     "Set up Bun",
                     "oven-sh/setup-bun",
-                    action_shas,
                     {"bun-version": "latest"},
                 )
             )
@@ -645,10 +672,9 @@ def _build_runtime_setup_steps(
             if cache_dep_path:
                 node_with["cache-dependency-path"] = cache_dep_path
             steps.append(
-                _build_action_step_vm(
+                _action(
                     node_label,
                     "actions/setup-node",
-                    action_shas,
                     node_with,
                 )
             )
@@ -662,10 +688,9 @@ def _build_runtime_setup_steps(
         rust_label = f"Set up Rust ({effective_version})" if effective_version else "Set up Rust"
         rust_with: Optional[Dict[str, Any]] = {"toolchain": effective_version} if effective_version else None
         steps.append(
-            _build_action_step_vm(
+            _action(
                 rust_label,
                 "dtolnay/rust-toolchain",
-                action_shas,
                 rust_with,
             )
         )
@@ -676,7 +701,7 @@ def _build_runtime_setup_steps(
                 "prefix-key": job_id,
             }
         steps.append(
-            _build_action_step_vm("Rust Cache", "Swatinem/rust-cache", action_shas, rust_cache_with)
+            _action("Rust Cache", "Swatinem/rust-cache", rust_cache_with)
         )
 
     elif unit.language == "go":
@@ -687,10 +712,9 @@ def _build_runtime_setup_steps(
         if cache_dep_path:
             go_with["cache-dependency-path"] = cache_dep_path
         steps.append(
-            _build_action_step_vm(
+            _action(
                 go_label,
                 "actions/setup-go",
-                action_shas,
                 go_with,
             )
         )
@@ -754,6 +778,7 @@ def _build_test_job_vm(
     effective_test_secrets: Optional[Sequence[str]] = None,
     effective_deployment_secrets: Optional[Set[str]] = None,
     include_combined_e2e: bool = False,
+    action_versions: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     """Build a single CI test job view-model for a normalized _BuildUnit."""
     os_matrix = _resolve_os_matrix(context, runner_override)
@@ -800,6 +825,7 @@ def _build_test_job_vm(
         effective_runs_on=effective_runs_on,
         ver_matrix=ver_matrix,
         job_id=job_id,
+        action_versions=action_versions,
     )
 
     if pre_steps:
@@ -852,6 +878,7 @@ def _build_test_job_vm(
         effective_env_vars,
         effective_test_secrets,
         effective_deployment_secrets,
+        scoped_services=scoped_services,
     )
 
     # Test step (SEC-02 env redaction + SEC-03 secret isolation)
@@ -920,6 +947,7 @@ def _build_e2e_job_vm(
         effective_env_vars,
         effective_test_secrets,
         effective_deployment_secrets,
+        scoped_services=None,
     )
     steps.extend(_build_e2e_steps(unit, step_env))
 
@@ -1155,6 +1183,7 @@ class GitHubActionsSynthesizer(BaseSynthesizer):
                     effective_test_secrets=effective_test_secrets,
                     effective_deployment_secrets=effective_deployment_secrets,
                     include_combined_e2e=combined_e2e,
+                    action_versions=policy.ci.action_versions,
                 )
                 test_job_ids.append("test")
             else:
@@ -1183,6 +1212,7 @@ class GitHubActionsSynthesizer(BaseSynthesizer):
                         effective_test_secrets=effective_test_secrets,
                         effective_deployment_secrets=effective_deployment_secrets,
                         include_combined_e2e=combined_e2e,
+                        action_versions=policy.ci.action_versions,
                     )
                     test_job_ids.append(job_id)
 
@@ -1214,8 +1244,10 @@ class GitHubActionsSynthesizer(BaseSynthesizer):
         deploy_if = f"github.ref == 'refs/heads/{default_branch}' && github.event_name == 'push'"
         jobs_vm.update(_build_deploy_jobs_vm(context, deploy_needs, deploy_if, action_shas, policy))
 
+        permissions_vm = dict(policy.ci.permissions) if policy.ci.permissions else {"contents": "read"}
         workflow_vm: Dict[str, Any] = {
             "name": "CI",
+            "permissions": permissions_vm,
             "on": {
                 "push": {
                     "branches": list(trigger_branches),

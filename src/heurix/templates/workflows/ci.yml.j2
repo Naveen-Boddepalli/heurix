@@ -4,7 +4,14 @@
 {% set wf_name = name if name is defined and name is not none else 'CI' %}
 {% set on_cfg = on if on is defined and on is not none else {} %}
 {% set jobs_cfg = jobs if jobs is defined and jobs is not none else {} %}
+{% set perms_cfg = permissions if permissions is defined and permissions is not none else {} %}
 name: {{ wf_name | yaml_scalar }}
+{% if perms_cfg %}
+permissions:
+{% for perm_name, perm_val in perms_cfg.items() %}
+  {{ perm_name | yaml_scalar }}: {{ perm_val | yaml_scalar }}
+{% endfor %}
+{% endif %}
 on:
 {% for event_name, event_cfg in on_cfg.items() %}
 {% if event_cfg is not none %}

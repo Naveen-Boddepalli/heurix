@@ -119,6 +119,7 @@ def _run_generate(
     side_by_side: bool = False,
     diff_style: str = "unified",
     strict: bool = False,
+    allow_empty: bool = False,
 ) -> None:
     """Core generate/diff workflow using pure Python arguments (safe from Typer OptionInfo)."""
     effective_diff_style = ("side-by-side" if side_by_side else (diff_style or "unified")).strip().lower()
@@ -149,7 +150,19 @@ def _run_generate(
     if explain:
         print_explain_tree(context)
 
-    # 3. Resolve policy and interactive ambiguities
+    # 3. Guard against empty / no-code repository
+    if not context.languages and not context.containers and not allow_empty:
+        console.print(
+            Panel.fit(
+                "[yellow]No code, language manifests, or Dockerfiles detected in repository.[/yellow]\n"
+                "[dim]Refusing to generate empty workflows in a directory with no code. Pass --allow-empty to override.[/dim]",
+                title="Empty Repository",
+                border_style="yellow",
+            )
+        )
+        return
+
+    # 4. Resolve policy and interactive ambiguities
     policy = HeurixPolicy.from_raw(context.policy_config)
     include_dependabot = policy.ci.include_dependabot
     include_k8s = (policy.ci.include_k8s if policy.ci.include_k8s is not None else k8s) if k8s else False
@@ -327,6 +340,9 @@ def generate(
     strict: bool = typer.Option(
         False, "--strict", help="Treat optional manifest validation warnings as fatal errors."
     ),
+    allow_empty: bool = typer.Option(
+        False, "--allow-empty", help="Allow generating workflow scaffolding even if no code or manifests are detected."
+    ),
 ):
     """
     Scan codebase and synthesize deterministic CI/CD and infrastructure YAML files.
@@ -342,6 +358,7 @@ def generate(
         side_by_side=side_by_side,
         diff_style=diff_style,
         strict=strict,
+        allow_empty=allow_empty,
     )
 
 

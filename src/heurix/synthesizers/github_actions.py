@@ -9,6 +9,7 @@ import copy
 from dataclasses import dataclass, replace
 import re
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
+from urllib.parse import quote
 from heurix.core.context import ProjectContext, ServiceRequirement
 from heurix.core.policy import (
     HeurixPolicy,
@@ -21,16 +22,16 @@ from heurix.synthesizers.base import BaseSynthesizer
 from heurix.synthesizers.templating import render_yaml_template
 
 ACTION_VERSIONS: Dict[str, str] = {
-    "actions/checkout": "v4",
+    "actions/checkout": "v7",
     "astral-sh/setup-uv": "v5",
-    "actions/setup-python": "v5",
+    "actions/setup-python": "v7.1.0",
     "snok/install-poetry": "v1",
     "pnpm/action-setup": "v4",
-    "actions/setup-node": "v4",
+    "actions/setup-node": "v7",
     "oven-sh/setup-bun": "v2",
     "dtolnay/rust-toolchain": "stable",
     "Swatinem/rust-cache": "v2",
-    "actions/setup-go": "v5",
+    "actions/setup-go": "v7",
     "golangci/golangci-lint-action": "v4",
     "amondnet/vercel-action": "v25",
     "FirebaseExtended/action-hosting-deploy": "v0",
@@ -437,29 +438,36 @@ def _build_step_env(
         if s not in deployment_secret_set and not is_deployment_secret_key(s):
             step_env[s] = f"${{{{ secrets.{s} }}}}"
 
+    ci_policy_env: Dict[str, str] = (
+        HeurixPolicy.from_raw(context.policy_config).ci.env if scoped_services else {}
+    )
     for svc in (scoped_services or []):
         svc_name = svc.name.lower()
         if "postgres" in svc_name or "postgres" in svc.image.lower():
-            pg_user = svc.env.get("POSTGRES_USER", "test_user") if svc.env else "test_user"
-            pg_pass = svc.env.get("POSTGRES_PASSWORD", "test_password") if svc.env else "test_password"
-            pg_db = svc.env.get("POSTGRES_DB", "test_db") if svc.env else "test_db"
-            if "DATABASE_URL" in step_env and not step_env["DATABASE_URL"].startswith("${{"):
-                step_env["DATABASE_URL"] = f"postgresql://{pg_user}:{pg_pass}@localhost:5432/{pg_db}"
-            elif "DATABASE_URL" in env_source and not str(env_source["DATABASE_URL"]).startswith("${{"):
+            pg_user = quote(svc.env.get("POSTGRES_USER", "test_user") if svc.env else "test_user", safe="")
+            pg_pass = quote(
+                svc.env.get("POSTGRES_PASSWORD", "test_password") if svc.env else "test_password",
+                safe="",
+            )
+            pg_db = quote(svc.env.get("POSTGRES_DB", "test_db") if svc.env else "test_db", safe="")
+            if "DATABASE_URL" in ci_policy_env:
+                step_env["DATABASE_URL"] = str(ci_policy_env["DATABASE_URL"])
+            elif "DATABASE_URL" in step_env:
                 step_env["DATABASE_URL"] = f"postgresql://{pg_user}:{pg_pass}@localhost:5432/{pg_db}"
         elif "mongo" in svc_name or "mongo" in svc.image.lower():
-            if "MONGO_URL" in step_env and not step_env["MONGO_URL"].startswith("${{"):
+            if "MONGO_URL" in ci_policy_env:
+                step_env["MONGO_URL"] = str(ci_policy_env["MONGO_URL"])
+            elif "MONGO_URL" in step_env:
                 step_env["MONGO_URL"] = "mongodb://localhost:27017/test_db"
-            elif "MONGO_URL" in env_source and not str(env_source["MONGO_URL"]).startswith("${{"):
-                step_env["MONGO_URL"] = "mongodb://localhost:27017/test_db"
-            if "MONGODB_URI" in step_env and not step_env["MONGODB_URI"].startswith("${{"):
-                step_env["MONGODB_URI"] = "mongodb://localhost:27017/test_db"
-            elif "MONGODB_URI" in env_source and not str(env_source["MONGODB_URI"]).startswith("${{"):
+
+            if "MONGODB_URI" in ci_policy_env:
+                step_env["MONGODB_URI"] = str(ci_policy_env["MONGODB_URI"])
+            elif "MONGODB_URI" in step_env:
                 step_env["MONGODB_URI"] = "mongodb://localhost:27017/test_db"
         elif "redis" in svc_name or "redis" in svc.image.lower():
-            if "REDIS_URL" in step_env and not step_env["REDIS_URL"].startswith("${{"):
-                step_env["REDIS_URL"] = "redis://localhost:6379"
-            elif "REDIS_URL" in env_source and not str(env_source["REDIS_URL"]).startswith("${{"):
+            if "REDIS_URL" in ci_policy_env:
+                step_env["REDIS_URL"] = str(ci_policy_env["REDIS_URL"])
+            elif "REDIS_URL" in step_env:
                 step_env["REDIS_URL"] = "redis://localhost:6379"
 
     return step_env

@@ -86,10 +86,14 @@ def test_scan_and_check_reject_missing_or_non_directory_paths(tmp_path: Path):
     missing = tmp_path / "missing"
     a_file = tmp_path / "file.txt"
     a_file.write_text("hi", encoding="utf-8")
+    def _flat(text: str) -> str:
+        # Rich wraps long paths at the console width; compare whitespace-normalized output.
+        return " ".join(text.split())
+
     for cmd in ("scan", "check", "generate"):
         res = runner.invoke(app, [cmd, "--path", str(missing)])
         assert res.exit_code == 1, (cmd, res.stdout)
-        assert "does not exist" in res.stdout
+        assert "does not exist" in _flat(res.stdout)
         res_file = runner.invoke(app, [cmd, "--path", str(a_file)])
         assert res_file.exit_code == 1, (cmd, res_file.stdout)
-        assert "is not a directory" in res_file.stdout
+        assert "is not a directory" in _flat(res_file.stdout)

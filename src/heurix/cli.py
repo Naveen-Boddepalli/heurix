@@ -77,6 +77,18 @@ def _resolve_or_exit(repo_path: Path, rel_path: str | Path) -> Path:
         raise typer.Exit(code=1)
 
 
+def _resolve_repo_dir_or_exit(path: str) -> Path:
+    """Resolve `path` to an existing directory or exit with code 1 and a clear error."""
+    repo_path = Path(path).resolve()
+    if not repo_path.exists():
+        console.print(f"[bold red]Error:[/bold red] Directory '{path}' does not exist.")
+        raise typer.Exit(code=1)
+    if not repo_path.is_dir():
+        console.print(f"[bold red]Error:[/bold red] '{path}' is not a directory.")
+        raise typer.Exit(code=1)
+    return repo_path
+
+
 def _synthesize_or_exit(
     context: ProjectContext,
     *,
@@ -137,10 +149,7 @@ def _run_generate(
 
     print_banner()
 
-    repo_path = Path(path).resolve()
-    if not repo_path.exists() or not repo_path.is_dir():
-        console.print(f"[bold red]Error:[/bold red] Directory '{path}' does not exist.")
-        raise typer.Exit(code=1)
+    repo_path = _resolve_repo_dir_or_exit(path)
 
     # 1. Scan and analyze repository into ProjectContext IR
     with console.status("[bold cyan]Scanning repository and running heuristic detectors...[/bold cyan]"):
@@ -396,7 +405,7 @@ def check(
     Continuous drift detection: verifies whether existing YAML configs match codebase requirements.
     Exits with code 1 if drift is detected (ideal for CI and git pre-commit hooks).
     """
-    repo_path = Path(path).resolve()
+    repo_path = _resolve_repo_dir_or_exit(path)
     context = analyze_repository(repo_path)
     policy = HeurixPolicy.from_raw(context.policy_config)
     include_dependabot = policy.ci.include_dependabot
@@ -430,7 +439,7 @@ def scan(
     """
     Scan codebase and output the strongly-typed ProjectContext Intermediate Representation (IR).
     """
-    repo_path = Path(path).resolve()
+    repo_path = _resolve_repo_dir_or_exit(path)
     context = analyze_repository(repo_path)
     console.print_json(context.model_dump_json(indent=2))
 

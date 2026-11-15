@@ -532,7 +532,7 @@ class PythonDetector(BaseDetector):
         service_source = "python dependencies" if base_dir == "." else f"{base_dir}/python dependencies"
 
         has_real_postgres = any(
-            db in deps_clean for db in ["psycopg2", "asyncpg", "postgresql", "pgvector"]
+            db in deps_clean for db in ["psycopg", "asyncpg", "postgresql", "pgvector"]
         )
         if has_real_postgres:
             if not any(s.name == "postgres" and s.package_path == pkg_path for s in context.services):

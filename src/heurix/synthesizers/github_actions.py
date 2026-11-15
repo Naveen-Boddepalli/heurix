@@ -75,6 +75,7 @@ class _BuildUnit:
     unit_test_runner: Optional[str] = None
     e2e_test_runner: Optional[str] = None
     e2e_cmd: Optional[str] = None
+    package_manager_spec_file: Optional[str] = None
 
 
 def _normalize_working_dir(raw_path: Optional[str]) -> str:
@@ -160,6 +161,7 @@ def _collect_build_units(context: ProjectContext) -> List[_BuildUnit]:
                 unit_test_runner=pkg.unit_test_runner,
                 e2e_test_runner=pkg.e2e_test_runner,
                 e2e_cmd=pkg.e2e_cmd,
+                package_manager_spec_file=pkg.package_manager_spec_file,
             )
         )
 
@@ -197,6 +199,7 @@ def _collect_build_units(context: ProjectContext) -> List[_BuildUnit]:
                 unit_test_runner=lang.unit_test_runner,
                 e2e_test_runner=lang.e2e_test_runner,
                 e2e_cmd=lang.e2e_cmd,
+                package_manager_spec_file=lang.package_manager_spec_file,
             )
         )
 
@@ -574,18 +577,19 @@ def _build_runtime_setup_steps(
                 py_with["python-version"] = effective_version
             if cache_dep_path:
                 py_with["cache-dependency-path"] = cache_dep_path
-            steps.append(
-                _action(
-                    py_label,
-                    "actions/setup-python",
-                    py_with,
-                )
-            )
+            # actions/setup-python `cache: poetry` needs the poetry executable on PATH first.
             steps.append(
                 _action(
                     "Install Poetry",
                     "snok/install-poetry",
                     {"virtualenvs-create": True, "virtualenvs-in-project": True},
+                )
+            )
+            steps.append(
+                _action(
+                    py_label,
+                    "actions/setup-python",
+                    py_with,
                 )
             )
             if install_cmd:
@@ -618,11 +622,20 @@ def _build_runtime_setup_steps(
     elif unit.language == "node":
         node_label = f"Set up Node.js {effective_version}" if effective_version else "Set up Node.js"
         if unit.package_manager == "pnpm":
+            # pnpm/action-setup fails when both `version` and package.json `packageManager`
+            # are set, so defer to `packageManager` whenever the project pins it.
+            spec_file = unit.package_manager_spec_file
+            if spec_file:
+                pnpm_with: Optional[Dict[str, Any]] = (
+                    None if spec_file == "package.json" else {"package_json_file": spec_file}
+                )
+            else:
+                pnpm_with = {"version": "9"}
             steps.append(
                 _action(
                     "Install pnpm",
                     "pnpm/action-setup",
-                    {"version": "9"},
+                    pnpm_with,
                 )
             )
             node_with: Dict[str, Any] = {"cache": "pnpm"}

@@ -102,6 +102,25 @@ def _has_real_postgres_adapter(
     return False
 
 
+def _package_manager_spec_file(
+    indexer: RepoIndexer, base_dir: str, pkg_data: Dict[str, Any], package_manager: str
+) -> Optional[str]:
+    """Return the package.json (local, then repo root) whose `packageManager` pins `package_manager`."""
+    prefix = f"{package_manager}@"
+    local_spec = pkg_data.get("packageManager")
+    if isinstance(local_spec, str) and local_spec.strip().startswith(prefix):
+        return _join(base_dir, "package.json")
+    if base_dir != "." and indexer.has_file("package.json"):
+        try:
+            root_data = json.loads(indexer.read_text("package.json") or "{}")
+        except Exception:
+            return None
+        root_spec = root_data.get("packageManager") if isinstance(root_data, dict) else None
+        if isinstance(root_spec, str) and root_spec.strip().startswith(prefix):
+            return "package.json"
+    return None
+
+
 def _detect_node_lockfile(indexer: RepoIndexer, base_dir: str) -> Optional[Tuple[str, str, str]]:
     """Detect package manager, install command, and lockfile path inside `base_dir`."""
     pnpm_lock = _join(base_dir, "pnpm-lock.yaml")
@@ -337,6 +356,12 @@ class NodeDetector(BaseDetector):
             install_cmd = "npm install"
             context.add_explain(f"Detected Package Manager: npm{scope_label}")
 
+        package_manager_spec_file = _package_manager_spec_file(indexer, base_dir, pkg_data, package_manager)
+        if package_manager_spec_file:
+            context.add_explain(
+                f"Detected pinned packageManager{scope_label}: {package_manager} (via {package_manager_spec_file})"
+            )
+
         # 4. Scripts: test, build, lint
         raw_scripts = pkg_data.get("scripts", {})
         scripts = raw_scripts if isinstance(raw_scripts, dict) else {}
@@ -476,6 +501,7 @@ class NodeDetector(BaseDetector):
             confidence=0.95,
             matrix_versions=list(matrix_versions),
             cache_dependency_path=cache_dependency_path,
+            package_manager_spec_file=package_manager_spec_file,
             is_workspace_root=is_workspace_root,
         )
 
@@ -501,6 +527,7 @@ class NodeDetector(BaseDetector):
                     e2e_cmd=e2e_cmd,
                     framework=framework,
                     cache_dependency_path=cache_dependency_path,
+                    package_manager_spec_file=package_manager_spec_file,
                     matrix_versions=list(matrix_versions),
                 )
             )

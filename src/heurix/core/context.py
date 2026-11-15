@@ -35,6 +35,8 @@ class LanguageContext(BaseModel):
     confidence: float = 1.0
     matrix_versions: List[str] = Field(default_factory=list)
     cache_dependency_path: Optional[str] = None
+    # package.json declaring an exact `packageManager` (e.g. "pnpm@9.12.0"), if any
+    package_manager_spec_file: Optional[str] = None
     is_workspace_root: Optional[bool] = None
 
 
@@ -72,6 +74,7 @@ class MonorepoPackage(BaseModel):
     e2e_cmd: Optional[str] = None
     framework: Optional[str] = None
     cache_dependency_path: Optional[str] = None
+    package_manager_spec_file: Optional[str] = None
     matrix_versions: List[str] = Field(default_factory=list)
 
 

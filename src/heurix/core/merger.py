@@ -181,6 +181,8 @@ class SmartMerger:
         self.yaml = YAML()
         self.yaml.preserve_quotes = True
         self.yaml.indent(mapping=2, sequence=4, offset=2)
+        # Match the template renderer's width so merged output never re-wraps long scalars.
+        self.yaml.width = 4096
 
     def merge_yaml(self, existing_content: str, new_content: str) -> str:
         """

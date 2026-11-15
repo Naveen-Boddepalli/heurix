@@ -13,6 +13,7 @@ from heurix.core.policy import (
     HeurixPolicy,
     K8sProbePolicy,
     is_sensitive_env_key,
+    is_valid_image_tag,
 )
 from heurix.synthesizers.base import BaseSynthesizer
 from heurix.synthesizers.templating import render_yaml_template
@@ -370,9 +371,22 @@ class KubernetesSynthesizer(BaseSynthesizer):
                 }
             )
 
+        # Env-derived tags come from scanned .env files and may be placeholders
+        # (e.g. "${GIT_SHA}"); only accept syntactically valid tags.
+        raw_tag = k8s_policy.image_tag or next(
+            (
+                tag
+                for tag in (
+                    str(context.env_vars.get("IMAGE_TAG") or "").strip(),
+                    str(context.env_vars.get("APP_VERSION") or "").strip(),
+                )
+                if tag and is_valid_image_tag(tag)
+            ),
+            "latest",
+        )
         container_vm: Dict[str, Any] = {
             "name": app_name,
-            "image": k8s_policy.image or f"{app_name}:latest",
+            "image": k8s_policy.image or f"{app_name}:{raw_tag}",
             "ports": [{"containerPort": port}],
             "resources": {
                 "requests": {"cpu": cpu_req, "memory": mem_req},

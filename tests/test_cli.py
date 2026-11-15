@@ -14,7 +14,7 @@ runner = CliRunner()
 def test_cli_version():
     result = runner.invoke(app, ["--version"])
     assert result.exit_code == 0
-    assert "0.2.0" in result.stdout
+    assert "0.2.1" in result.stdout
 
 
 def test_cli_init(tmp_path: Path):
@@ -980,7 +980,7 @@ def test_cli_side_by_side_and_auto_diff_modes(tmp_path: Path):
     )
     assert gen_sbs.exit_code == 0, gen_sbs.stdout
     assert "(side-by-side)" in gen_sbs.stdout
-    assert "actions/setup-python@v5" in ci_file.read_text(encoding="utf-8")
+    assert "actions/setup-python@v7.1.0" in ci_file.read_text(encoding="utf-8")
 
     # 4. Invalid --diff-style exits cleanly with code 1 and no traceback
     for bad_cmd in (

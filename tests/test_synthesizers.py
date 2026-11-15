@@ -46,14 +46,14 @@ def test_github_actions_synthesizer():
     assert ".github/workflows/ci.yml" in res
     content = res[".github/workflows/ci.yml"]
 
-    assert "actions/checkout@v4" in content
+    assert "actions/checkout@v7" in content
     assert "astral-sh/setup-uv@v5" in content
     assert "python-version: '3.12'" in content or 'python-version: "3.12"' in content or "python-version: 3.12" in content
     assert "uv sync --frozen" in content
     assert "uv run ruff check ." in content
     assert "uv run pytest" in content
     assert "postgres:16-alpine" in content
-    assert "${{ secrets.DATABASE_URL }}" in content
+    assert "postgresql://test_user:test@localhost:5432/test_db" in content
 
 
 def test_dependabot_synthesizer():
@@ -611,9 +611,9 @@ def test_action_pinning_and_optional_sha_pinning():
     is_valid, errors = PreflightValidator().validate(".github/workflows/ci.yml", ci_yaml)
     assert is_valid, f"Validation failed: {errors}"
 
-    assert re.search(rf"uses: actions/checkout@{checkout_sha}\s+# v4", ci_yaml)
+    assert re.search(rf"uses: actions/checkout@{checkout_sha}\s+# v7", ci_yaml)
     assert re.search(rf"uses: golangci/golangci-lint-action@{lint_sha}\s+# v4", ci_yaml)
-    assert "actions/setup-go@v5" in ci_yaml
+    assert "actions/setup-go@v7" in ci_yaml
 
     doc = YAML(typ="safe").load(ci_yaml)
     uses_vals = [s["uses"] for s in doc["jobs"]["test"]["steps"] if "uses" in s]
@@ -1373,7 +1373,7 @@ def test_ci_template_decoupling_and_local_override(tmp_path: Path):
 
     assert ci_yaml.startswith("# Synthesized deterministically by Heurix (hx)\n")
     assert "# Non-destructive updates: preserve blocks marked with # @heurix:preserve" in ci_yaml
-    assert re.search(rf"uses: actions/checkout@{checkout_sha}\s+# v4", ci_yaml)
+    assert re.search(rf"uses: actions/checkout@{checkout_sha}\s+# v7", ci_yaml)
     assert "'3.10'" in ci_yaml
     assert "'1.20'" in ci_yaml
 
@@ -1411,7 +1411,7 @@ def test_ci_template_decoupling_and_local_override(tmp_path: Path):
     assert is_custom_valid, f"Custom override validation failed: {custom_errors}"
     assert "# Custom local workflow template" in custom_yaml
     assert "name: Custom CI" in custom_yaml
-    assert re.search(rf"uses: actions/checkout@{checkout_sha}\s+# v4", custom_yaml)
+    assert re.search(rf"uses: actions/checkout@{checkout_sha}\s+# v7", custom_yaml)
 
     # Custom [engine].templates_dir also takes precedence when contained inside repo_root
     alt_dir = tmp_path / "alt_templates" / "workflows"
@@ -2200,7 +2200,7 @@ def test_github_actions_permissions_block_and_action_versions_policy():
     default_out = syn.synthesize(ctx)[".github/workflows/ci.yml"]
     default_doc = yaml_parser.load(default_out)
     assert default_doc["permissions"] == {"contents": "read"}
-    assert "actions/setup-python@v5" in default_out
+    assert "actions/setup-python@v7.1.0" in default_out
 
     # 2. Custom permissions and action_versions overrides via policy
     custom_ctx = ctx.model_copy(
@@ -2209,8 +2209,8 @@ def test_github_actions_permissions_block_and_action_versions_policy():
                 "ci": {
                     "permissions": {"contents": "read", "pull-requests": "write"},
                     "action_versions": {
-                        "actions/setup-python": "v7.1.0",
-                        "actions/checkout": "v4.2.0",
+                        "actions/setup-python": "v7.2.0",
+                        "actions/checkout": "v7.0.1",
                     },
                 }
             }
@@ -2219,8 +2219,8 @@ def test_github_actions_permissions_block_and_action_versions_policy():
     custom_out = syn.synthesize(custom_ctx)[".github/workflows/ci.yml"]
     custom_doc = yaml_parser.load(custom_out)
     assert custom_doc["permissions"] == {"contents": "read", "pull-requests": "write"}
-    assert "actions/setup-python@v7.1.0" in custom_out
-    assert "actions/checkout@v4.2.0" in custom_out
+    assert "actions/setup-python@v7.2.0" in custom_out
+    assert "actions/checkout@v7.0.1" in custom_out
 
 
 def test_kubernetes_hardened_security_context_and_secret_wiring():
@@ -2277,3 +2277,64 @@ def test_kubernetes_hardened_security_context_and_secret_wiring():
     assert "DATABASE_PASSWORD" in sec_doc["stringData"]
     assert "API_KEY" in sec_doc["stringData"]
 
+
+
+def _postgres_ctx(**overrides):
+    base = dict(
+        repo_name="demo-app",
+        repo_root="/demo",
+        languages=[
+            LanguageContext(
+                language="python",
+                runtime_version="3.12",
+                version_source=".python-version",
+                package_manager="uv",
+                install_cmd="uv sync --frozen",
+                test_cmd="uv run pytest",
+            )
+        ],
+        services=[
+            ServiceRequirement(
+                name="postgres",
+                image="postgres:16-alpine",
+                ports=[5432],
+                env={"POSTGRES_USER": "ci@user", "POSTGRES_PASSWORD": "p@ss:w/rd#1"},
+                source_file="pyproject.toml",
+            )
+        ],
+        test_secrets=["DATABASE_URL"],
+    )
+    base.update(overrides)
+    return ProjectContext(**base)
+
+
+def _test_step_env(ci_yaml: str) -> dict:
+    from ruamel.yaml import YAML
+
+    doc = YAML(typ="safe").load(ci_yaml)
+    step = next(s for s in doc["jobs"]["test"]["steps"] if str(s.get("name", "")).startswith("Run tests"))
+    return step["env"]
+
+
+def test_service_database_url_percent_encodes_credentials():
+    ci_yaml = GitHubActionsSynthesizer().synthesize(_postgres_ctx())[".github/workflows/ci.yml"]
+    env = _test_step_env(ci_yaml)
+    assert env["DATABASE_URL"] == "postgresql://ci%40user:p%40ss%3Aw%2Frd%231@localhost:5432/test_db"
+
+
+def test_ci_env_policy_overrides_service_urls_and_is_validated():
+    from heurix.core.policy import HeurixPolicy
+
+    ctx = _postgres_ctx(
+        policy_config={"ci": {"env": {"DATABASE_URL": "postgresql://custom@localhost:5432/app"}}}
+    )
+    env = _test_step_env(GitHubActionsSynthesizer().synthesize(ctx)[".github/workflows/ci.yml"])
+    assert env["DATABASE_URL"] == "postgresql://custom@localhost:5432/app"
+
+    # ci.env is a declared, validated policy field (not silently ignored)
+    assert HeurixPolicy.from_raw({"ci": {"env": {"PORT": 8080}}}).ci.env == {"PORT": "8080"}
+
+    # A malformed ci.env must not crash synthesis
+    bad_ctx = _postgres_ctx(policy_config={"ci": {"env": "not-a-mapping"}})
+    bad_env = _test_step_env(GitHubActionsSynthesizer().synthesize(bad_ctx)[".github/workflows/ci.yml"])
+    assert bad_env["DATABASE_URL"].startswith("postgresql://")

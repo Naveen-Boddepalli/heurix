@@ -574,3 +574,76 @@ spec:
     )
     with pytest.raises(ValueError, match="Path traversal security violation"):
         syn.synthesize(traversal_ctx)
+
+
+def test_kubernetes_image_tag_configuration_and_parameterization():
+    yaml = YAML(typ="safe")
+    syn = KubernetesSynthesizer()
+
+    # 1. Default fallback is :latest
+    default_ctx = ProjectContext(
+        repo_name="demo-app",
+        repo_root="/demo",
+        languages=[_python_lang("FastAPI")],
+    )
+    res_default = syn.synthesize(default_ctx)
+    dep_default = yaml.load(res_default["k8s/deployment.yaml"])
+    assert dep_default["spec"]["template"]["spec"]["containers"][0]["image"] == "demo-app:latest"
+
+    # 2. Configurable image_tag via policy
+    policy_tag_ctx = ProjectContext(
+        repo_name="demo-app",
+        repo_root="/demo",
+        languages=[_python_lang("FastAPI")],
+        policy_config={"kubernetes": {"image_tag": "v1.2.3"}},
+    )
+    res_policy_tag = syn.synthesize(policy_tag_ctx)
+    dep_policy_tag = yaml.load(res_policy_tag["k8s/deployment.yaml"])
+    assert dep_policy_tag["spec"]["template"]["spec"]["containers"][0]["image"] == "demo-app:v1.2.3"
+
+    # 3. Parameterized tag via IMAGE_TAG in env_vars
+    env_tag_ctx = ProjectContext(
+        repo_name="demo-app",
+        repo_root="/demo",
+        languages=[_python_lang("FastAPI")],
+        env_vars={"IMAGE_TAG": "v2.0.0-rc1"},
+    )
+    res_env_tag = syn.synthesize(env_tag_ctx)
+    dep_env_tag = yaml.load(res_env_tag["k8s/deployment.yaml"])
+    assert dep_env_tag["spec"]["template"]["spec"]["containers"][0]["image"] == "demo-app:v2.0.0-rc1"
+
+    # 4. Explicit full image override takes precedence
+    full_image_ctx = ProjectContext(
+        repo_name="demo-app",
+        repo_root="/demo",
+        languages=[_python_lang("FastAPI")],
+        policy_config={"kubernetes": {"image": "ghcr.io/acme/demo:prod-stable", "image_tag": "v1.2.3"}},
+    )
+    res_full = syn.synthesize(full_image_ctx)
+    dep_full = yaml.load(res_full["k8s/deployment.yaml"])
+    assert dep_full["spec"]["template"]["spec"]["containers"][0]["image"] == "ghcr.io/acme/demo:prod-stable"
+
+
+def test_kubernetes_image_tag_rejects_invalid_values():
+    yaml = YAML(typ="safe")
+    syn = KubernetesSynthesizer()
+
+    # Placeholder values from scanned .env files fall back to the next candidate / :latest
+    placeholder_ctx = ProjectContext(
+        repo_name="demo-app",
+        repo_root="/demo",
+        languages=[_python_lang("FastAPI")],
+        env_vars={"IMAGE_TAG": "${GIT_SHA}", "APP_VERSION": "1.4.0"},
+    )
+    dep = yaml.load(syn.synthesize(placeholder_ctx)["k8s/deployment.yaml"])
+    assert dep["spec"]["template"]["spec"]["containers"][0]["image"] == "demo-app:1.4.0"
+
+    junk_ctx = placeholder_ctx.model_copy(update={"env_vars": {"IMAGE_TAG": "has space"}})
+    dep = yaml.load(syn.synthesize(junk_ctx)["k8s/deployment.yaml"])
+    assert dep["spec"]["template"]["spec"]["containers"][0]["image"] == "demo-app:latest"
+
+    # Invalid policy image_tag is a validation error
+    from heurix.core.policy import parse_heurix_policy
+
+    _, errors = parse_heurix_policy({"kubernetes": {"image_tag": "bad:tag"}})
+    assert errors

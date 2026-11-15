@@ -8,6 +8,7 @@ with zero reverse imports from `heurix.detectors`.
 from __future__ import annotations
 
 import copy
+import re
 from typing import Annotated, Any, Dict, List, Literal, Mapping, Optional, Sequence, Tuple
 
 from pydantic import (
@@ -83,6 +84,14 @@ def is_sensitive_env_key(key: str) -> bool:
     """Return True if an environment variable key matches any SEC-02 sensitive credential token."""
     key_upper = str(key).strip().upper()
     return any(sk in key_upper for sk in SENSITIVE_KEYWORDS) or "SERVICE_ACCOUNT" in key_upper
+
+
+_IMAGE_TAG_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$")
+
+
+def is_valid_image_tag(tag: str) -> bool:
+    """Return True if ``tag`` is a syntactically valid OCI/Docker image tag."""
+    return bool(_IMAGE_TAG_RE.fullmatch(str(tag)))
 
 
 def is_deployment_secret_key(key: str) -> bool:
@@ -193,6 +202,14 @@ class CiPolicy(_PolicyBase):
     permissions: Dict[str, str] = Field(default_factory=dict)
     runners: Dict[str, _NonEmptyStr] = Field(default_factory=dict)
     steps: CiStepsPolicy = Field(default_factory=CiStepsPolicy)
+    # Explicit overrides for CI service-container connection URLs
+    # (DATABASE_URL, MONGO_URL, MONGODB_URI, REDIS_URL).
+    env: Dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("env", mode="before")
+    @classmethod
+    def _coerce_env(cls, val: Any) -> Any:
+        return _coerce_scalar_env_dict(val)
 
 
 class JobPolicy(_PolicyBase):
@@ -279,6 +296,17 @@ class KubernetesPolicy(_PolicyBase):
     replicas: _StrictInt = Field(default=2, ge=1)
     namespace: Optional[_NonEmptyStr] = None
     image: Optional[_NonEmptyStr] = None
+    image_tag: Optional[_NonEmptyStr] = None
+
+    @field_validator("image_tag")
+    @classmethod
+    def _validate_image_tag(cls, val: Optional[str]) -> Optional[str]:
+        if val is not None and not is_valid_image_tag(val):
+            raise ValueError(
+                "image_tag must match [A-Za-z0-9_][A-Za-z0-9_.-]{0,127} (OCI tag syntax)"
+            )
+        return val
+
     port: Optional[Annotated[int, BeforeValidator(_reject_bool_for_int), Field(ge=1, le=65535)]] = None
     service_type: Literal["ClusterIP", "NodePort", "LoadBalancer"] = "ClusterIP"
     resources: K8sResourcesPolicy = Field(default_factory=K8sResourcesPolicy)

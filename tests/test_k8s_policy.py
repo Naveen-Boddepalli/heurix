@@ -160,6 +160,7 @@ def test_k8s_template_framework_profiles():
                 repo_name="web_app",
                 repo_root="/demo",
                 languages=[_node_lang(fw)],
+                containers=[ContainerContext(dockerfile_path="Dockerfile")],
             )
         )
         c = yaml.load(res["k8s/deployment.yaml"])["spec"]["template"]["spec"]["containers"][0]
@@ -179,6 +180,7 @@ def test_k8s_template_framework_profiles():
                 repo_name="backend_svc",
                 repo_root="/demo",
                 languages=[lang_ctx],
+                containers=[ContainerContext(dockerfile_path="Dockerfile")],
             )
         )
         c = yaml.load(res["k8s/deployment.yaml"])["spec"]["template"]["spec"]["containers"][0]
@@ -200,6 +202,7 @@ def test_k8s_template_framework_profiles():
                 repo_name="fast_svc",
                 repo_root="/demo",
                 languages=[lang_ctx],
+                containers=[ContainerContext(dockerfile_path="Dockerfile")],
             )
         )
         c = yaml.load(res["k8s/deployment.yaml"])["spec"]["template"]["spec"]["containers"][0]
@@ -372,6 +375,7 @@ def test_k8s_policy_overrides_probes_resources_and_hpa():
         repo_name="alias_app",
         repo_root="/demo",
         languages=[_python_lang("FastAPI")],
+        containers=[ContainerContext(dockerfile_path="Dockerfile")],
         policy_config={
             "k8s": {
                 "service_type": "NodePort",
@@ -561,6 +565,7 @@ spec:
         repo_name="escape_app",
         repo_root=str(symlink_repo),
         languages=[_python_lang("FastAPI")],
+        containers=[ContainerContext(dockerfile_path="Dockerfile")],
         policy_config={"kubernetes": {"hpa": {"enabled": True}}},
     )
     with pytest.raises(ValueError, match="Path traversal security violation"):
@@ -570,6 +575,7 @@ spec:
         repo_name="traversal_app",
         repo_root=str(repo),
         languages=[_python_lang("FastAPI")],
+        containers=[ContainerContext(dockerfile_path="Dockerfile")],
         policy_config={"engine": {"templates_dir": "../outside"}},
     )
     with pytest.raises(ValueError, match="Path traversal security violation"):
@@ -585,6 +591,7 @@ def test_kubernetes_image_tag_configuration_and_parameterization():
         repo_name="demo-app",
         repo_root="/demo",
         languages=[_python_lang("FastAPI")],
+        containers=[ContainerContext(dockerfile_path="Dockerfile")],
     )
     res_default = syn.synthesize(default_ctx)
     dep_default = yaml.load(res_default["k8s/deployment.yaml"])
@@ -595,6 +602,7 @@ def test_kubernetes_image_tag_configuration_and_parameterization():
         repo_name="demo-app",
         repo_root="/demo",
         languages=[_python_lang("FastAPI")],
+        containers=[ContainerContext(dockerfile_path="Dockerfile")],
         policy_config={"kubernetes": {"image_tag": "v1.2.3"}},
     )
     res_policy_tag = syn.synthesize(policy_tag_ctx)
@@ -606,6 +614,7 @@ def test_kubernetes_image_tag_configuration_and_parameterization():
         repo_name="demo-app",
         repo_root="/demo",
         languages=[_python_lang("FastAPI")],
+        containers=[ContainerContext(dockerfile_path="Dockerfile")],
         env_vars={"IMAGE_TAG": "v2.0.0-rc1"},
     )
     res_env_tag = syn.synthesize(env_tag_ctx)
@@ -617,6 +626,7 @@ def test_kubernetes_image_tag_configuration_and_parameterization():
         repo_name="demo-app",
         repo_root="/demo",
         languages=[_python_lang("FastAPI")],
+        containers=[ContainerContext(dockerfile_path="Dockerfile")],
         policy_config={"kubernetes": {"image": "ghcr.io/acme/demo:prod-stable", "image_tag": "v1.2.3"}},
     )
     res_full = syn.synthesize(full_image_ctx)
@@ -633,6 +643,7 @@ def test_kubernetes_image_tag_rejects_invalid_values():
         repo_name="demo-app",
         repo_root="/demo",
         languages=[_python_lang("FastAPI")],
+        containers=[ContainerContext(dockerfile_path="Dockerfile")],
         env_vars={"IMAGE_TAG": "${GIT_SHA}", "APP_VERSION": "1.4.0"},
     )
     dep = yaml.load(syn.synthesize(placeholder_ctx)["k8s/deployment.yaml"])

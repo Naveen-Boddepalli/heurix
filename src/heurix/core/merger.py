@@ -183,12 +183,15 @@ class SmartMerger:
         self.yaml.indent(mapping=2, sequence=4, offset=2)
         # Match the template renderer's width so merged output never re-wraps long scalars.
         self.yaml.width = 4096
+        # Human-readable notes about existing values the last merge replaced.
+        self.replaced: List[str] = []
 
     def merge_yaml(self, existing_content: str, new_content: str) -> str:
         """
         Merges new_content into existing_content non-destructively.
         Raises YamlSyntaxError if existing_content cannot be parsed.
         """
+        self.replaced = []
         if not existing_content.strip():
             return new_content
 
@@ -307,7 +310,9 @@ class SmartMerger:
         for job_id, job_val in new_jobs.items():
             if job_id in existing_jobs:
                 # Merge the managed job
-                merged_jobs[job_id] = self._merge_job(existing_jobs[job_id], job_val, raw_existing)
+                merged_jobs[job_id] = self._merge_job(
+                    existing_jobs[job_id], job_val, raw_existing, job_id=str(job_id)
+                )
             else:
                 merged_jobs[job_id] = job_val
 
@@ -440,18 +445,57 @@ class SmartMerger:
 
         return ex_to_new, new_to_ex
 
-    def _merge_job(self, existing_job: Any, new_job: Any, raw_existing: str = "") -> Any:
+    @staticmethod
+    def _key_has_inline_preserve(mapping: Any, key: str) -> bool:
+        """True if `key: value  # @heurix:preserve` marks this key on its own line."""
+        ca = getattr(mapping, "ca", None)
+        tokens = ca.items.get(key) if ca is not None else None
+        if not tokens or len(tokens) < 3 or tokens[2] is None:
+            return False
+        # ruamel folds following full-line comments into the same token; only the
+        # first line is the inline comment on this key.
+        inline = str(getattr(tokens[2], "value", "")).split("\n", 1)[0]
+        return any(m in inline for m in PRESERVE_MARKERS)
+
+    @staticmethod
+    def _plain(value: Any) -> Any:
+        """Convert ruamel containers to plain Python values for comparison."""
+        if isinstance(value, dict):
+            return {str(k): SmartMerger._plain(v) for k, v in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [SmartMerger._plain(v) for v in value]
+        return value
+
+    def _sync_key(self, merged_job: Any, existing_job: Any, new_job: Any, key: str, job_id: str) -> None:
+        """Take `key` from the synthesized job unless the user marked it preserved."""
+        if key in existing_job and self._key_has_inline_preserve(existing_job, key):
+            return
+        if key in new_job:
+            old_val = existing_job.get(key)
+            new_val = new_job[key]
+            if (
+                key in existing_job
+                and not isinstance(old_val, (dict, list))
+                and self._plain(old_val) != self._plain(new_val)
+            ):
+                self.replaced.append(
+                    f"jobs.{job_id}.{key}: '{old_val}' -> '{new_val}'"
+                )
+            merged_job[key] = new_val
+        elif key == "services":
+            merged_job.pop(key, None)
+
+    def _merge_job(
+        self, existing_job: Any, new_job: Any, raw_existing: str = "", job_id: str = ""
+    ) -> Any:
         if not isinstance(existing_job, dict) or not isinstance(new_job, dict):
             return new_job
 
         merged_job = existing_job.copy()
-        # Update runs-on, services, defaults, needs, and strategy from new_job
-        if "runs-on" in new_job:
-            merged_job["runs-on"] = new_job["runs-on"]
-        if "services" in new_job:
-            merged_job["services"] = new_job["services"]
-        else:
-            merged_job.pop("services", None)
+        # Update runs-on, services, defaults, needs, and strategy from new_job.
+        # A trailing `# @heurix:preserve` on the key line keeps the user's value.
+        self._sync_key(merged_job, existing_job, new_job, "runs-on", job_id)
+        self._sync_key(merged_job, existing_job, new_job, "services", job_id)
 
         if "defaults" in new_job:
             new_defaults = new_job["defaults"]
@@ -489,10 +533,12 @@ class SmartMerger:
                     else:
                         merged_job.pop("defaults", None)
 
-        if "needs" in new_job:
+        if "needs" in new_job and not self._key_has_inline_preserve(existing_job, "needs"):
             merged_job["needs"] = new_job["needs"]
 
-        if "strategy" in new_job:
+        if self._key_has_inline_preserve(existing_job, "strategy"):
+            pass
+        elif "strategy" in new_job:
             new_strat = new_job["strategy"]
             ex_strat = merged_job.get("strategy")
             if isinstance(ex_strat, (dict, CommentedMap)) and isinstance(new_strat, (dict, CommentedMap)):
@@ -555,13 +601,35 @@ class SmartMerger:
                 # Preserve existing customized step rather than overwriting with synthesized step
                 _append_existing(new_to_ex[j])
             else:
+                if j in new_to_ex:
+                    old_run = _normalize_step_run(existing_steps[new_to_ex[j]])
+                    new_run = _normalize_step_run(new_step)
+                    if old_run and new_run and old_run != new_run:
+                        label = str(new_step.get("name") or new_run)
+                        self.replaced.append(
+                            f"jobs.{job_id}.steps['{label}'].run: '{old_run}' -> '{new_run}'"
+                        )
                 final_steps.append(new_step)
 
         for ex_idx in trailing_existing:
             _append_existing(ex_idx)
 
+        # Re-attach the directive at the step's own indentation (the "- " column);
+        # without `indent` ruamel writes it at column 0.
+        dash_col = 0
+        step_lc = getattr(existing_seq, "lc", None)
+        raw_lines = raw_existing.splitlines()
+        if step_lc is not None and existing_steps:
+            try:
+                line_no, content_col = step_lc.item(0)
+                dash = raw_lines[line_no].rfind("-", 0, content_col + 1)
+                dash_col = dash if dash >= 0 else max(content_col - 2, 0)
+            except Exception:
+                dash_col = 0
         for pos in preserve_comment_indices:
-            final_steps.yaml_set_comment_before_after_key(pos, before="@heurix:preserve")
+            final_steps.yaml_set_comment_before_after_key(
+                pos, before="@heurix:preserve", indent=dash_col
+            )
 
         merged_job["steps"] = final_steps
         return merged_job

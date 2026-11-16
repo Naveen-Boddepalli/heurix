@@ -113,6 +113,12 @@ def _synthesize_or_exit(
         raise typer.Exit(code=1)
 
 
+def _print_context_warnings(context: ProjectContext) -> None:
+    """Show problems found while scanning (bad manifests, invalid policy)."""
+    for warning in context.warnings:
+        console.print(f"[yellow]⚠ Warning:[/yellow] {escape(warning)}")
+
+
 def version_callback(value: bool):
     if value:
         console.print(f"[bold cyan]Heurix (hx)[/bold cyan] version [green]{__version__}[/green]")
@@ -158,6 +164,8 @@ def _run_generate(
     # 2. Render explain reasoning tree if requested
     if explain:
         print_explain_tree(context)
+    elif context.warnings:
+        _print_context_warnings(context)
 
     # 3. Guard against empty / no-code repository
     if not context.languages and not context.containers and not allow_empty:
@@ -256,6 +264,17 @@ def _run_generate(
                     )
                 )
                 raise typer.Exit(code=1)
+
+            if non_destructive and merger.replaced:
+                console.print(
+                    f"[yellow]⚠ {rel_path}: these existing values will be replaced:[/yellow]"
+                )
+                for note in merger.replaced:
+                    console.print(f"  [yellow]•[/yellow] {escape(note)}")
+                console.print(
+                    "  [dim]To keep your version, add '# @heurix:preserve' to the end of "
+                    "that key's line (or on the line above a step).[/dim]"
+                )
 
             if diff:
                 _render_diff(rel_path, existing_content, merged_content)
@@ -407,6 +426,18 @@ def check(
     """
     repo_path = _resolve_repo_dir_or_exit(path)
     context = analyze_repository(repo_path)
+    if context.policy_error:
+        # A drift gate that silently drops the policy reports misleading results.
+        console.print(
+            Panel.fit(
+                f"[bold red]Error:[/bold red] {escape(context.policy_error)}\n"
+                "[dim]Fix .heurix.toml so 'hx check' can apply your policy.[/dim]",
+                title="Invalid Policy",
+                border_style="red",
+            )
+        )
+        raise typer.Exit(code=1)
+    _print_context_warnings(context)
     policy = HeurixPolicy.from_raw(context.policy_config)
     include_dependabot = policy.ci.include_dependabot
     include_k8s = bool(policy.ci.include_k8s)
@@ -472,6 +503,9 @@ def init(
     if config_file.exists():
         console.print("[yellow].heurix.toml already exists.[/yellow]")
     else:
+        # Mirror the repo's current state: turning k8s on for a repo that has no
+        # manifests would make `hx check` fail immediately on missing files.
+        has_k8s = (repo_path / "k8s" / "deployment.yaml").is_file()
         content = """# Heurix Configuration Policy (.heurix.toml)
 # Deterministic CI/CD, Dependabot, and Kubernetes policy configuration.
 
@@ -482,7 +516,7 @@ non_destructive = true
 
 [ci]
 include_dependabot = true
-include_k8s = true
+include_k8s = __INCLUDE_K8S__  # also controls whether `hx check` verifies k8s/ manifests
 # default_branch = "main"
 # pin_actions = true
 #
@@ -572,6 +606,7 @@ include_k8s = true
 # max_replicas = 10
 # target_cpu_utilization = 80
 """
+        content = content.replace("__INCLUDE_K8S__", "true" if has_k8s else "false")
         config_file.write_text(content, encoding="utf-8")
         console.print("[bold green]✔ Initialized .heurix.toml policy file.[/bold green]")
 

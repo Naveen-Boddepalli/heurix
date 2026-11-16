@@ -290,8 +290,12 @@ class PythonDetector(BaseDetector):
                 parsed = tomllib.loads(pyproject_content)
                 if isinstance(parsed, dict):
                     pyproject_data = parsed
-            except Exception:
+            except Exception as e:
                 pyproject_data = {}
+                context.add_warning(
+                    f"Could not parse {pyproject_path} ({e}); its Python version, "
+                    "dependencies and tool settings were ignored, so generated CI may be incomplete."
+                )
 
         # 1. Determine Runtime Version
         runtime_version = "3.12"
@@ -477,10 +481,12 @@ class PythonDetector(BaseDetector):
             context.add_explain(f"Detected Framework{scope_label}: {framework}")
 
         # 4. Test Runner, E2E Runner & Linter
-        test_cmd = "pytest"
+        # `python -m pytest` puts the working directory on sys.path, so flat-layout
+        # projects (app.py next to tests/) import cleanly; bare `pytest` does not.
+        test_cmd = "python -m pytest"
         unit_test_runner: Optional[str] = None
         if "pytest" in deps_lower or indexer.has_file(_join(base_dir, "pytest.ini")) or has_tests_dir or "[tool.pytest" in deps_text:
-            test_cmd = "pytest"
+            test_cmd = "python -m pytest"
             unit_test_runner = "pytest"
             context.add_explain(f"Detected Test Runner{scope_label}: pytest")
         elif "django" in deps_lower and indexer.has_file(_join(base_dir, "manage.py")):
@@ -507,11 +513,11 @@ class PythonDetector(BaseDetector):
         ):
             e2e_test_runner = "playwright"
             if has_tests_e2e:
-                e2e_cmd = f"{cmd_prefix}pytest tests/e2e"
+                e2e_cmd = f"{cmd_prefix}python -m pytest tests/e2e"
             elif has_e2e_dir:
-                e2e_cmd = f"{cmd_prefix}pytest e2e"
+                e2e_cmd = f"{cmd_prefix}python -m pytest e2e"
             else:
-                e2e_cmd = f"{cmd_prefix}pytest -k e2e"
+                e2e_cmd = f"{cmd_prefix}python -m pytest -k e2e"
             context.add_explain(f"Detected E2E Test Runner{scope_label}: playwright ({e2e_cmd})")
 
         lint_cmd = None

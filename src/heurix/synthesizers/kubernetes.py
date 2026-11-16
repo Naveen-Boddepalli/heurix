@@ -12,6 +12,7 @@ from heurix.core.policy import (
     SENSITIVE_KEYWORDS,
     HeurixPolicy,
     K8sProbePolicy,
+    is_deployment_secret_key,
     is_sensitive_env_key,
     is_valid_image_tag,
 )
@@ -291,11 +292,10 @@ class KubernetesSynthesizer(BaseSynthesizer):
             or (isinstance(raw_cfg.get("kubernetes"), Mapping) and len(raw_cfg["kubernetes"]) > 0)
             or (isinstance(raw_cfg.get("k8s"), Mapping) and len(raw_cfg["k8s"]) > 0)
         )
-        if (
-            not context.containers
-            and not any(l.framework for l in context.languages)
-            and not has_explicit_k8s_policy
-        ):
+        # Manifests deploy an image, so without a Dockerfile (or an explicit
+        # [kubernetes] policy naming one) they would reference an image that
+        # nothing builds.
+        if not context.containers and not has_explicit_k8s_policy:
             return {}
 
         app_name = context.repo_name.lower().replace("_", "-")
@@ -338,13 +338,20 @@ class KubernetesSynthesizer(BaseSynthesizer):
             probe_name="readiness_probe",
         )
 
-        declared_secrets = (
-            set(context.required_secrets)
-            | set(context.test_secrets)
-            | set(context.deployment_secrets)
-            | {s.strip() for s in policy.secrets.test if isinstance(s, str) and s.strip()}
-            | {s.strip() for s in policy.secrets.deploy if isinstance(s, str) and s.strip()}
-        )
+        # Deploy credentials (VERCEL_TOKEN, FIREBASE_*) belong to CI deploy jobs only;
+        # mounting them into the running app's pod would leak them at runtime.
+        deploy_only = set(context.deployment_secrets) | {
+            s.strip() for s in policy.secrets.deploy if isinstance(s, str) and s.strip()
+        }
+        declared_secrets = {
+            key
+            for key in (
+                set(context.required_secrets)
+                | set(context.test_secrets)
+                | {s.strip() for s in policy.secrets.test if isinstance(s, str) and s.strip()}
+            )
+            if key not in deploy_only and not is_deployment_secret_key(key)
+        }
 
         merged_env: Dict[str, str] = {}
         for k, v in context.env_vars.items():

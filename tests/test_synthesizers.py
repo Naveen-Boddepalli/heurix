@@ -757,6 +757,8 @@ def test_multijob_polyglot_monorepo_splitting_and_paths():
 
     # Path filters cover sorted sub-package globs (no root package active)
     expected_paths = [
+        "*",
+        ".github/workflows/**",
         "apps/shared/**",
         "apps/web/**",
         "crates/core/**",

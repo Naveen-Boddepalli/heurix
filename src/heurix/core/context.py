@@ -93,11 +93,16 @@ class ProjectContext(BaseModel):
     env_vars: Dict[str, str] = Field(default_factory=dict)
     language_scores: Dict[str, int] = Field(default_factory=dict)
     explain_log: List[str] = Field(default_factory=list)
+    # Problems the user should fix (unparseable manifests, invalid policy); shown by every command.
+    warnings: List[str] = Field(default_factory=list)
+    policy_error: Optional[str] = None
     confidence: float = 1.0
     runner: str = "ubuntu-latest"
     matrix_os: List[str] = Field(default_factory=list)
     split_e2e_jobs: Optional[bool] = None
     policy_config: Dict[str, Any] = Field(default_factory=dict)
+    # True when the root Cargo.toml declares [workspace]: members share ./target
+    cargo_workspace: bool = False
 
     def sync_required_secrets(self) -> None:
         """Synchronize test_secrets and deployment_secrets into required_secrets without duplicates."""
@@ -112,6 +117,11 @@ class ProjectContext(BaseModel):
 
     def add_explain(self, step: str) -> None:
         self.explain_log.append(step)
+
+    def add_warning(self, message: str) -> None:
+        """Record a user-facing warning in both the warnings list and the explain log."""
+        self.warnings.append(message)
+        self.explain_log.append(f"Warning: {message}")
 
     def has_language(self, name: str) -> bool:
         return any(lang.language.lower() == name.lower() for lang in self.languages)

@@ -44,7 +44,7 @@ dependencies = [
     assert py.package_manager == "uv"
     assert py.install_cmd == "uv sync --frozen"
     assert py.framework == "FastAPI"
-    assert py.test_cmd == "uv run pytest"
+    assert py.test_cmd == "uv run python -m pytest"
 
     # Backing service inferred
     assert any(s.name == "postgres" for s in context.services)
@@ -243,7 +243,7 @@ ruff = "^0.1.0"
     assert py.framework == "Streamlit"
     assert py.package_manager == "poetry"
     assert py.install_cmd == "poetry install --no-interaction"
-    assert py.test_cmd == "poetry run pytest"
+    assert py.test_cmd == "poetry run python -m pytest"
     assert py.lint_cmd == "poetry run ruff check ."
 
 
@@ -772,7 +772,7 @@ dependencies = ["fastapi", "psycopg2-binary", "pytest", "ruff", "fakeredis"]
     assert api.package_manager == "uv"
     assert api.runtime_version == "3.11"
     assert api.install_cmd == "uv sync --frozen"
-    assert api.test_cmd == "uv run pytest"
+    assert api.test_cmd == "uv run python -m pytest"
     assert api.lint_cmd == "uv run ruff check ."
     assert api.framework == "FastAPI"
     assert api.cache_dependency_path == "services/api/uv.lock"
@@ -1395,10 +1395,10 @@ dependencies = ["fastapi", "pytest"]
     py_ctx = analyze_repository(py_repo)
     py_lang = py_ctx.get_language("python")
     assert py_lang is not None
-    assert py_lang.test_cmd == "uv run pytest"
+    assert py_lang.test_cmd == "uv run python -m pytest"
     assert py_lang.unit_test_runner == "pytest"
     assert py_lang.e2e_test_runner == "playwright"
-    assert py_lang.e2e_cmd == "uv run pytest tests/e2e"
+    assert py_lang.e2e_cmd == "uv run python -m pytest tests/e2e"
 
     # (d) Additional edge cases: Python playwright.config.py fallback (-k e2e), e2e/ dir, Node mocha + E2E-only
     py_cfg = tmp_path / "py_cfg_e2e"
@@ -1408,10 +1408,10 @@ dependencies = ["fastapi", "pytest"]
     py_cfg_ctx = analyze_repository(py_cfg)
     py_cfg_lang = py_cfg_ctx.get_language("python")
     assert py_cfg_lang is not None
-    assert py_cfg_lang.test_cmd == "pytest"
+    assert py_cfg_lang.test_cmd == "python -m pytest"
     assert py_cfg_lang.unit_test_runner == "pytest"
     assert py_cfg_lang.e2e_test_runner == "playwright"
-    assert py_cfg_lang.e2e_cmd == "pytest -k e2e"
+    assert py_cfg_lang.e2e_cmd == "python -m pytest -k e2e"
 
     py_e2e_dir = tmp_path / "py_e2e_dir"
     (py_e2e_dir / "e2e").mkdir(parents=True)
@@ -1421,7 +1421,7 @@ dependencies = ["fastapi", "pytest"]
     py_dir_lang = py_dir_ctx.get_language("python")
     assert py_dir_lang is not None
     assert py_dir_lang.e2e_test_runner == "playwright"
-    assert py_dir_lang.e2e_cmd == "pytest e2e"
+    assert py_dir_lang.e2e_cmd == "python -m pytest e2e"
 
     node_e2e_only = tmp_path / "node_e2e_only"
     node_e2e_only.mkdir()
@@ -1515,7 +1515,7 @@ test = ["pytest-cov"]
     py = context.languages[0]
     assert py.package_manager == "uv"
     assert py.install_cmd == "uv sync --frozen --all-extras --all-groups"
-    assert py.test_cmd == "uv run pytest"
+    assert py.test_cmd == "uv run python -m pytest"
     assert py.lint_cmd == "uv run ruff check ."
 
 

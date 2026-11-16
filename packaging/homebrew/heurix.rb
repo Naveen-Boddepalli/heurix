@@ -4,9 +4,10 @@ class Heurix < Formula
   desc "Deterministic Codebase Scanner & Automated YAML Synthesizer"
   homepage "https://github.com/Naveen-Boddepalli/heurix"
   url "https://files.pythonhosted.org/packages/source/h/heurix/heurix-0.2.2.tar.gz"
-  # Release tag automation / homebrew-pypi-poet populates the tarball sha256
-  # and Python dependency resource stanzas at PyPI publish time.
-  sha256 "REPLACE_WITH_RELEASE_TARBALL_SHA256"
+  sha256 "9d7bdd350e94aaf64613d739ca3ecec980f250053d7ccde8376c96c712942efb"
+  # TODO: add `resource` stanzas for the Python dependencies (typer, rich,
+  # pydantic, ruamel.yaml, jsonschema, jinja2, ...). Homebrew installs Python
+  # packages without their dependencies, so hx cannot import them until then.
   license "MIT"
   head "https://github.com/Naveen-Boddepalli/heurix.git", branch: "main"
 

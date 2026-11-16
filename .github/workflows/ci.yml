@@ -6,10 +6,22 @@ on:
     branches:
       - main
       - master
+    paths-ignore:
+      - docs/**
+      - site/**
+      - '**/*.md'
+      - llms.txt
+      - llms-full.txt
   pull_request:
     branches:
       - main
       - master
+    paths-ignore:
+      - docs/**
+      - site/**
+      - '**/*.md'
+      - llms.txt
+      - llms-full.txt
 jobs:
   test:
     runs-on: ubuntu-latest

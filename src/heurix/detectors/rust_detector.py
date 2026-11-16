@@ -154,6 +154,7 @@ class RustDetector(BaseDetector):
             is_cargo_ws = "cargo" in topo.workspace_kinds or bool(members or exclude)
             if is_cargo_ws:
                 context.is_monorepo = True
+                context.cargo_workspace = True
                 context.add_explain("Detected Rust Cargo Workspace in Cargo.toml")
 
             if is_cargo_ws and rust_sub_dirs:

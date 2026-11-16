@@ -81,3 +81,37 @@ def test_init_keeps_kubernetes_on_when_manifests_exist(tmp_path: Path):
     _generate(tmp_path)
     assert _invoke("init", "--path", str(tmp_path), "--no-hooks", "--yes").exit_code == 0
     assert "include_k8s = true" in (tmp_path / ".heurix.toml").read_text(encoding="utf-8")
+
+
+def test_monorepo_paths_filter_includes_root_files_and_workflow(tmp_path: Path):
+    _write(tmp_path, "pnpm-workspace.yaml", "packages:\n  - 'apps/*'\n")
+    _write(tmp_path, "pnpm-lock.yaml", "lockfileVersion: '9.0'\n")
+    _write(tmp_path, "package.json", '{"name": "mono", "private": true}')
+    for name in ("api", "web"):
+        _write(tmp_path, f"apps/{name}/package.json", json.dumps({"name": name, "scripts": {"test": "vitest run"}}))
+        _write(tmp_path, f"apps/{name}/index.ts", "export {}\n")
+    paths = _generate(tmp_path, "--no-k8s")["on"]["push"]["paths"]
+    assert paths[:2] == ["*", ".github/workflows/**"]
+    assert "apps/api/**" in paths and "apps/web/**" in paths
+
+
+def test_cargo_workspace_members_cache_shared_root_target(tmp_path: Path):
+    _write(tmp_path, "Cargo.toml", '[workspace]\nmembers = ["crates/a", "crates/b"]\nresolver = "2"\n')
+    for name in ("a", "b"):
+        _write(tmp_path, f"crates/{name}/Cargo.toml", f'[package]\nname = "{name}"\nversion = "0.1.0"\nedition = "2021"\n')
+        _write(tmp_path, f"crates/{name}/src/lib.rs", "pub fn f() {}\n")
+    jobs = _generate(tmp_path, "--no-k8s")["jobs"]
+    for job_id in ("test-crates-a", "test-crates-b"):
+        cache = next(s for s in jobs[job_id]["steps"] if "rust-cache" in s.get("uses", ""))
+        assert cache["with"]["workspaces"] == ". -> target"
+
+
+def test_standalone_nested_crate_caches_its_own_target(tmp_path: Path):
+    _write(tmp_path, "pyproject.toml", '[project]\nname = "x"\n')
+    _write(tmp_path, "app.py", "x = 1\n")
+    _write(tmp_path, "native/Cargo.toml", '[package]\nname = "native"\nversion = "0.1.0"\nedition = "2021"\n')
+    _write(tmp_path, "native/src/lib.rs", "pub fn f() {}\n")
+    jobs = _generate(tmp_path, "--no-k8s")["jobs"]
+    rust_job = next(j for j in jobs.values() if any("rust-cache" in s.get("uses", "") for s in j["steps"]))
+    cache = next(s for s in rust_job["steps"] if "rust-cache" in s.get("uses", ""))
+    assert cache["with"]["workspaces"] == "native -> target"

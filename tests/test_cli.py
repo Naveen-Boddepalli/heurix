@@ -340,8 +340,8 @@ os = ["ubuntu-latest", "macos-latest"]
     assert ci_file.exists()
     doc = YAML(typ="safe").load(ci_file.read_text(encoding="utf-8"))
 
-    assert doc["on"]["push"]["paths"] == ["apps/web/**", "services/api/**"]
-    assert doc["on"]["pull_request"]["paths"] == ["apps/web/**", "services/api/**"]
+    assert doc["on"]["push"]["paths"] == ["*", ".github/workflows/**", "apps/web/**", "services/api/**"]
+    assert doc["on"]["pull_request"]["paths"] == ["*", ".github/workflows/**", "apps/web/**", "services/api/**"]
     assert set(doc["jobs"].keys()) == {"test-apps-web", "test-services-api"}
 
     web_job = doc["jobs"]["test-apps-web"]
@@ -458,8 +458,8 @@ os = ["ubuntu-latest", "macos-latest"]
     assert gen_res.exit_code == 0, gen_res.stdout
 
     doc = YAML(typ="safe").load(ci_file.read_text(encoding="utf-8"))
-    assert doc["on"]["push"]["paths"] == ["apps/web/**", "services/api/**"]
-    assert doc["on"]["pull_request"]["paths"] == ["apps/web/**", "services/api/**"]
+    assert doc["on"]["push"]["paths"] == ["*", ".github/workflows/**", "apps/web/**", "services/api/**"]
+    assert doc["on"]["pull_request"]["paths"] == ["*", ".github/workflows/**", "apps/web/**", "services/api/**"]
 
     web_job = doc["jobs"]["test-apps-web"]
     assert web_job["defaults"]["run"]["working-directory"] == "apps/web"

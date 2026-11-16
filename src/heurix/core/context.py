@@ -98,6 +98,8 @@ class ProjectContext(BaseModel):
     matrix_os: List[str] = Field(default_factory=list)
     split_e2e_jobs: Optional[bool] = None
     policy_config: Dict[str, Any] = Field(default_factory=dict)
+    # True when the root Cargo.toml declares [workspace]: members share ./target
+    cargo_workspace: bool = False
 
     def sync_required_secrets(self) -> None:
         """Synchronize test_secrets and deployment_secrets into required_secrets without duplicates."""

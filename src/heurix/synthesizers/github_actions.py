@@ -76,6 +76,8 @@ class _BuildUnit:
     e2e_test_runner: Optional[str] = None
     e2e_cmd: Optional[str] = None
     package_manager_spec_file: Optional[str] = None
+    # Directory holding this crate's target/ (repo root for Cargo workspace members)
+    cargo_target_root: Optional[str] = None
 
 
 def _normalize_working_dir(raw_path: Optional[str]) -> str:
@@ -202,6 +204,12 @@ def _collect_build_units(context: ProjectContext) -> List[_BuildUnit]:
                 package_manager_spec_file=lang.package_manager_spec_file,
             )
         )
+
+    if context.cargo_workspace:
+        units = [
+            replace(u, cargo_target_root=".") if u.language == "rust" and u.working_dir != "." else u
+            for u in units
+        ]
 
     units.sort(key=lambda u: (0 if u.working_dir == "." else 1, u.working_dir, u.language))
     return units
@@ -718,7 +726,7 @@ def _build_runtime_setup_steps(
         rust_cache_with: Optional[Dict[str, Any]] = None
         if unit.working_dir != ".":
             rust_cache_with = {
-                "workspaces": f"{unit.working_dir} -> target",
+                "workspaces": f"{unit.cargo_target_root or unit.working_dir} -> target",
                 "prefix-key": job_id,
             }
         steps.append(
@@ -1153,7 +1161,13 @@ class GitHubActionsSynthesizer(BaseSynthesizer):
                     if wd != "."
                 }
             )
-            path_filters = ["**"] if (has_root_unit or not sub_paths) else sub_paths
+            # Root files (lockfiles, workspace manifests, turbo.json) and the workflow
+            # itself affect every package, so changes to them must still trigger CI.
+            path_filters = (
+                ["**"]
+                if (has_root_unit or not sub_paths)
+                else ["*", ".github/workflows/**", *sub_paths]
+            )
 
         has_unit_runner = any(bool(u.unit_test_runner) for u in units)
         e2e_units = [u for u in units if u.e2e_test_runner and u.e2e_cmd]

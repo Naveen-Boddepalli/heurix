@@ -5,6 +5,7 @@ Distribution packaging alignment and sub-second CLI latency benchmarks (NFR-04, 
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -233,8 +234,19 @@ def test_packaging_wheel_homebrew_docker_and_workflows(tmp_path: Path) -> None:
     assert f"heurix-{project['version']}.tar.gz" in formula_text
     assert 'license "MIT"' in formula_text
     assert "virtualenv_install_with_resources" in formula_text
-    assert "homebrew-pypi-poet" in formula_text
-    assert 'sha256 "REPLACE_WITH_RELEASE_TARBALL_SHA256"' in formula_text
+    # The release tarball checksum must be real, not a placeholder.
+    tarball_sha = re.search(r'^  sha256 "([^"]+)"', formula_text, re.MULTILINE)
+    assert tarball_sha and re.fullmatch(r"[0-9a-f]{64}", tarball_sha.group(1))
+    # Homebrew installs Python packages with --no-deps, so every runtime
+    # dependency (except Python-version-gated backports) needs a resource.
+    resource_names = set(re.findall(r'^  resource "([^"]+)" do', formula_text, re.MULTILINE))
+    for dep in project["dependencies"]:
+        if "python_version" in dep:
+            continue
+        dep_name = re.split(r"[<>=!~;\[ ]", dep, maxsplit=1)[0]
+        normalized = re.sub(r"[-_.]+", "-", dep_name).lower()
+        assert normalized in resource_names, f"Homebrew formula missing resource for {dep_name}"
+    assert 'depends_on "rust" => :build' in formula_text
     # Ensure broken assertion ('Heurix (hx)' checked against --help) is fixed
     assert 'assert_match "Heurix (hx)", shell_output("#{bin}/hx --help")' not in formula_text
     assert 'assert_match "Heurix (hx)", shell_output("#{bin}/hx --version")' in formula_text

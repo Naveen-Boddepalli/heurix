@@ -28,6 +28,12 @@ on:
       - {{ path_pattern | yaml_scalar }}
 {% endfor %}
 {% endif %}
+{% if event_cfg.get('paths-ignore') %}
+    paths-ignore:
+{% for path_pattern in event_cfg.get('paths-ignore', []) %}
+      - {{ path_pattern | yaml_scalar }}
+{% endfor %}
+{% endif %}
 {% endif %}
 {% endfor %}
 jobs:

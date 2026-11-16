@@ -1,0 +1,5 @@
+# Heurix policy for this repo (see docs/getting-started.md).
+
+[ci]
+# Docs and the web frontend have their own workflow (pages.yml); skip tests when only they change.
+paths_ignore = ["docs/**", "site/**", "**/*.md", "llms.txt", "llms-full.txt"]

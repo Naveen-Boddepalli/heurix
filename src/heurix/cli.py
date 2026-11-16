@@ -240,7 +240,7 @@ def _run_generate(
             show_diff(rel_path, old_text, new_text, style=effective_diff_style)
 
     # 6. Diff preview or smart merge
-    merger = SmartMerger()
+    merger = SmartMerger(authoritative_trigger_paths=policy.ci.has_path_filters)
     files_to_write: dict[str, str] = {}
     non_destructive = policy.engine.non_destructive
 
@@ -519,6 +519,8 @@ include_dependabot = true
 include_k8s = __INCLUDE_K8S__  # also controls whether `hx check` verifies k8s/ manifests
 # default_branch = "main"
 # pin_actions = true
+# paths_ignore = ["docs/**", "**/*.md"]  # skip CI when only these files change
+# paths = ["src/**", "tests/**"]         # run CI only for these files (replaces the monorepo filter)
 #
 # [ci.action_shas]
 # "actions/checkout" = "<40-char-commit-sha>"

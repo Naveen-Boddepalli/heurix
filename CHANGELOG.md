@@ -2,6 +2,11 @@
 
 All notable changes to Heurix (`hx`) are documented here.
 
+## Unreleased
+
+### Added
+- **CI path filters in `.heurix.toml`.** `[ci].paths` sets which files trigger CI (and replaces the inferred monorepo filter). `[ci].paths_ignore` skips CI when only matching files change, e.g. `["docs/**", "**/*.md"]`. Both apply to `push` and `pull_request`. If a `paths` list also exists, the ignores are folded into it as `!pattern` entries, because GitHub doesn't allow `paths` and `paths-ignore` together. When either key is set, regenerating updates the filters in an existing `ci.yml`.
+
 ## 0.2.2 — 2026-11-16
 
 First release since 0.2.0 (0.2.1 was never published), so this also includes the 0.2.1 changes listed further down.

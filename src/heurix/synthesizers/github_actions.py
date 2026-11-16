@@ -1169,6 +1169,18 @@ class GitHubActionsSynthesizer(BaseSynthesizer):
                 else ["*", ".github/workflows/**", *sub_paths]
             )
 
+        # Explicit [ci].paths / [ci].paths_ignore policy wins over the inferred filter.
+        path_ignore_filters: Optional[List[str]] = None
+        if policy.ci.paths is not None:
+            path_filters = list(policy.ci.paths) or None
+        if policy.ci.paths_ignore:
+            if path_filters:
+                # GitHub rejects `paths` and `paths-ignore` on the same event, so
+                # fold the ignores into `paths` as trailing negation patterns.
+                path_filters = [*path_filters, *(f"!{p}" for p in policy.ci.paths_ignore)]
+            else:
+                path_ignore_filters = list(policy.ci.paths_ignore)
+
         has_unit_runner = any(bool(u.unit_test_runner) for u in units)
         e2e_units = [u for u in units if u.e2e_test_runner and u.e2e_cmd]
         has_unit_and_e2e = has_unit_runner and bool(e2e_units)
@@ -1287,10 +1299,12 @@ class GitHubActionsSynthesizer(BaseSynthesizer):
                 "push": {
                     "branches": list(trigger_branches),
                     "paths": list(path_filters) if path_filters else None,
+                    "paths-ignore": list(path_ignore_filters) if path_ignore_filters else None,
                 },
                 "pull_request": {
                     "branches": list(trigger_branches),
                     "paths": list(path_filters) if path_filters else None,
+                    "paths-ignore": list(path_ignore_filters) if path_ignore_filters else None,
                 },
             },
             "jobs": jobs_vm,

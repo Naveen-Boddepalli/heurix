@@ -77,6 +77,8 @@ _LOC_KEY_FALLBACKS: Dict[str, str] = {
     "continue-on-error": "continue_on_error",
     "timeout_minutes": "timeout-minutes",
     "timeout-minutes": "timeout_minutes",
+    "paths_ignore": "paths-ignore",
+    "paths-ignore": "paths_ignore",
 }
 
 
@@ -138,7 +140,14 @@ def _deep_merge_dicts(base: Mapping[str, Any], override: Mapping[str, Any]) -> D
     return merged
 
 
+def _reject_negated_pattern(value: str) -> str:
+    if value.startswith("!"):
+        raise ValueError("Path pattern must not start with '!'; list it under paths_ignore instead")
+    return value
+
+
 _NonEmptyStr = Annotated[str, AfterValidator(_validate_non_empty_str)]
+_PathPattern = Annotated[str, AfterValidator(_validate_non_empty_str), AfterValidator(_reject_negated_pattern)]
 _StrictInt = Annotated[int, BeforeValidator(_reject_bool_for_int)]
 
 
@@ -205,11 +214,34 @@ class CiPolicy(_PolicyBase):
     # Explicit overrides for CI service-container connection URLs
     # (DATABASE_URL, MONGO_URL, MONGODB_URI, REDIS_URL).
     env: Dict[str, str] = Field(default_factory=dict)
+    # Trigger path filters for push / pull_request. `paths` replaces the inferred
+    # monorepo filter; `paths_ignore` skips CI when only matching files change.
+    paths: Optional[List[_PathPattern]] = None
+    paths_ignore: List[_PathPattern] = Field(default_factory=list, alias="paths-ignore")
 
     @field_validator("env", mode="before")
     @classmethod
     def _coerce_env(cls, val: Any) -> Any:
         return _coerce_scalar_env_dict(val)
+
+    @field_validator("paths", "paths_ignore", mode="before")
+    @classmethod
+    def _coerce_path_list(cls, val: Any) -> Any:
+        if isinstance(val, str):
+            return [val]
+        return val
+
+    @field_validator("paths", "paths_ignore")
+    @classmethod
+    def _validate_path_patterns(cls, val: Optional[List[str]]) -> Optional[List[str]]:
+        if val is None:
+            return None
+        return list(dict.fromkeys(val))
+
+    @property
+    def has_path_filters(self) -> bool:
+        """Return True when the policy explicitly controls CI trigger path filters."""
+        return self.paths is not None or bool(self.paths_ignore)
 
 
 class JobPolicy(_PolicyBase):

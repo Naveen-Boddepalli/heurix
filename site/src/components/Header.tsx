@@ -124,7 +124,7 @@ export function Header() {
             />
           </svg>
           <span>Heurix</span>
-          <span className="brand-badge">hx v0.2.2</span>
+          <span className="brand-badge">hx v0.3.0</span>
         </a>
 
         <div className="header-spacer" />

@@ -10,6 +10,7 @@ from ruamel.yaml import YAML
 from heurix.core.context import ContainerContext, ProjectContext, ServiceRequirement
 from heurix.core.indexer import RepoIndexer
 from heurix.detectors.base import BaseDetector
+from heurix.detectors.service_reconciler import resolve_compose_value
 
 
 def _parse_port_token(token: str) -> List[int]:
@@ -176,15 +177,24 @@ class DockerDetector(BaseDetector):
                                 if port not in parsed_ports:
                                     parsed_ports.append(port)
 
-                    parsed_env: Dict[str, str] = {}
+                    raw_pairs: List[tuple] = []
                     if isinstance(env_raw, dict):
-                        for k, v in env_raw.items():
-                            parsed_env[str(k)] = str(v)
+                        raw_pairs = [(str(k), str(v)) for k, v in env_raw.items() if v is not None]
                     elif isinstance(env_raw, list):
                         for item in env_raw:
                             if "=" in str(item):
                                 k, v = str(item).split("=", 1)
-                                parsed_env[k.strip()] = v.strip()
+                                raw_pairs.append((k.strip(), v.strip()))
+
+                    parsed_env: Dict[str, str] = {}
+                    for k, v in raw_pairs:
+                        resolved = resolve_compose_value(v)
+                        if resolved is None:
+                            context.add_explain(
+                                f"Skipping unresolved variable '{k}={v}' on compose service '{svc_name}'"
+                            )
+                            continue
+                        parsed_env[k] = resolved
 
                     # Deduplicate or add service
                     existing = [s for s in context.services if s.name.lower() == svc_name.lower()]

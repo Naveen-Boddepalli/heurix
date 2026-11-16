@@ -177,7 +177,10 @@ class SmartMerger:
     # @heurix:preserve / # @autoyaml:preserve directives.
     """
 
-    def __init__(self):
+    def __init__(self, authoritative_trigger_paths: bool = False):
+        # When True (`.heurix.toml` sets [ci].paths / paths_ignore), the generated
+        # push/pull_request path filters replace whatever the existing file has.
+        self.authoritative_trigger_paths = authoritative_trigger_paths
         self.yaml = YAML()
         self.yaml.preserve_quotes = True
         self.yaml.indent(mapping=2, sequence=4, offset=2)
@@ -268,6 +271,24 @@ class SmartMerger:
 
         return merged_docs
 
+    def _sync_policy_trigger_paths(self, trigger: str, ex_trigger: Any, new_trigger: Any) -> None:
+        """Make an existing trigger's `paths` / `paths-ignore` match the policy-driven output."""
+        for key in ("paths", "paths-ignore"):
+            new_val = new_trigger.get(key)
+            if key not in ex_trigger and new_val is None:
+                continue
+            old_val = ex_trigger.get(key)
+            old_plain = list(old_val) if isinstance(old_val, (list, CommentedSeq)) else old_val
+            new_plain = list(new_val) if isinstance(new_val, (list, CommentedSeq)) else new_val
+            if old_plain == new_plain:
+                continue
+            if key in ex_trigger:
+                self.replaced.append(f"on.{trigger}.{key}: {old_plain} -> {new_plain}")
+            if new_val is None:
+                del ex_trigger[key]
+            else:
+                ex_trigger[key] = new_val
+
     def _merge_github_workflow(
         self,
         existing: CommentedMap,
@@ -288,6 +309,12 @@ class SmartMerger:
                 ex_trigger = existing_on.get(trigger)
                 new_trigger = new_on.get(trigger)
                 if (
+                    self.authoritative_trigger_paths
+                    and isinstance(ex_trigger, (dict, CommentedMap))
+                    and isinstance(new_trigger, (dict, CommentedMap))
+                ):
+                    self._sync_policy_trigger_paths(str(trigger), ex_trigger, new_trigger)
+                elif (
                     isinstance(ex_trigger, (dict, CommentedMap))
                     and isinstance(new_trigger, (dict, CommentedMap))
                     and "paths" in new_trigger

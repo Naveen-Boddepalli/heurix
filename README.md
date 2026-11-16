@@ -135,7 +135,7 @@ hx init
 
 Supported `.heurix.toml` sections:
 - `[engine]`: `runner` (e.g., `"ubuntu-latest"`), `non_destructive` (`true` / `false`)
-- `[ci]`: `include_dependabot`, `include_k8s`, `default_branch`, `pin_actions`, `action_shas` (40-char commit SHA mapping)
+- `[ci]`: `include_dependabot`, `include_k8s`, `default_branch`, `pin_actions`, `action_shas` (40-char commit SHA mapping), `paths` / `paths_ignore` (trigger path filters for `push` and `pull_request`)
 - `[overrides]`: explicit language runtime pins (`python = "3.12"`, `node = "20.x"`, etc.)
 
 ---

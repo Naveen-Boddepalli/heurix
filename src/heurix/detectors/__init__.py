@@ -35,6 +35,7 @@ from heurix.detectors.go_detector import GoDetector
 from heurix.detectors.node_detector import NodeDetector
 from heurix.detectors.python_detector import PythonDetector
 from heurix.detectors.rust_detector import RustDetector
+from heurix.detectors.service_reconciler import reconcile_services
 
 ALL_DETECTORS: List[BaseDetector] = [
     PythonDetector(),
@@ -103,5 +104,9 @@ def analyze_repository(root_dir: str | Path) -> ProjectContext:
             apply_policy_to_context(context, policy, raw_config=config)
         except Exception as e:
             context.add_explain(f"Warning: Failed to parse .heurix.toml: {e}")
+
+    # Runs after policy so [services].exclude can target either a compose name
+    # (e.g. "db") or a canonical name (e.g. "postgres") before duplicates merge.
+    reconcile_services(context, indexer)
 
     return context

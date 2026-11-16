@@ -305,8 +305,12 @@ class NodeDetector(BaseDetector):
                 parsed = json.loads(content)
                 if isinstance(parsed, dict):
                     pkg_data = parsed
-            except Exception:
+            except Exception as e:
                 pkg_data = {}
+                context.add_warning(
+                    f"Could not parse {pkg_json_path} ({e}); scripts, engines and "
+                    "dependencies in it were ignored, so generated CI may be incomplete."
+                )
 
         engines_raw = pkg_data.get("engines")
         node_engine = engines_raw.get("node") if isinstance(engines_raw, dict) else None

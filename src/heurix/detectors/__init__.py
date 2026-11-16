@@ -103,7 +103,8 @@ def analyze_repository(root_dir: str | Path) -> ProjectContext:
                 context.add_explain(warning)
             apply_policy_to_context(context, policy, raw_config=config)
         except Exception as e:
-            context.add_explain(f"Warning: Failed to parse .heurix.toml: {e}")
+            context.policy_error = f"Failed to parse .heurix.toml: {e}"
+            context.add_warning(f"{context.policy_error}. Policy overrides were NOT applied.")
 
     # Runs after policy so [services].exclude can target either a compose name
     # (e.g. "db") or a canonical name (e.g. "postgres") before duplicates merge.

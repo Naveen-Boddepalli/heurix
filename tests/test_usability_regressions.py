@@ -196,3 +196,39 @@ def test_preserve_directive_keeps_step_indentation():
     )
     _, out = _merge(existing, _NEW_WF)
     assert "\n      # @heurix:preserve\n      - name: Upload coverage" in out
+
+
+def test_malformed_package_json_is_reported(tmp_path: Path):
+    _write(tmp_path, "package.json", '{"name": "x", "scripts": {')
+    _write(tmp_path, "index.js", "x\n")
+    res = _invoke("generate", "--path", str(tmp_path), "--yes", "--no-k8s", "--dry-run")
+    assert res.exit_code == 0
+    assert "Could not parse package.json" in res.stdout
+
+
+def test_malformed_pyproject_is_reported_without_explain(tmp_path: Path):
+    _write(tmp_path, "pyproject.toml", "[project\nname=")
+    _write(tmp_path, "a.py", "x = 1\n")
+    res = _invoke("generate", "--path", str(tmp_path), "--yes", "--no-k8s", "--dry-run", "--no-explain")
+    assert res.exit_code == 0
+    assert "Could not parse pyproject.toml" in res.stdout
+
+
+def test_check_fails_on_invalid_policy_file(tmp_path: Path):
+    _write(tmp_path, "requirements.txt", "pytest\n")
+    _write(tmp_path, "app.py", "x = 1\n")
+    _generate(tmp_path, "--no-k8s")
+    _write(tmp_path, ".heurix.toml", "[engine]\nrunner = \n")
+    res = _invoke("check", "--path", str(tmp_path))
+    assert res.exit_code == 1
+    assert "Invalid Policy" in res.stdout
+
+
+def test_malformed_workflow_recommendation_names_real_options(tmp_path: Path):
+    _write(tmp_path, "requirements.txt", "pytest\n")
+    _write(tmp_path, "app.py", "x = 1\n")
+    _write(tmp_path, ".github/workflows/ci.yml", "jobs:\n  t:\n   x: [\n")
+    res = _invoke("check", "--path", str(tmp_path))
+    assert res.exit_code == 1
+    assert "--force" not in res.stdout
+    assert "non_destructive" in res.stdout

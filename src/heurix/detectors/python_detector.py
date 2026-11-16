@@ -290,8 +290,12 @@ class PythonDetector(BaseDetector):
                 parsed = tomllib.loads(pyproject_content)
                 if isinstance(parsed, dict):
                     pyproject_data = parsed
-            except Exception:
+            except Exception as e:
                 pyproject_data = {}
+                context.add_warning(
+                    f"Could not parse {pyproject_path} ({e}); its Python version, "
+                    "dependencies and tool settings were ignored, so generated CI may be incomplete."
+                )
 
         # 1. Determine Runtime Version
         runtime_version = "3.12"

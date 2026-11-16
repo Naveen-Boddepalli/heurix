@@ -697,7 +697,7 @@ class DriftDetector:
                         file_path=rel_path,
                         issue=f"Existing YAML file is malformed: {e}",
                         severity="ERROR",
-                        recommendation="Fix YAML syntax or run 'hx generate --force'.",
+                        recommendation="Fix the YAML syntax, or set non_destructive = false under [engine] in .heurix.toml and run 'hx generate' to rewrite the file.",
                     )
                 )
                 continue
@@ -722,7 +722,7 @@ class DriftDetector:
                         file_path=rel_path,
                         issue="Existing workflow YAML file is not a valid mapping.",
                         severity="ERROR",
-                        recommendation="Fix YAML structure or run 'hx generate --force'.",
+                        recommendation="Fix the YAML structure, or set non_destructive = false under [engine] in .heurix.toml and run 'hx generate' to rewrite the file.",
                     )
                 )
                 continue

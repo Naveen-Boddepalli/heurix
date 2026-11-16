@@ -113,6 +113,12 @@ def _synthesize_or_exit(
         raise typer.Exit(code=1)
 
 
+def _print_context_warnings(context: ProjectContext) -> None:
+    """Show problems found while scanning (bad manifests, invalid policy)."""
+    for warning in context.warnings:
+        console.print(f"[yellow]⚠ Warning:[/yellow] {escape(warning)}")
+
+
 def version_callback(value: bool):
     if value:
         console.print(f"[bold cyan]Heurix (hx)[/bold cyan] version [green]{__version__}[/green]")
@@ -158,6 +164,8 @@ def _run_generate(
     # 2. Render explain reasoning tree if requested
     if explain:
         print_explain_tree(context)
+    elif context.warnings:
+        _print_context_warnings(context)
 
     # 3. Guard against empty / no-code repository
     if not context.languages and not context.containers and not allow_empty:
@@ -418,6 +426,18 @@ def check(
     """
     repo_path = _resolve_repo_dir_or_exit(path)
     context = analyze_repository(repo_path)
+    if context.policy_error:
+        # A drift gate that silently drops the policy reports misleading results.
+        console.print(
+            Panel.fit(
+                f"[bold red]Error:[/bold red] {escape(context.policy_error)}\n"
+                "[dim]Fix .heurix.toml so 'hx check' can apply your policy.[/dim]",
+                title="Invalid Policy",
+                border_style="red",
+            )
+        )
+        raise typer.Exit(code=1)
+    _print_context_warnings(context)
     policy = HeurixPolicy.from_raw(context.policy_config)
     include_dependabot = policy.ci.include_dependabot
     include_k8s = bool(policy.ci.include_k8s)

@@ -25,6 +25,19 @@ jobs:
         uses: slackapi/slack-github-action@v1
 ```
 
+5. **Job-Level Keys:** Heurix owns `runs-on`, `services`, `needs`, and `strategy` in managed jobs. To keep your own value, put the directive at the end of that key's line:
+
+```yaml
+jobs:
+  test:
+    runs-on: ubuntu-24.04  # @heurix:preserve pinned by SRE
+    strategy:  # @heurix:preserve
+      matrix:
+        python-version: ['3.11', '3.12']
+```
+
+6. **Replacement Notices:** When a merge would replace a value you edited by hand (a `runs-on` runner or a generated step's `run:` command) without a preserve directive, `hx generate` lists each replaced value before writing, so edits are never lost silently.
+
 ## Disabling Smart Merge
 
 If you ever want a clean rewrite of synthesized targets in `.heurix.toml`, set `non_destructive = false` under `[engine]`:

@@ -257,6 +257,17 @@ def _run_generate(
                 )
                 raise typer.Exit(code=1)
 
+            if non_destructive and merger.replaced:
+                console.print(
+                    f"[yellow]⚠ {rel_path}: these existing values will be replaced:[/yellow]"
+                )
+                for note in merger.replaced:
+                    console.print(f"  [yellow]•[/yellow] {escape(note)}")
+                console.print(
+                    "  [dim]To keep your version, add '# @heurix:preserve' to the end of "
+                    "that key's line (or on the line above a step).[/dim]"
+                )
+
             if diff:
                 _render_diff(rel_path, existing_content, merged_content)
 

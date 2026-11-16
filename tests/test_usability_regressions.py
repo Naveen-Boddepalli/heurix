@@ -115,3 +115,84 @@ def test_standalone_nested_crate_caches_its_own_target(tmp_path: Path):
     rust_job = next(j for j in jobs.values() if any("rust-cache" in s.get("uses", "") for s in j["steps"]))
     cache = next(s for s in rust_job["steps"] if "rust-cache" in s.get("uses", ""))
     assert cache["with"]["workspaces"] == "native -> target"
+
+
+def _merge(existing: str, new: str):
+    from heurix.core.merger import SmartMerger
+
+    merger = SmartMerger()
+    return merger, merger.merge_yaml(existing, new)
+
+
+_NEW_WF = """name: CI
+on: [push]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.12']
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+      - name: Run tests (python)
+        run: python -m pytest
+"""
+
+
+def test_inline_preserve_keeps_runs_on_and_strategy():
+    existing = """name: CI
+on: [push]
+jobs:
+  test:
+    runs-on: ubuntu-24.04  # @heurix:preserve pinned by SRE
+    strategy:  # @heurix:preserve
+      matrix:
+        python-version: ['3.11', '3.12']
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+      - name: Run tests (python)
+        run: python -m pytest
+"""
+    merger, out = _merge(existing, _NEW_WF)
+    doc = YAML(typ="safe").load(out)
+    assert doc["jobs"]["test"]["runs-on"] == "ubuntu-24.04"
+    assert doc["jobs"]["test"]["strategy"]["matrix"]["python-version"] == ["3.11", "3.12"]
+    assert merger.replaced == []
+
+
+def test_replaced_user_values_are_reported():
+    existing = _NEW_WF.replace("runs-on: ubuntu-latest", "runs-on: ubuntu-24.04").replace(
+        "run: python -m pytest", "run: python -m pytest -x --cov"
+    )
+    merger, out = _merge(existing, _NEW_WF)
+    assert "runs-on: ubuntu-latest" in out
+    assert any("runs-on" in n and "ubuntu-24.04" in n for n in merger.replaced)
+    assert any("Run tests (python)" in n and "-x --cov" in n for n in merger.replaced)
+
+
+def test_unchanged_merge_reports_nothing():
+    merger, out = _merge(_NEW_WF, _NEW_WF)
+    assert merger.replaced == []
+
+
+def test_generate_prints_replaced_values(tmp_path: Path):
+    _write(tmp_path, "requirements.txt", "pytest\n")
+    _write(tmp_path, "app.py", "x = 1\n")
+    _generate(tmp_path, "--no-k8s")
+    wf = tmp_path / ".github" / "workflows" / "ci.yml"
+    wf.write_text(wf.read_text(encoding="utf-8").replace("run: python -m pytest", "run: python -m pytest -q"), encoding="utf-8")
+    res = _invoke("generate", "--path", str(tmp_path), "--yes", "--no-k8s")
+    assert res.exit_code == 0
+    assert "will be replaced" in res.stdout
+    assert "@heurix:preserve" in res.stdout
+
+
+def test_preserve_directive_keeps_step_indentation():
+    existing = _NEW_WF.replace(
+        "      - name: Run tests (python)\n",
+        "      # @heurix:preserve\n      - name: Upload coverage\n        run: echo cov\n      - name: Run tests (python)\n",
+    )
+    _, out = _merge(existing, _NEW_WF)
+    assert "\n      # @heurix:preserve\n      - name: Upload coverage" in out

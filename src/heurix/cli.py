@@ -472,6 +472,9 @@ def init(
     if config_file.exists():
         console.print("[yellow].heurix.toml already exists.[/yellow]")
     else:
+        # Mirror the repo's current state: turning k8s on for a repo that has no
+        # manifests would make `hx check` fail immediately on missing files.
+        has_k8s = (repo_path / "k8s" / "deployment.yaml").is_file()
         content = """# Heurix Configuration Policy (.heurix.toml)
 # Deterministic CI/CD, Dependabot, and Kubernetes policy configuration.
 
@@ -482,7 +485,7 @@ non_destructive = true
 
 [ci]
 include_dependabot = true
-include_k8s = true
+include_k8s = __INCLUDE_K8S__  # also controls whether `hx check` verifies k8s/ manifests
 # default_branch = "main"
 # pin_actions = true
 #
@@ -572,6 +575,7 @@ include_k8s = true
 # max_replicas = 10
 # target_cpu_utilization = 80
 """
+        content = content.replace("__INCLUDE_K8S__", "true" if has_k8s else "false")
         config_file.write_text(content, encoding="utf-8")
         console.print("[bold green]✔ Initialized .heurix.toml policy file.[/bold green]")
 

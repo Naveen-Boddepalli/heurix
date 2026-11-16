@@ -76,6 +76,44 @@ PACKAGE_MANAGER_CHECKS: Dict[str, Tuple[str, str, str]] = {
 }
 
 
+def _service_host_port(port: Any) -> Optional[str]:
+    """
+    Return the host port a service `ports:` entry binds, or None if Docker picks one.
+
+    "5432:5432" and "127.0.0.1:5432:5432" bind host port 5432; a bare container
+    port ("5432" or 5432) gets a random free host port, so it cannot collide.
+    """
+    text = str(port).strip().split("/", 1)[0]
+    parts = text.split(":")
+    if len(parts) < 2:
+        return None
+    host = parts[-2].strip()
+    return host or None
+
+
+def find_service_port_collisions(doc: Any) -> List[Tuple[str, str, List[str]]]:
+    """List (job_id, host_port, service_names) where 2+ services bind the same host port."""
+    collisions: List[Tuple[str, str, List[str]]] = []
+    jobs = doc.get("jobs") if isinstance(doc, Mapping) else None
+    if not isinstance(jobs, Mapping):
+        return collisions
+    for job_id, job in jobs.items():
+        svcs = job.get("services") if isinstance(job, Mapping) else None
+        if not isinstance(svcs, Mapping):
+            continue
+        by_port: Dict[str, List[str]] = {}
+        for svc_name, svc in svcs.items():
+            ports = svc.get("ports") if isinstance(svc, Mapping) else None
+            for port in ports if isinstance(ports, list) else []:
+                host = _service_host_port(port)
+                if host and str(svc_name) not in by_port.setdefault(host, []):
+                    by_port[host].append(str(svc_name))
+        for host, names in sorted(by_port.items()):
+            if len(names) > 1:
+                collisions.append((str(job_id), host, names))
+    return collisions
+
+
 class DriftFinding(NamedTuple):
     file_path: str
     issue: str
@@ -728,6 +766,20 @@ class DriftDetector:
                 continue
 
             ast_info = inspect_workflow_ast(existing_doc)
+
+            # 0. Services sharing a host port cannot all start, so the job fails before any step runs
+            for job_id, host_port, names in find_service_port_collisions(existing_doc):
+                findings.append(
+                    DriftFinding(
+                        file_path=rel_path,
+                        issue=(
+                            f"Job '{job_id}': services {', '.join(repr(n) for n in names)} all bind "
+                            f"host port {host_port}; only one can start, so the job will fail."
+                        ),
+                        severity="ERROR",
+                        recommendation="Run 'hx generate' to merge duplicate services, or remove the extra service.",
+                    )
+                )
 
             # 1. Check if active (non-excluded) backing services are missing across all jobs
             for svc in active_services:

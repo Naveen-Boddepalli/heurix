@@ -232,3 +232,32 @@ def test_malformed_workflow_recommendation_names_real_options(tmp_path: Path):
     assert res.exit_code == 1
     assert "--force" not in res.stdout
     assert "non_destructive" in res.stdout
+
+
+def test_check_flags_services_sharing_a_host_port(tmp_path: Path):
+    _write(tmp_path, "uv.lock", "")
+    _write(tmp_path, "pyproject.toml", '[project]\nname = "x"\ndependencies = ["psycopg", "pytest"]\n')
+    _write(tmp_path, "docker-compose.yml", "services:\n  db:\n    image: postgres:16\n")
+    _generate(tmp_path, "--no-k8s")
+    assert _invoke("check", "--path", str(tmp_path)).exit_code == 0
+
+    wf = tmp_path / ".github" / "workflows" / "ci.yml"
+    text = wf.read_text(encoding="utf-8").replace(
+        "    steps:\n",
+        "      db:\n        image: postgres:16\n        ports:\n          - 5432:5432\n    steps:\n",
+        1,
+    )
+    wf.write_text(text, encoding="utf-8")
+    res = _invoke("check", "--path", str(tmp_path))
+    assert res.exit_code == 1
+    assert "host port 5432" in " ".join(res.stdout.split())
+
+
+def test_service_host_port_parsing():
+    from heurix.core.drift import _service_host_port
+
+    assert _service_host_port("5432:5432") == "5432"
+    assert _service_host_port("127.0.0.1:6380:6379") == "6380"
+    assert _service_host_port("5432") is None
+    assert _service_host_port(5432) is None
+    assert _service_host_port("53:53/udp") == "53"

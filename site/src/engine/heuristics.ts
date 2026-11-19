@@ -2,6 +2,7 @@ import type {
   ContainerContext,
   DeploymentTarget,
   DriftFinding,
+  HeurixPolicy,
   LanguageContext,
   MonorepoPackage,
   ProjectContext,
@@ -19,7 +20,174 @@ const SENSITIVE_KEYWORDS = [
   'PRIVATE',
   'CREDENTIAL',
   'CERT',
+  'URL',
+  'URI',
+  'DSN',
+  'CONN',
+  'WEBHOOK',
+  'SESSION',
 ];
+
+/** Deployment-only secret prefixes: kept out of test jobs and k8s/secret.yaml. */
+const DEPLOYMENT_SECRET_PREFIXES = ['VERCEL_', 'FIREBASE_', 'AWS_', 'DOCKER_'];
+
+function isDeploymentSecret(key: string): boolean {
+  const upper = key.toUpperCase();
+  return DEPLOYMENT_SECRET_PREFIXES.some((p) => upper.startsWith(p));
+}
+
+/** Default action refs, mirroring ACTION_VERSIONS in synthesizers/github_actions.py. */
+export const ACTION_VERSIONS: Record<string, string> = {
+  'actions/checkout': 'v7',
+  'astral-sh/setup-uv': 'v5',
+  'actions/setup-python': 'v7.1.0',
+  'snok/install-poetry': 'v1',
+  'pnpm/action-setup': 'v4',
+  'actions/setup-node': 'v7',
+  'oven-sh/setup-bun': 'v2',
+  'dtolnay/rust-toolchain': 'stable',
+  'Swatinem/rust-cache': 'v2',
+  'actions/setup-go': 'v7',
+  'amondnet/vercel-action': 'v25',
+  'FirebaseExtended/action-hosting-deploy': 'v0',
+};
+
+function uses(repo: string): string {
+  return `        uses: ${repo}@${ACTION_VERSIONS[repo] ?? 'v4'}`;
+}
+
+/** Quote a YAML scalar when it starts with a character YAML would misread. */
+function yamlScalar(value: string): string {
+  return /^[*!&{}[\]|>@`'"%#,?:-]/.test(value) || /: | #/.test(value)
+    ? `'${value.replace(/'/g, "''")}'`
+    : value;
+}
+
+// --------------------------------------------------------------------------
+// Minimal `.heurix.toml` reader (sections, strings, booleans, string arrays)
+// --------------------------------------------------------------------------
+
+type TomlValue = string | boolean | number | string[];
+
+function parseTomlValue(raw: string, lineNo: number): TomlValue {
+  const v = raw.trim();
+  if (v === 'true' || v === 'false') return v === 'true';
+  if (/^-?\d+$/.test(v)) return Number(v);
+  const str = v.match(/^"((?:[^"\\]|\\.)*)"$/) ?? v.match(/^'([^']*)'$/);
+  if (str) return str[1];
+  if (v.startsWith('[') && v.endsWith(']')) {
+    const inner = v.slice(1, -1).trim();
+    if (!inner) return [];
+    const items: string[] = [];
+    const re = /\s*(?:"((?:[^"\\]|\\.)*)"|'([^']*)')\s*(?:,|$)/y;
+    let m: RegExpExecArray | null;
+    let consumed = 0;
+    while (consumed < inner.length && (m = re.exec(inner))) {
+      items.push(m[1] ?? m[2]);
+      consumed = re.lastIndex;
+    }
+    if (consumed < inner.trim().length) {
+      throw new Error(`line ${lineNo}: arrays may only contain quoted strings`);
+    }
+    return items;
+  }
+  throw new Error(`line ${lineNo}: invalid value '${v}'`);
+}
+
+function stripTomlComment(line: string): string {
+  let inStr: string | null = null;
+  for (let i = 0; i < line.length; i += 1) {
+    const ch = line[i];
+    if (inStr) {
+      if (ch === inStr && line[i - 1] !== '\\') inStr = null;
+    } else if (ch === '"' || ch === "'") {
+      inStr = ch;
+    } else if (ch === '#') {
+      return line.slice(0, i);
+    }
+  }
+  return line;
+}
+
+export function parseHeurixToml(text: string): Record<string, Record<string, TomlValue>> {
+  const out: Record<string, Record<string, TomlValue>> = { '': {} };
+  let section = '';
+  const lines = text.split('\n');
+  for (let i = 0; i < lines.length; i += 1) {
+    let line = stripTomlComment(lines[i]).trim();
+    if (!line) continue;
+    const header = line.match(/^\[\s*([A-Za-z0-9_.-]+)\s*\]$/);
+    if (header) {
+      section = header[1];
+      out[section] ??= {};
+      continue;
+    }
+    const eq = line.indexOf('=');
+    if (eq === -1) throw new Error(`line ${i + 1}: expected 'key = value'`);
+    const key = line.slice(0, eq).trim().replace(/^"|"$/g, '');
+    let value = line.slice(eq + 1).trim();
+    // Multi-line arrays
+    if (value.startsWith('[') && !value.endsWith(']')) {
+      const start = i + 1;
+      while (i + 1 < lines.length && !value.endsWith(']')) {
+        i += 1;
+        line = stripTomlComment(lines[i]).trim();
+        value += ` ${line}`;
+      }
+      if (!value.endsWith(']')) throw new Error(`line ${start}: unterminated array`);
+      value = value.replace(/,\s*]$/, ']');
+    }
+    if (!key) throw new Error(`line ${i + 1}: missing key`);
+    out[section][key] = parseTomlValue(value, i + 1);
+  }
+  return out;
+}
+
+function emptyPolicy(): HeurixPolicy {
+  return {
+    source: null,
+    error: null,
+    runner: null,
+    includeK8s: null,
+    includeDependabot: true,
+    paths: null,
+    pathsIgnore: [],
+    imageTag: null,
+    overrides: {},
+  };
+}
+
+function asStringList(v: TomlValue | undefined, key: string): string[] | null {
+  if (v === undefined) return null;
+  if (typeof v === 'string') return [v];
+  if (Array.isArray(v)) return Array.from(new Set(v));
+  throw new Error(`[ci].${key} must be a string or a list of strings`);
+}
+
+function loadPolicy(indexer: VirtualRepoIndexer): HeurixPolicy {
+  const policy = emptyPolicy();
+  const raw = indexer.readText('.heurix.toml');
+  if (raw === null) return policy;
+  policy.source = '.heurix.toml';
+  try {
+    const doc = parseHeurixToml(raw);
+    const engine = doc.engine ?? {};
+    const ci = doc.ci ?? {};
+    const k8s = doc.kubernetes ?? doc.k8s ?? {};
+    if (typeof engine.runner === 'string' && engine.runner.trim()) policy.runner = engine.runner.trim();
+    if (typeof ci.include_k8s === 'boolean') policy.includeK8s = ci.include_k8s;
+    if (typeof ci.include_dependabot === 'boolean') policy.includeDependabot = ci.include_dependabot;
+    policy.paths = asStringList(ci.paths, 'paths');
+    policy.pathsIgnore = asStringList(ci.paths_ignore ?? ci['paths-ignore'], 'paths_ignore') ?? [];
+    if (typeof k8s.image_tag === 'string') policy.imageTag = k8s.image_tag;
+    for (const [lang, val] of Object.entries(doc.overrides ?? {})) {
+      if (typeof val === 'string' || typeof val === 'number') policy.overrides[lang] = String(val);
+    }
+  } catch (err) {
+    return { ...emptyPolicy(), source: '.heurix.toml', error: (err as Error).message };
+  }
+  return policy;
+}
 
 class VirtualRepoIndexer {
   private fileMap: Map<string, string>;
@@ -113,9 +281,13 @@ function detectPython(indexer: VirtualRepoIndexer, context: ProjectContext): voi
   let packageManager = 'pip';
   let installCmd = '';
 
+  const syncFlags: string[] = [];
+  if (pyproject?.includes('[project.optional-dependencies]')) syncFlags.push('--all-extras');
+  if (pyproject?.includes('[dependency-groups]')) syncFlags.push('--all-groups');
+
   if (indexer.hasFile('uv.lock')) {
     packageManager = 'uv';
-    installCmd = 'uv sync --frozen';
+    installCmd = ['uv sync --frozen', ...syncFlags].join(' ');
     context.explain_log.push('Detected Package Manager: uv (via uv.lock)');
   } else if (indexer.hasFile('poetry.lock')) {
     packageManager = 'poetry';
@@ -167,8 +339,9 @@ function detectPython(indexer: VirtualRepoIndexer, context: ProjectContext): voi
 
   let testCmd = 'python -m unittest discover';
   if (depsLower.includes('pytest') || indexer.hasFile('pytest.ini') || depsText.includes('[tool.pytest')) {
-    testCmd = 'pytest';
-    context.explain_log.push('Detected Test Runner: pytest');
+    // `python -m pytest` puts the repo root on sys.path, so flat layouts import.
+    testCmd = 'python -m pytest';
+    context.explain_log.push('Detected Test Runner: pytest (run as python -m pytest)');
   } else if (depsLower.includes('django') && indexer.hasFile('manage.py')) {
     testCmd = 'python manage.py test';
     context.explain_log.push('Detected Test Runner: django manage.py test');
@@ -186,7 +359,7 @@ function detectPython(indexer: VirtualRepoIndexer, context: ProjectContext): voi
   testCmd = `${cmdPrefix}${testCmd}`;
   if (lintCmd) lintCmd = `${cmdPrefix}${lintCmd}`;
 
-  if (['psycopg2', 'asyncpg', 'postgresql', 'pgvector'].some((d) => depsLower.includes(d))) {
+  if (['psycopg', 'asyncpg', 'postgresql', 'pgvector'].some((d) => depsLower.includes(d))) {
     addServiceIfMissing(
       context,
       {
@@ -817,26 +990,50 @@ function detectCloud(indexer: VirtualRepoIndexer, context: ProjectContext): void
   }
 }
 
-function synthesizeGitHubActions(context: ProjectContext): string {
+function resolvePathFilters(
+  context: ProjectContext,
+  policy: HeurixPolicy
+): { paths: string[] | null; pathsIgnore: string[] | null } {
+  let paths: string[] | null =
+    context.is_monorepo && context.monorepo_packages.length > 0 ? ['**'] : null;
+  let pathsIgnore: string[] | null = null;
+  // Explicit [ci].paths / [ci].paths_ignore policy wins over the inferred filter.
+  if (policy.paths !== null) paths = policy.paths.length > 0 ? [...policy.paths] : null;
+  if (policy.pathsIgnore.length > 0) {
+    if (paths) {
+      // GitHub rejects `paths` + `paths-ignore` on one event: fold ignores in as negations.
+      paths = [...paths, ...policy.pathsIgnore.map((p) => `!${p}`)];
+    } else {
+      pathsIgnore = [...policy.pathsIgnore];
+    }
+  }
+  return { paths, pathsIgnore };
+}
+
+function synthesizeGitHubActions(context: ProjectContext, policy: HeurixPolicy): string {
+  const { paths, pathsIgnore } = resolvePathFilters(context, policy);
+  const filterLines: string[] = [];
+  if (paths) filterLines.push('    paths:', ...paths.map((p) => `      - ${yamlScalar(p)}`));
+  if (pathsIgnore) filterLines.push('    paths-ignore:', ...pathsIgnore.map((p) => `      - ${yamlScalar(p)}`));
+
   const lines: string[] = [
     '# Synthesized deterministically by Heurix (hx)',
     '# Non-destructive updates: preserve blocks marked with # @heurix:preserve',
     'name: CI',
+    'permissions:',
+    '  contents: read',
     'on:',
     '  push:',
     '    branches:',
     '      - main',
     '      - master',
+    ...filterLines,
+    '  pull_request:',
+    '    branches:',
+    '      - main',
+    '      - master',
+    ...filterLines,
   ];
-
-  if (context.is_monorepo && context.monorepo_packages.length > 0) {
-    lines.push('    paths:', '      - "**"');
-  }
-
-  lines.push('  pull_request:', '    branches:', '      - main', '      - master');
-  if (context.is_monorepo && context.monorepo_packages.length > 0) {
-    lines.push('    paths:', '      - "**"');
-  }
 
   lines.push('jobs:', '  test:', `    runs-on: ${context.runner}`);
 
@@ -869,18 +1066,18 @@ function synthesizeGitHubActions(context: ProjectContext): string {
     }
   }
 
-  lines.push('    steps:', '      - name: Checkout repository', '        uses: actions/checkout@v4');
+  lines.push('    steps:', '      - name: Checkout repository', uses('actions/checkout'));
 
   for (const lang of context.languages) {
     if (lang.language === 'python') {
       if (lang.package_manager === 'uv') {
         lines.push(
           '      - name: Install uv',
-          '        uses: astral-sh/setup-uv@v5',
+          uses('astral-sh/setup-uv'),
           '        with:',
           '          enable-cache: true',
           `      - name: Set up Python ${lang.runtime_version}`,
-          '        uses: actions/setup-python@v5',
+          uses('actions/setup-python'),
           '        with:',
           `          python-version: '${lang.runtime_version}'`,
           '      - name: Install dependencies',
@@ -889,12 +1086,12 @@ function synthesizeGitHubActions(context: ProjectContext): string {
       } else if (lang.package_manager === 'poetry') {
         lines.push(
           `      - name: Set up Python ${lang.runtime_version}`,
-          '        uses: actions/setup-python@v5',
+          uses('actions/setup-python'),
           '        with:',
           `          python-version: '${lang.runtime_version}'`,
           '          cache: poetry',
           '      - name: Install Poetry',
-          '        uses: snok/install-poetry@v1',
+          uses('snok/install-poetry'),
           '        with:',
           '          virtualenvs-create: true',
           '          virtualenvs-in-project: true',
@@ -904,7 +1101,7 @@ function synthesizeGitHubActions(context: ProjectContext): string {
       } else {
         lines.push(
           `      - name: Set up Python ${lang.runtime_version}`,
-          '        uses: actions/setup-python@v5',
+          uses('actions/setup-python'),
           '        with:',
           `          python-version: '${lang.runtime_version}'`
         );
@@ -917,11 +1114,11 @@ function synthesizeGitHubActions(context: ProjectContext): string {
       if (lang.package_manager === 'pnpm') {
         lines.push(
           '      - name: Install pnpm',
-          '        uses: pnpm/action-setup@v4',
+          uses('pnpm/action-setup'),
           '        with:',
           "          version: '9'",
           `      - name: Set up Node.js ${lang.runtime_version}`,
-          '        uses: actions/setup-node@v4',
+          uses('actions/setup-node'),
           '        with:',
           `          node-version: ${lang.runtime_version}`,
           '          cache: pnpm'
@@ -929,14 +1126,14 @@ function synthesizeGitHubActions(context: ProjectContext): string {
       } else if (lang.package_manager === 'bun') {
         lines.push(
           '      - name: Set up Bun',
-          '        uses: oven-sh/setup-bun@v2',
+          uses('oven-sh/setup-bun'),
           '        with:',
           '          bun-version: latest'
         );
       } else {
         lines.push(
           `      - name: Set up Node.js ${lang.runtime_version}`,
-          '        uses: actions/setup-node@v4',
+          uses('actions/setup-node'),
           '        with:',
           `          node-version: ${lang.runtime_version}`,
           `          cache: ${lang.package_manager === 'yarn' ? 'yarn' : 'npm'}`
@@ -950,12 +1147,12 @@ function synthesizeGitHubActions(context: ProjectContext): string {
         '        with:',
         `          toolchain: ${lang.runtime_version}`,
         '      - name: Rust Cache',
-        '        uses: Swatinem/rust-cache@v2'
+        uses('Swatinem/rust-cache')
       );
     } else if (lang.language === 'go') {
       lines.push(
         `      - name: Set up Go ${lang.runtime_version}`,
-        '        uses: actions/setup-go@v5',
+        uses('actions/setup-go'),
         '        with:',
         `          go-version: '${lang.runtime_version}'`,
         '          cache: true',
@@ -991,12 +1188,13 @@ function synthesizeGitHubActions(context: ProjectContext): string {
     if (lang.test_cmd) {
       lines.push(`      - name: Run tests (${lang.language})`, `        run: ${lang.test_cmd}`);
       const envEntries = Object.entries(context.env_vars);
-      if (envEntries.length > 0 || context.required_secrets.length > 0) {
+      const testSecrets = context.required_secrets.filter((s) => !isDeploymentSecret(s));
+      if (envEntries.length > 0 || testSecrets.length > 0) {
         lines.push('        env:');
         for (const [k, v] of envEntries) {
           lines.push(`          ${k}: ${v}`);
         }
-        for (const s of context.required_secrets) {
+        for (const s of testSecrets) {
           lines.push(`          ${s}: \${{ secrets.${s} }}`);
         }
       }
@@ -1013,9 +1211,9 @@ function synthesizeGitHubActions(context: ProjectContext): string {
         "    if: github.ref == 'refs/heads/main' && github.event_name == 'push'",
         '    steps:',
         '      - name: Checkout repository',
-        '        uses: actions/checkout@v4',
+        uses('actions/checkout'),
         '      - name: Deploy to Vercel (Production)',
-        '        uses: amondnet/vercel-action@v25',
+        uses('amondnet/vercel-action'),
         '        with:',
         '          vercel-token: ${{ secrets.VERCEL_TOKEN }}',
         '          vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}',
@@ -1031,9 +1229,9 @@ function synthesizeGitHubActions(context: ProjectContext): string {
         "    if: github.ref == 'refs/heads/main' && github.event_name == 'push'",
         '    steps:',
         '      - name: Checkout repository',
-        '        uses: actions/checkout@v4',
+        uses('actions/checkout'),
         '      - name: Deploy to Firebase Hosting',
-        '        uses: FirebaseExtended/action-hosting-deploy@v0',
+        uses('FirebaseExtended/action-hosting-deploy'),
         '        with:',
         '          repoToken: ${{ secrets.GITHUB_TOKEN }}',
         '          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}',
@@ -1108,10 +1306,11 @@ function synthesizeDependabot(context: ProjectContext): string {
   return lines.join('\n') + '\n';
 }
 
-function synthesizeKubernetes(context: ProjectContext): Record<string, string> {
-  if (context.containers.length === 0 && !context.languages.some((l) => l.framework)) {
-    return {};
-  }
+function synthesizeKubernetes(context: ProjectContext, policy: HeurixPolicy): Record<string, string> {
+  // Manifests only for containerized repos (or an explicit include_k8s = true policy):
+  // a framework alone no longer produces a Deployment for an image nothing builds.
+  if (policy.includeK8s === false) return {};
+  if (context.containers.length === 0 && policy.includeK8s !== true) return {};
 
   const appName = context.repo_name.toLowerCase().replace(/_/g, '-');
   const primary = context.languages[0];
@@ -1128,22 +1327,33 @@ function synthesizeKubernetes(context: ProjectContext): Record<string, string> {
   const memReq = isSystems ? '64Mi' : '256Mi';
   const memLimit = isSystems ? '256Mi' : '512Mi';
 
+  // Deploy credentials (VERCEL_*, FIREBASE_*, ...) never reach the app pod.
+  const podSecrets = context.required_secrets.filter((s) => !isDeploymentSecret(s));
+  const imageTag = policy.imageTag ?? 'latest';
+
   const envFromLines: string[] = [];
-  if (Object.keys(context.env_vars).length > 0 || context.required_secrets.length > 0) {
+  if (Object.keys(context.env_vars).length > 0 || podSecrets.length > 0) {
     envFromLines.push('          envFrom:');
     if (Object.keys(context.env_vars).length > 0) {
       envFromLines.push(`            - configMapRef:\n                name: ${appName}-config`);
     }
-    if (context.required_secrets.length > 0) {
+    if (podSecrets.length > 0) {
       envFromLines.push(
         `            - secretRef:\n                name: ${appName}-secrets\n                optional: true`
       );
     }
   }
 
-  const readinessProbe = isStreamlit
-    ? `          readinessProbe:\n            httpGet:\n              path: /_stcore/health\n              port: ${port}\n            initialDelaySeconds: 5\n            periodSeconds: 10`
-    : `          readinessProbe:\n            tcpSocket:\n              port: ${port}\n            initialDelaySeconds: 5\n            periodSeconds: 10`;
+  const HTTP_PROBE_PATHS: Record<string, string> = {
+    Streamlit: '/_stcore/health',
+    FastAPI: '/health',
+    'Next.js': '/',
+  };
+  const probePath = primary?.framework ? HTTP_PROBE_PATHS[primary.framework] : undefined;
+  const probe = (name: string, delay: number) =>
+    probePath
+      ? `          ${name}:\n            httpGet:\n              path: ${probePath}\n              port: ${port}\n            initialDelaySeconds: ${delay}\n            periodSeconds: 10`
+      : `          ${name}:\n            tcpSocket:\n              port: ${port}\n            initialDelaySeconds: ${delay}\n            periodSeconds: 10`;
 
   const deployment = [
     '# Synthesized deterministically by Heurix (hx)',
@@ -1163,9 +1373,19 @@ function synthesizeKubernetes(context: ProjectContext): Record<string, string> {
     '      labels:',
     `        app: ${appName}`,
     '    spec:',
+    '      securityContext:',
+    '        runAsNonRoot: true',
+    '        seccompProfile:',
+    '          type: RuntimeDefault',
     '      containers:',
     `        - name: ${appName}`,
-    `          image: ${appName}:latest`,
+    `          image: ${appName}:${imageTag}`,
+    '          securityContext:',
+    '            allowPrivilegeEscalation: false',
+    '            readOnlyRootFilesystem: true',
+    '            capabilities:',
+    '              drop:',
+    '                - ALL',
     '          ports:',
     `            - containerPort: ${port}`,
     '          resources:',
@@ -1175,12 +1395,8 @@ function synthesizeKubernetes(context: ProjectContext): Record<string, string> {
     '            limits:',
     '              cpu: 500m',
     `              memory: ${memLimit}`,
-    '          livenessProbe:',
-    '            tcpSocket:',
-    `              port: ${port}`,
-    '            initialDelaySeconds: 15',
-    '            periodSeconds: 10',
-    readinessProbe,
+    probe('livenessProbe', 15),
+    probe('readinessProbe', 5),
     ...envFromLines,
     '',
   ].join('\n');
@@ -1272,12 +1488,29 @@ function synthesizeKubernetes(context: ProjectContext): Record<string, string> {
     k8sOutputs['k8s/configmap.yaml'] = cmLines.join('\n');
   }
 
+  if (podSecrets.length > 0) {
+    k8sOutputs['k8s/secret.yaml'] = [
+      '# Synthesized deterministically by Heurix (hx)',
+      'apiVersion: v1',
+      'kind: Secret',
+      'metadata:',
+      `  name: ${appName}-secrets`,
+      '  labels:',
+      `    app: ${appName}`,
+      'type: Opaque',
+      'stringData:',
+      ...[...podSecrets].sort().map((k) => `  ${k}: "CHANGE_ME"`),
+      '',
+    ].join('\n');
+  }
+
   return k8sOutputs;
 }
 
 export function runHeurixScan(repoName: string, files: VirtualFile[]): ScanResult {
   const start = performance.now();
   const indexer = new VirtualRepoIndexer(files);
+  const policy = loadPolicy(indexer);
 
   const context: ProjectContext = {
     repo_name: repoName,
@@ -1292,8 +1525,21 @@ export function runHeurixScan(repoName: string, files: VirtualFile[]): ScanResul
     env_vars: {},
     explain_log: [`Scanning repository at /workspace/${repoName} (indexed ${indexer.files.length} files)...`],
     confidence: 1.0,
-    runner: 'ubuntu-latest',
+    runner: policy.runner ?? 'ubuntu-latest',
   };
+
+  if (policy.error) {
+    context.explain_log.push(`⚠ Invalid Policy: .heurix.toml could not be parsed (${policy.error}); using defaults`);
+  } else if (policy.source) {
+    const notes: string[] = [];
+    if (policy.runner) notes.push(`runner=${policy.runner}`);
+    if (policy.paths) notes.push(`paths=[${policy.paths.join(', ')}]`);
+    if (policy.pathsIgnore.length) notes.push(`paths_ignore=[${policy.pathsIgnore.join(', ')}]`);
+    if (policy.includeK8s !== null) notes.push(`include_k8s=${policy.includeK8s}`);
+    if (!policy.includeDependabot) notes.push('include_dependabot=false');
+    for (const [k, v] of Object.entries(policy.overrides)) notes.push(`${k}=${v}`);
+    context.explain_log.push(`Loaded policy .heurix.toml${notes.length ? ` (${notes.join(', ')})` : ''}`);
+  }
 
   detectPython(indexer, context);
   detectNode(indexer, context);
@@ -1304,31 +1550,88 @@ export function runHeurixScan(repoName: string, files: VirtualFile[]): ScanResul
   detectEnv(indexer, context);
   detectCloud(indexer, context);
 
-  const synthesized: Record<string, string> = {};
-  if (context.languages.length > 0 || context.deployment_targets.length > 0) {
-    synthesized['.github/workflows/ci.yml'] = synthesizeGitHubActions(context);
-    synthesized['.github/dependabot.yml'] = synthesizeDependabot(context);
+  // [overrides] pin runtimes explicitly (python = "3.12", node = "20.x", ...)
+  for (const lang of context.languages) {
+    const pinned = policy.overrides[lang.language];
+    if (pinned && pinned !== lang.runtime_version) {
+      lang.runtime_version = pinned;
+      lang.version_source = '.heurix.toml [overrides]';
+      context.explain_log.push(`Policy override: ${lang.language} runtime pinned to ${pinned}`);
+    }
   }
 
-  Object.assign(synthesized, synthesizeKubernetes(context));
+  if (context.containers.length === 0 && policy.includeK8s !== true && context.languages.length > 0) {
+    context.explain_log.push('Skipping Kubernetes manifests: no Dockerfile (repo is not containerized)');
+  }
+
+  const synthesized: Record<string, string> = {};
+  if (context.languages.length > 0 || context.deployment_targets.length > 0) {
+    synthesized['.github/workflows/ci.yml'] = synthesizeGitHubActions(context, policy);
+    if (policy.includeDependabot) {
+      synthesized['.github/dependabot.yml'] = synthesizeDependabot(context);
+    }
+  }
+
+  Object.assign(synthesized, synthesizeKubernetes(context, policy));
 
   const durationMs = Math.max(0.2, Number((performance.now() - start).toFixed(2)));
-  return { context, synthesized, durationMs };
+  return { context, policy, synthesized, durationMs };
 }
 
-export function simulateSmartMerge(existingCi: string, newCi: string): string {
+export interface MergeSimulation {
+  merged: string;
+  /** Human-readable notes for hand-edited values the merge replaces (as `hx generate` prints). */
+  replaced: string[];
+  /** Keys kept because their line ends with `# @heurix:preserve`. */
+  keptKeys: string[];
+}
+
+const PRESERVE_RE = /#\s*@(heurix|autoyaml):preserve/;
+const KEY_LEVEL_PRESERVE = ['runs-on', 'services', 'needs', 'strategy'];
+
+function stepRunsByName(yaml: string): Map<string, string> {
+  const out = new Map<string, string>();
+  const lines = yaml.split('\n');
+  for (let i = 0; i < lines.length; i += 1) {
+    const name = lines[i].match(/^\s*-\s+name:\s*(.+)$/);
+    if (!name) continue;
+    for (let j = i + 1; j < lines.length && !/^\s*-\s/.test(lines[j]); j += 1) {
+      const run = lines[j].match(/^\s+run:\s*(.+)$/);
+      if (run) {
+        out.set(name[1].trim(), run[1].trim());
+        break;
+      }
+    }
+  }
+  return out;
+}
+
+export function simulateSmartMerge(existingCi: string, newCi: string): MergeSimulation {
   const lines = existingCi.split('\n');
   const preservedBlocks: string[] = [];
+  const keptKeys: string[] = [];
+  const replaced: string[] = [];
   let i = 0;
+
+  // Key-level preserve: `runs-on: self-hosted  # @heurix:preserve` keeps the value.
+  const keptJobKeys = new Map<string, string>();
+  for (const line of lines) {
+    const m = line.match(/^    ([a-z-]+):(.*)$/);
+    if (m && KEY_LEVEL_PRESERVE.includes(m[1]) && PRESERVE_RE.test(line)) {
+      keptJobKeys.set(m[1], line);
+      keptKeys.push(`jobs.test.${m[1]}`);
+    }
+  }
 
   while (i < lines.length) {
     const line = lines[i];
-    if (line.includes('@heurix:preserve') || line.includes('@autoyaml:preserve')) {
+    if (PRESERVE_RE.test(line) && line.trim().startsWith('#')) {
+      const indent = line.match(/^\s*/)?.[0] ?? '';
       const block = [line];
       if (i + 1 < lines.length && lines[i + 1].trim().startsWith('- name:')) {
         i += 1;
         block.push(lines[i]);
-        while (i + 1 < lines.length && lines[i + 1].startsWith('        ') && !lines[i + 1].trim().startsWith('- ')) {
+        while (i + 1 < lines.length && lines[i + 1].startsWith(`${indent}  `) && !lines[i + 1].trim().startsWith('- ')) {
           i += 1;
           block.push(lines[i]);
         }
@@ -1338,39 +1641,117 @@ export function simulateSmartMerge(existingCi: string, newCi: string): string {
     i += 1;
   }
 
-  // Also preserve custom jobs not named "test", "deploy_vercel", "deploy_firebase"
-  const customJobStart = lines.findIndex((l) => /^  (slack_notify|security_audit|notify):/.test(l));
-  let customJobBlock = '';
-  if (customJobStart !== -1) {
-    const collected = [lines[customJobStart]];
-    for (let j = customJobStart + 1; j < lines.length; j += 1) {
-      if (/^  [a-zA-Z0-9_-]+:/.test(lines[j])) break;
-      collected.push(lines[j]);
+  // Replacement notices: managed values that were hand-edited
+  const oldRunsOn = existingCi.match(/^  test:\n(?:.*\n)*?    runs-on:\s*([^#\n]+)/m)?.[1]?.trim();
+  const newRunsOn = newCi.match(/^  test:\n(?:.*\n)*?    runs-on:\s*([^#\n]+)/m)?.[1]?.trim();
+  if (oldRunsOn && newRunsOn && oldRunsOn !== newRunsOn && !keptJobKeys.has('runs-on')) {
+    replaced.push(`jobs.test.runs-on: '${oldRunsOn}' -> '${newRunsOn}'`);
+  }
+  const oldRuns = stepRunsByName(existingCi);
+  for (const [name, newRun] of stepRunsByName(newCi)) {
+    const oldRun = oldRuns.get(name);
+    if (oldRun && oldRun !== newRun) {
+      replaced.push(`jobs.test.steps['${name}'].run: '${oldRun}' -> '${newRun}'`);
     }
-    customJobBlock = collected.join('\n');
+  }
+
+  // Also preserve custom jobs not managed by Heurix (anything except test / deploy_*)
+  const customJobs: string[] = [];
+  const jobsIdx = lines.findIndex((l) => /^jobs:\s*$/.test(l));
+  if (jobsIdx !== -1) {
+    for (let j = jobsIdx + 1; j < lines.length; j += 1) {
+      const job = lines[j].match(/^  ([a-zA-Z0-9_-]+):\s*$/);
+      if (!job || job[1] === 'test' || job[1].startsWith('deploy_')) continue;
+      const collected = [lines[j]];
+      while (j + 1 < lines.length && !/^  [a-zA-Z0-9_-]+:/.test(lines[j + 1]) && !/^\S/.test(lines[j + 1])) {
+        j += 1;
+        collected.push(lines[j]);
+      }
+      customJobs.push(collected.join('\n').trimEnd());
+    }
   }
 
   let merged = newCi.trimEnd();
+  for (const [key, original] of keptJobKeys) {
+    merged = merged.replace(new RegExp(`^    ${key}:.*$`, 'm'), original);
+  }
   if (preservedBlocks.length > 0) {
-    // Inject preserved step inside test job before deploy jobs or at end of test steps
+    // Inject preserved steps at the end of the test job, before any deploy jobs
     const deployIdx = merged.search(/\n  deploy_(vercel|firebase):/);
     const blockText = '\n' + preservedBlocks.join('\n');
-    if (deployIdx !== -1) {
-      merged = merged.slice(0, deployIdx) + blockText + merged.slice(deployIdx);
-    } else {
-      merged += blockText;
-    }
+    merged = deployIdx !== -1 ? merged.slice(0, deployIdx) + blockText + merged.slice(deployIdx) : merged + blockText;
   }
-  if (customJobBlock) {
-    merged += '\n' + customJobBlock;
+  for (const job of customJobs) {
+    merged += '\n' + job;
   }
 
-  return merged + '\n';
+  return { merged: merged + '\n', replaced, keptKeys };
 }
 
-export function checkDrift(context: ProjectContext, existingCi: string | null): DriftFinding[] {
+/** Find services in one job that bind the same host port (mirrors core/drift.py). */
+export function findServicePortCollisions(workflow: string): { job: string; port: string; services: string[] }[] {
+  const out: { job: string; port: string; services: string[] }[] = [];
+  const lines = workflow.split('\n');
+  let job: string | null = null;
+  let inServices = false;
+  let svc: string | null = null;
+  let byPort = new Map<string, string[]>();
+  const flush = () => {
+    if (job) {
+      for (const [port, names] of byPort) if (names.length > 1) out.push({ job, port, services: names });
+    }
+    byPort = new Map();
+  };
+  for (const line of lines) {
+    const jobM = line.match(/^  ([a-zA-Z0-9_-]+):\s*$/);
+    if (jobM) {
+      flush();
+      job = jobM[1];
+      inServices = false;
+      continue;
+    }
+    if (/^    services:\s*$/.test(line)) {
+      inServices = true;
+      continue;
+    }
+    if (/^    \S/.test(line)) inServices = false;
+    if (!inServices) continue;
+    const svcM = line.match(/^      ([a-zA-Z0-9_-]+):\s*$/);
+    if (svcM) {
+      svc = svcM[1];
+      continue;
+    }
+    const portM = line.match(/^\s+-\s*['"]?([\d.:]+)['"]?\s*$/);
+    if (svc && portM) {
+      const parts = portM[1].split(':');
+      if (parts.length >= 2) {
+        const host = parts[parts.length - 2];
+        const names = byPort.get(host) ?? [];
+        if (!names.includes(svc)) names.push(svc);
+        byPort.set(host, names);
+      }
+    }
+  }
+  flush();
+  return out;
+}
+
+export function checkDrift(
+  context: ProjectContext,
+  existingCi: string | null,
+  policy?: HeurixPolicy
+): DriftFinding[] {
   const findings: DriftFinding[] = [];
   const ciPath = '.github/workflows/ci.yml';
+
+  if (policy?.error) {
+    findings.push({
+      file_path: '.heurix.toml',
+      issue: `Invalid Policy: ${policy.error}`,
+      severity: 'ERROR',
+      recommendation: 'Fix the .heurix.toml syntax; hx check exits 1 until the policy parses.',
+    });
+  }
 
   if (!existingCi) {
     findings.push({
@@ -1380,6 +1761,16 @@ export function checkDrift(context: ProjectContext, existingCi: string | null): 
       recommendation: `Run 'hx generate' to synthesize ${ciPath}.`,
     });
     return findings;
+  }
+
+  // Services sharing a host port cannot all start, so the job fails before any step runs
+  for (const c of findServicePortCollisions(existingCi)) {
+    findings.push({
+      file_path: ciPath,
+      issue: `Job '${c.job}': services ${c.services.map((n) => `'${n}'`).join(', ')} all bind host port ${c.port}; only one can start, so the job will fail.`,
+      severity: 'ERROR',
+      recommendation: "Run 'hx generate' to merge duplicate services, or remove the extra service.",
+    });
   }
 
   for (const svc of context.services) {

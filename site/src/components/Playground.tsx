@@ -11,11 +11,11 @@ import { CodeBlock } from './CodeBlock';
 
 type OutputTab = 'generate' | 'scan' | 'merge' | 'drift';
 
-const OUTPUT_TABS: { id: OutputTab; label: string }[] = [
-  { id: 'generate', label: 'hx generate (YAML)' },
-  { id: 'scan', label: 'hx scan (IR JSON)' },
-  { id: 'merge', label: 'hx diff (# @heurix:preserve)' },
-  { id: 'drift', label: 'hx check (Drift Guard)' },
+const OUTPUT_TABS: { id: OutputTab; label: string; hint: string }[] = [
+  { id: 'generate', label: 'hx generate', hint: 'YAML' },
+  { id: 'scan', label: 'hx scan', hint: 'IR JSON' },
+  { id: 'merge', label: 'hx diff', hint: 'Smart merge' },
+  { id: 'drift', label: 'hx check', hint: 'Drift guard' },
 ];
 
 export function Playground() {
@@ -38,6 +38,7 @@ export function Playground() {
   const [isAddingFile, setIsAddingFile] = useState(false);
   const [newFilePath, setNewFilePath] = useState(STARTER_FILE_TEMPLATES[1].defaultPath);
   const [templateIdx, setTemplateIdx] = useState(1);
+  const [addFileError, setAddFileError] = useState<string | null>(null);
 
   const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
@@ -48,6 +49,7 @@ export function Playground() {
     setSelectedFilePath(next.files[0]?.path ?? '');
     setSelectedOutputFile('.github/workflows/ci.yml');
     setIsAddingFile(false);
+    setAddFileError(null);
     setSimulatedCi(null);
     setDriftNotice(null);
   }
@@ -70,9 +72,10 @@ export function Playground() {
     if (!cleanPath) return;
 
     if (files.some((f) => f.path === cleanPath)) {
-      alert(`File "${cleanPath}" already exists.`);
+      setAddFileError(`"${cleanPath}" already exists. Pick another path or edit the existing file.`);
       return;
     }
+    setAddFileError(null);
 
     const tpl = STARTER_FILE_TEMPLATES[templateIdx] ?? STARTER_FILE_TEMPLATES[0];
     const newFile: VirtualFile = {
@@ -145,7 +148,7 @@ export function Playground() {
     currentPreset.existingCiForMerge ??
     `name: CI\non:\n  push:\n    branches: [main]\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      # @heurix:preserve\n      - name: Custom security & SBOM upload\n        run: ./scripts/upload-sbom.sh\n  slack_notify:\n    needs: test\n    if: failure()\n    runs-on: ubuntu-latest\n    steps:\n      - uses: slackapi/slack-github-action@v1`;
 
-  const mergedCiOutput = useMemo(
+  const mergeResult = useMemo(
     () =>
       simulateSmartMerge(
         existingCiSample,
@@ -161,8 +164,14 @@ export function Playground() {
   const activeCheckedWorkflow = simulatedCi ?? staleBaselineCi;
 
   const driftFindings = useMemo(() => {
-    return checkDrift(scanResult.context, activeCheckedWorkflow);
-  }, [scanResult.context, activeCheckedWorkflow]);
+    return checkDrift(scanResult.context, activeCheckedWorkflow, scanResult.policy);
+  }, [scanResult.context, scanResult.policy, activeCheckedWorkflow]);
+
+  const policyStatus = scanResult.policy.error
+    ? { tone: 'danger', label: 'Invalid .heurix.toml' }
+    : scanResult.policy.source
+      ? { tone: 'accent', label: '.heurix.toml applied' }
+      : { tone: 'muted', label: 'Zero-config defaults' };
 
   const cliCheckOutput = useMemo(() => {
     if (driftFindings.length === 0) {
@@ -285,6 +294,23 @@ export function Playground() {
     setDriftNotice('⚡ Injected PostgreSQL service requirement. Workflow is missing postgres container!');
   }
 
+  function handleDuplicateService() {
+    const base = scanResult.synthesized['.github/workflows/ci.yml'] ?? staleBaselineCi;
+    const dupBlock = [
+      '      db:',
+      '        image: postgres:15',
+      '        ports:',
+      "          - '5432:5432'",
+    ].join('\n');
+    const withServices = /^    services:$/m.test(base)
+      ? base.replace(/^    services:$/m, `    services:\n${dupBlock}`)
+      : base.replace(/^(    runs-on: .*)$/m, `$1\n    services:\n      postgres:\n        image: postgres:16-alpine\n        ports:\n          - 5432:5432\n${dupBlock}`);
+    setSimulatedCi(withServices);
+    setDriftNotice(
+      '⚡ Loaded a workflow from an older Heurix version: compose "db" and inferred "postgres" both bind host port 5432.'
+    );
+  }
+
   function handleReconcile() {
     const currentGenerated = scanResult.synthesized['.github/workflows/ci.yml'];
     if (currentGenerated) {
@@ -339,8 +365,9 @@ export function Playground() {
             ))}
 
             <div className="scan-meta" aria-live="polite">
+              <span className={`status-chip is-${policyStatus.tone}`}>{policyStatus.label}</span>
               <span>✔ Scanned in {scanResult.durationMs} ms</span>
-              <span>•</span>
+              <span aria-hidden="true">•</span>
               <span>{outputKeys.length} artifacts</span>
             </div>
           </div>
@@ -417,7 +444,10 @@ export function Playground() {
                       type="text"
                       className="form-input"
                       value={newFilePath}
-                      onChange={(e) => setNewFilePath(e.target.value)}
+                      onChange={(e) => {
+                        setNewFilePath(e.target.value);
+                        setAddFileError(null);
+                      }}
                       placeholder="e.g. Dockerfile"
                       required
                     />
@@ -425,6 +455,11 @@ export function Playground() {
                       Add
                     </button>
                   </div>
+                  {addFileError && (
+                    <p className="form-error" role="alert">
+                      {addFileError}
+                    </p>
+                  )}
                 </form>
               )}
 
@@ -501,7 +536,8 @@ export function Playground() {
                     onClick={() => setActiveTab(tab.id)}
                     onKeyDown={(e) => handleTabKeyDown(e, idx)}
                   >
-                    {tab.label}
+                    <code className="tab-cmd">{tab.label}</code>
+                    <span className="tab-hint">{tab.hint}</span>
                   </button>
                 ))}
               </div>
@@ -514,21 +550,27 @@ export function Playground() {
                 tabIndex={activeTab === 'generate' ? 0 : undefined}
               >
                 <div className="output-body">
-                  <div className="explain-box">
-                    <div className="explain-title">
-                      🔍 Heuristic Reasoning Tree (`hx generate --explain`)
-                    </div>
+                  <details className="explain-box" open>
+                    <summary className="explain-title">
+                      <span>Heuristic reasoning tree</span>
+                      <code>hx generate --explain</code>
+                      <span className="explain-count">{scanResult.context.explain_log.length} steps</span>
+                    </summary>
                     <ul className="explain-list">
-                      {scanResult.context.explain_log.map((step, i) => (
-                        <li key={i}>
-                          <span className="explain-check" aria-hidden="true">
-                            ✔
-                          </span>
-                          <span>{step}</span>
-                        </li>
-                      ))}
+                      {scanResult.context.explain_log.map((step, i) => {
+                        const isWarn = step.startsWith('⚠');
+                        const isSkip = step.startsWith('Skipping');
+                        return (
+                          <li key={i} className={isWarn ? 'is-warn' : isSkip ? 'is-skip' : undefined}>
+                            <span className="explain-check" aria-hidden="true">
+                              {isWarn ? '!' : isSkip ? '–' : '✔'}
+                            </span>
+                            <span>{isWarn ? step.slice(1).trim() : step}</span>
+                          </li>
+                        );
+                      })}
                     </ul>
-                  </div>
+                  </details>
 
                   {outputKeys.length > 0 && (
                     <div className="export-actions-bar">
@@ -618,9 +660,54 @@ export function Playground() {
                   <p style={{ fontSize: '0.9375rem' }}>
                     <code>SmartMerger</code> parses existing YAML via <code>ruamel.yaml</code> AST round-tripping.
                     Custom jobs (like <code>slack_notify</code>) and any step marked with{' '}
-                    <code># @heurix:preserve</code> survive regeneration intact while managed steps update.
+                    <code># @heurix:preserve</code> survive regeneration intact while managed steps update. Put the
+                    marker at the end of a <code>runs-on</code>, <code>services</code>, <code>needs</code>, or{' '}
+                    <code>strategy</code> line to keep just that value.
                   </p>
-                  <div style={{ display: 'grid', gap: '1rem' }}>
+
+                  <div className="merge-report" aria-label="Merge report">
+                    <div className="merge-report-col">
+                      <h3 className="merge-report-title is-warn">
+                        Values that will be replaced <span className="count-pill">{mergeResult.replaced.length}</span>
+                      </h3>
+                      {mergeResult.replaced.length === 0 ? (
+                        <p className="merge-report-empty">No hand-edited managed values are overwritten.</p>
+                      ) : (
+                        <ul>
+                          {mergeResult.replaced.map((note) => (
+                            <li key={note}>
+                              <code>{note}</code>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                    <div className="merge-report-col">
+                      <h3 className="merge-report-title is-ok">
+                        Kept by <code>@heurix:preserve</code>{' '}
+                        <span className="count-pill">
+                          {mergeResult.keptKeys.length + (existingCiSample.match(/^\s*# @heurix:preserve/gm)?.length ?? 0)}
+                        </span>
+                      </h3>
+                      <ul>
+                        {mergeResult.keptKeys.map((k) => (
+                          <li key={k}>
+                            <code>{k}</code> <span className="muted">(key-level)</span>
+                          </li>
+                        ))}
+                        {(existingCiSample.match(/# @heurix:preserve\n\s*- name: (.+)/g) ?? []).map((m) => (
+                          <li key={m}>
+                            step <code>{m.split('- name: ')[1]}</code>
+                          </li>
+                        ))}
+                        {mergeResult.keptKeys.length === 0 && !/^\s*# @heurix:preserve/m.test(existingCiSample) && (
+                          <li className="muted">No preserve markers in this workflow.</li>
+                        )}
+                      </ul>
+                    </div>
+                  </div>
+
+                  <div className="merge-compare">
                     <CodeBlock
                       title="Before: Existing .github/workflows/ci.yml (with custom steps)"
                       code={existingCiSample}
@@ -628,7 +715,7 @@ export function Playground() {
                     />
                     <CodeBlock
                       title="After: Merged .github/workflows/ci.yml (AST preserved)"
-                      code={mergedCiOutput}
+                      code={mergeResult.merged}
                       badge="✔ Preserved user customizations"
                       highlightDiff
                     />
@@ -687,6 +774,14 @@ export function Playground() {
                         title="Add PostgreSQL container in compose"
                       >
                         + Postgres Service
+                      </button>
+                      <button
+                        type="button"
+                        className="drift-scenario-btn"
+                        onClick={handleDuplicateService}
+                        title="Load a workflow with two services on host port 5432"
+                      >
+                        + Port Collision
                       </button>
                     </div>
 

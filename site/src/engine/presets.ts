@@ -57,6 +57,22 @@ LOG_LEVEL=info
 STRIPE_SECRET_KEY=sk_test_placeholder
 DATABASE_PASSWORD=change_me`,
       },
+      {
+        path: '.heurix.toml',
+        enabled: true,
+        content: `# Heurix Configuration Policy (.heurix.toml)
+[engine]
+runner = "ubuntu-latest"
+
+[ci]
+include_dependabot = true
+# Skip CI when a change only touches docs (new in 0.3.0)
+paths_ignore = ["docs/**", "**/*.md"]
+# paths = ["src/**", "tests/**"]
+
+[overrides]
+# python = "3.13"`,
+      },
     ],
     existingCiForMerge: `name: CI
 on:
@@ -64,13 +80,15 @@ on:
     branches: [main]
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted # @heurix:preserve
     steps:
       - uses: actions/checkout@v4
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      - name: Run tests (python)
+        run: pytest -q
       # @heurix:preserve
       - name: Upload coverage to internal bucket
         run: ./scripts/upload-cov.sh
@@ -385,6 +403,19 @@ export const STARTER_FILE_TEMPLATES: FileTemplate[] = [
     name: 'Blank File',
     defaultPath: 'config.toml',
     content: '# New configuration file\n',
+  },
+  {
+    name: '.heurix.toml (Policy + path filters)',
+    defaultPath: '.heurix.toml',
+    content: `[engine]
+runner = "ubuntu-latest"
+
+[ci]
+include_k8s = true
+paths_ignore = ["docs/**", "**/*.md"]
+
+[overrides]
+python = "3.12"\n`,
   },
   {
     name: 'Dockerfile (Container)',

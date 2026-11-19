@@ -350,7 +350,7 @@
 .term-screen {
   margin: 0;
   padding: 0.875rem 1rem;
-  block-size: 21rem;
+  block-size: 17rem;
   overflow: auto;
   font-family: var(--font-mono);
   font-size: 0.78rem;

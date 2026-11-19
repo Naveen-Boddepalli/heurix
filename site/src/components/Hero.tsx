@@ -6,11 +6,10 @@ import { CodeBlock } from './CodeBlock';
 import { HeroGraph } from './HeroGraph';
 import { TerminalReplay } from './TerminalReplay';
 
-const DEMO_TAB = { id: 'demo', label: 'Demo' };
-const TABS = [DEMO_TAB, ...INSTALL_METHODS.map(({ id, label }) => ({ id, label }))];
+const TABS = INSTALL_METHODS;
 
 export function Hero() {
-  const [selectedId, setSelectedId] = useState(DEMO_TAB.id);
+  const [selectedId, setSelectedId] = useState(INSTALL_METHODS[0].id);
   const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const tablistRef = useRef<HTMLDivElement | null>(null);
   const actionsRef = useRef<HTMLDivElement | null>(null);
@@ -31,8 +30,6 @@ export function Hero() {
       tabRefs.current[nextIndex]?.focus();
     }
   }
-
-  const isDemo = selectedId === DEMO_TAB.id;
 
   return (
     <section id="top" className="hero">
@@ -70,8 +67,8 @@ export function Hero() {
           </p>
         </div>
 
-        <aside className="install-card" aria-label="Demo and install">
-          <div role="tablist" aria-label="Demo and installation methods" className="tablist" ref={tablistRef}>
+        <aside className="install-card" aria-label="Install Heurix">
+          <div role="tablist" aria-label="Installation methods" className="tablist" ref={tablistRef}>
             {TABS.map((tab, idx) => (
               <button
                 key={tab.id}
@@ -93,12 +90,6 @@ export function Hero() {
             <span className="tab-indicator" aria-hidden="true" />
           </div>
 
-          <div role="tabpanel" aria-labelledby="install-tab-demo" hidden={!isDemo} tabIndex={isDemo ? 0 : undefined}>
-            <div className="tabpanel-body">
-              <TerminalReplay active={isDemo} />
-            </div>
-          </div>
-
           {INSTALL_METHODS.map((method) => {
             const isSelected = selectedId === method.id;
             return (
@@ -117,15 +108,11 @@ export function Hero() {
             );
           })}
 
-          {!isDemo && (
-            <div className="install-next">
-              <span className="install-next-label">Then, from your repo root:</span>
-              <CodeBlock
-                title="First run"
-                code={'hx generate --dry-run   # preview, writes nothing\nhx generate             # write + smart-merge\nhx check                # exit 1 on drift'}
-              />
-            </div>
-          )}
+          {/* The first run, played back on a sample repo */}
+          <div className="install-next">
+            <span className="install-next-label">Then, from your repo root:</span>
+            <TerminalReplay />
+          </div>
         </aside>
       </div>
     </section>

@@ -9,6 +9,7 @@ interface ReplayLine {
 }
 
 const COMMAND = 'hx generate --dry-run';
+const FIRST_RUN = 'hx generate --dry-run   # preview, writes nothing\nhx generate             # write + smart-merge\nhx check                # exit 1 on drift';
 const YAML_PREVIEW_LINES = 14;
 const DELAY: Record<LineKind, number> = { log: 260, hit: 220, warn: 260, gap: 320, write: 200, yaml: 55, done: 400 };
 
@@ -40,10 +41,13 @@ async function buildTranscript(): Promise<{ repo: string; lines: ReplayLine[] }>
   for (const l of yaml.slice(0, YAML_PREVIEW_LINES)) lines.push({ kind: 'yaml', text: l });
   if (yaml.length > YAML_PREVIEW_LINES) lines.push({ kind: 'log', text: `# ... ${yaml.length - YAML_PREVIEW_LINES} more lines` });
   lines.push({ kind: 'done', text: `Dry run finished in ${result.durationMs} ms. Nothing written.` });
+  lines.push({ kind: 'gap', text: '' });
+  lines.push({ kind: 'log', text: '# next: hx generate   (write + smart-merge)' });
+  lines.push({ kind: 'log', text: '#       hx check      (exit 1 on drift)' });
   return { repo: preset.repoName, lines };
 }
 
-export function TerminalReplay({ active }: { active: boolean }) {
+export function TerminalReplay({ active = true }: { active?: boolean }) {
   const [transcript, setTranscript] = useState<{ repo: string; lines: ReplayLine[] } | null>(null);
   const [typed, setTyped] = useState(0);
   const [shown, setShown] = useState(0);
@@ -101,6 +105,17 @@ export function TerminalReplay({ active }: { active: boolean }) {
   const finished = !!transcript && shown >= transcript.lines.length;
   const lines = transcript?.lines.slice(0, shown) ?? [];
 
+  const [copied, setCopied] = useState(false);
+  async function copyCommands() {
+    try {
+      await navigator.clipboard.writeText(FIRST_RUN);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1800);
+    } catch {
+      setCopied(false);
+    }
+  }
+
   function replay() {
     setTyped(0);
     setShown(0);
@@ -119,6 +134,17 @@ export function TerminalReplay({ active }: { active: boolean }) {
         <button type="button" className="code-copy-btn term-replay" onClick={replay} disabled={!finished}>
           Replay
         </button>
+        <button
+          type="button"
+          className={`code-copy-btn${copied ? ' is-copied' : ''}`}
+          onClick={copyCommands}
+          aria-label="Copy the first-run commands"
+        >
+          {copied ? 'Copied' : 'Copy'}
+        </button>
+        <span className="visually-hidden" aria-live="polite">
+          {copied ? 'First-run commands copied to clipboard' : ''}
+        </span>
       </div>
       <pre className="term-screen" ref={screenRef} aria-hidden="true">
         <code>

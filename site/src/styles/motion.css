@@ -418,3 +418,193 @@
     opacity: 0;
   }
 }
+
+/* --------------------------------------------------------------------------
+   "How it works" pipeline diagram
+   -------------------------------------------------------------------------- */
+.pipeline {
+  position: relative;
+  display: grid;
+  gap: 1.75rem;
+}
+
+@media (min-width: 52rem) {
+  .pipeline {
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: clamp(3rem, 7vw, 6.5rem);
+  }
+}
+
+.pipeline-col {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: 0.5rem;
+}
+
+.pipeline-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-content: center;
+}
+
+@media (min-width: 52rem) {
+  .pipeline-chips {
+    display: grid;
+  }
+}
+
+.pipeline-title {
+  margin-block-end: 0.25rem;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.pipe-chip {
+  justify-self: start;
+  padding: 0.45rem 0.75rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background-color: var(--bg-surface);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  text-align: start;
+  cursor: pointer;
+  transition:
+    opacity var(--motion-base) var(--ease-out),
+    border-color var(--motion-fast) var(--ease-out),
+    background-color var(--motion-fast) var(--ease-out),
+    color var(--motion-fast) var(--ease-out),
+    box-shadow var(--motion-base) var(--ease-out),
+    translate var(--motion-base) var(--ease-out);
+}
+
+.pipeline-col:nth-of-type(2) .pipe-chip {
+  font-family: var(--font-sans);
+  font-weight: 600;
+}
+
+.pipeline-col:nth-of-type(3) .pipe-chip {
+  color: var(--accent);
+}
+
+.pipe-chip[aria-pressed='true'] {
+  outline: 2px dashed color-mix(in oklab, var(--accent) 60%, transparent);
+  outline-offset: 2px;
+}
+
+.pipe-chip.is-on {
+  border-color: var(--accent);
+  background-color: color-mix(in oklab, var(--accent) 12%, var(--bg-surface));
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 14%, transparent);
+}
+
+.pipeline[data-focus] .pipe-chip:not(.is-on) {
+  opacity: 0.38;
+}
+
+.pipeline-links {
+  display: none;
+}
+
+@media (min-width: 52rem) {
+  .pipeline-links {
+    display: block;
+    position: absolute;
+    inset: 0;
+    inline-size: 100%;
+    block-size: 100%;
+    overflow: visible;
+    pointer-events: none;
+    z-index: 0;
+  }
+}
+
+.pipe-link {
+  fill: none;
+  stroke: var(--border-strong);
+  stroke-width: 1.25;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 0;
+  transition:
+    stroke var(--motion-base) var(--ease-out),
+    opacity var(--motion-base) var(--ease-out),
+    stroke-width var(--motion-base) var(--ease-out);
+}
+
+.pipeline[data-focus] g:not(.is-on) .pipe-link {
+  opacity: 0.18;
+}
+
+.pipeline g.is-on .pipe-link {
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+
+.pipe-flow {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-dasharray: 1 13;
+  animation: pipe-flow 0.9s linear infinite;
+}
+
+@keyframes pipe-flow {
+  to {
+    stroke-dashoffset: -14;
+  }
+}
+
+/* Entrance: chips fill in column by column, then the links draw */
+@media (prefers-reduced-motion: no-preference) {
+  .js-reveal .pipeline:not(.is-visible) .pipe-chip {
+    opacity: 0;
+  }
+
+  /* fill-mode backwards only, so the hover/focus dimming still applies afterwards */
+  .js-reveal .pipeline.is-visible .pipe-chip {
+    animation: chip-in 0.5s var(--ease-out) backwards;
+    animation-delay: calc(var(--col) * 260ms + var(--row) * 35ms);
+  }
+
+  .js-reveal .pipeline:not(.is-visible) .pipe-link {
+    stroke-dashoffset: 1;
+  }
+
+  .js-reveal .pipeline.is-visible .pipe-link {
+    animation: pipe-draw 0.8s var(--ease-out) both;
+    animation-delay: calc(var(--d, 0) * 1ms + 250ms);
+  }
+}
+
+@keyframes chip-in {
+  from {
+    opacity: 0;
+    translate: -8px 0;
+  }
+}
+
+@keyframes pipe-draw {
+  from {
+    stroke-dashoffset: 1;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+.pipeline-trace {
+  margin-block-start: 1.25rem;
+  min-block-size: 1.5em;
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+}

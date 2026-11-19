@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { HERO_STATS, HX_VERSION, INSTALL_METHODS, RELEASES } from '../data/siteData';
+import { HX_VERSION, INSTALL_METHODS } from '../data/siteData';
 import { CodeBlock } from './CodeBlock';
 
 export function Hero() {
@@ -24,47 +24,35 @@ export function Hero() {
     <section id="top" className="hero">
       <div className="container hero-grid">
         <div className="hero-copy">
-          <a href="#changelog" className="release-banner">
-            <span className="release-banner-tag">New in v{HX_VERSION}</span>
-            <span>{RELEASES[0].headline}</span>
-            <span aria-hidden="true">→</span>
-          </a>
-
           <h1 id="main-content" tabIndex={-1}>
-            Deterministic codebase scanner &amp; YAML synthesizer.
+            CI config generated from what&rsquo;s actually in your repo.
           </h1>
 
           <p className="hero-lede">
-            Heurix (<code>hx</code>) reads your manifests, runtime pins, lockfiles, Dockerfiles, and env templates
-            with pure-logic heuristics, then writes GitHub Actions CI, Dependabot, and Kubernetes YAML. No LLM, no
-            network calls, and your hand edits survive every re-run.
+            <code>hx</code> reads your lockfiles, version pins, Dockerfiles, compose services, and{' '}
+            <code>.env.example</code>, then writes a GitHub Actions workflow, a Dependabot config, and Kubernetes
+            manifests to match. It runs locally, makes no network calls, and gives the same output for the same repo
+            every time.
           </p>
 
-          <div className="hero-pills" aria-label="Key properties">
-            <span className="pill">100% deterministic</span>
-            <span className="pill">Offline</span>
-            <span className="pill">AST smart merge</span>
-            <span className="pill">Schema validated</span>
-            <span className="pill">Drift guard</span>
-          </div>
+          <p className="hero-lede">
+            Re-running it is safe. Changes are merged into your existing YAML, so comments, extra jobs, and anything
+            marked <code># @heurix:preserve</code> stay where they are.
+          </p>
 
           <div className="hero-actions">
             <a href="#playground" className="btn btn-primary">
-              Try interactive playground
+              Try it in the browser
             </a>
             <a href="#docs" className="btn">
-              Read documentation
+              Docs
             </a>
           </div>
 
-          <dl className="hero-stats">
-            {HERO_STATS.map((s) => (
-              <div key={s.label} className="hero-stat">
-                <dt>{s.label}</dt>
-                <dd>{s.value}</dd>
-              </div>
-            ))}
-          </dl>
+          <p className="hero-release">
+            v{HX_VERSION} adds CI path filters (<code>[ci].paths</code> and <code>[ci].paths_ignore</code>).{' '}
+            <a href="#changelog">Changelog</a>
+          </p>
         </div>
 
         <aside className="install-card" aria-label="Install Heurix">
@@ -108,7 +96,7 @@ export function Hero() {
           })}
 
           <div className="install-next">
-            <span className="install-next-label">Then, in your repo:</span>
+            <span className="install-next-label">Then, from your repo root:</span>
             <CodeBlock title="First run" code={'hx generate --dry-run   # preview, writes nothing\nhx generate             # write + smart-merge\nhx check                # exit 1 on drift'} />
           </div>
         </aside>

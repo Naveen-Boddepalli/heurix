@@ -5,11 +5,10 @@ export function HeuristicsGrid() {
     <section id="heuristics" className="section">
       <div className="container">
         <div className="section-header">
-          <span className="eyebrow">Deep Heuristic Matrix</span>
-          <h2>Eight modular detectors. Zero guesswork.</h2>
+          <h2>What it detects</h2>
           <p>
-            Instead of checking a single manifest file, Heurix cross-references lockfiles, runtime version pins,
-            Dockerfiles, Compose topologies, and environment templates into one Intermediate Representation.
+            Each detector looks at a specific set of files. Their results go into one project description (run{' '}
+            <code>hx scan</code> to see it), and the generators work only from that.
           </p>
         </div>
 

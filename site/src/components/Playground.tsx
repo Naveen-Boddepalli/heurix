@@ -140,7 +140,7 @@ export function Playground() {
     : outputKeys[0] ?? '';
   const activeOutputCode = activeOutputPath
     ? scanResult.synthesized[activeOutputPath]
-    : '# Enable at least one language or deployment config file to synthesize YAML.';
+    : '# Turn on at least one language or deploy config file to generate YAML.';
 
   const activeFile = files.find((f) => f.path === selectedFilePath) ?? files[0];
 
@@ -171,23 +171,23 @@ export function Playground() {
     ? { tone: 'danger', label: 'Invalid .heurix.toml' }
     : scanResult.policy.source
       ? { tone: 'accent', label: '.heurix.toml applied' }
-      : { tone: 'muted', label: 'Zero-config defaults' };
+      : { tone: 'muted', label: 'No .heurix.toml' };
 
   const cliCheckOutput = useMemo(() => {
     if (driftFindings.length === 0) {
-      return `$ hx check\n✔ Zero Drift Detected: CI/CD workflows are completely synchronized with the codebase!\n\nExit code: 0 (PASS)`;
+      return `$ hx check\nNo drift detected.\n\nexit code 0`;
     }
     const lines = [
       `$ hx check`,
-      `⚠️ Drift Detected (${driftFindings.length} issue(s)):`,
+      `Drift Detected (${driftFindings.length} issue(s)):`,
       '',
     ];
     for (const f of driftFindings) {
       lines.push(`[${f.severity}] ${f.file_path}: ${f.issue}`);
-      lines.push(`  ↳ Recommendation: ${f.recommendation}`);
+      lines.push(`  Recommendation: ${f.recommendation}`);
       lines.push('');
     }
-    lines.push(`Error: Process completed with exit code 1.`);
+    lines.push(`exit code 1`);
     return lines.join('\n');
   }, [driftFindings]);
 
@@ -237,7 +237,7 @@ export function Playground() {
         },
       ];
     });
-    setDriftNotice('⚡ Injected Redis into codebase dependencies. Workflow is missing Redis service!');
+    setDriftNotice('Added a Redis dependency. The workflow has no redis service yet.');
   }
 
   function handleBumpRuntime() {
@@ -258,7 +258,7 @@ export function Playground() {
       }
       return [...prev, { path: '.python-version', enabled: true, content: '3.13\n' }];
     });
-    setDriftNotice('⚡ Bumped runtime version in codebase. Workflow does not match new runtime requirement!');
+    setDriftNotice('Bumped the runtime version. The workflow still pins the old one.');
   }
 
   function handleInjectUv() {
@@ -266,7 +266,7 @@ export function Playground() {
       if (prev.some((f) => f.path === 'uv.lock')) return prev;
       return [...prev, { path: 'uv.lock', enabled: true, content: '# uv lockfile v1\nversion = 1\n' }];
     });
-    setDriftNotice('⚡ Added uv.lock! Heurix detected uv, but workflow does not use setup-uv.');
+    setDriftNotice('Added uv.lock. The workflow does not set up uv.');
   }
 
   function handleInjectPostgres() {
@@ -291,7 +291,7 @@ export function Playground() {
         },
       ];
     });
-    setDriftNotice('⚡ Injected PostgreSQL service requirement. Workflow is missing postgres container!');
+    setDriftNotice('Added a Postgres service to docker-compose.yml. The workflow has no postgres service yet.');
   }
 
   function handleDuplicateService() {
@@ -307,7 +307,7 @@ export function Playground() {
       : base.replace(/^(    runs-on: .*)$/m, `$1\n    services:\n      postgres:\n        image: postgres:16-alpine\n        ports:\n          - 5432:5432\n${dupBlock}`);
     setSimulatedCi(withServices);
     setDriftNotice(
-      '⚡ Loaded a workflow from an older Heurix version: compose "db" and inferred "postgres" both bind host port 5432.'
+      'Loaded a workflow like the ones older versions generated: "db" from compose and "postgres" from dependencies both use host port 5432.'
     );
   }
 
@@ -315,13 +315,13 @@ export function Playground() {
     const currentGenerated = scanResult.synthesized['.github/workflows/ci.yml'];
     if (currentGenerated) {
       setSimulatedCi(currentGenerated);
-      setDriftNotice('✔ Reconciled! Ran simulated hx generate — workflow now matches all codebase requirements.');
+      setDriftNotice('Replaced the workflow with the current hx generate output.');
     }
   }
 
   function handleResetStale() {
     setSimulatedCi(staleBaselineCi);
-    setDriftNotice('Reset workflow to stale baseline (Exit code 1).');
+    setDriftNotice('Reset to the outdated workflow.');
   }
 
   function handleTabKeyDown(e: React.KeyboardEvent<HTMLButtonElement>, index: number) {
@@ -342,11 +342,10 @@ export function Playground() {
     <section id="playground" className="section">
       <div className="container">
         <div className="section-header">
-          <span className="eyebrow">Interactive Playground</span>
-          <h2>Run the deterministic engine live in your browser</h2>
+          <h2>Playground</h2>
           <p>
-            Select a preset repository or edit any manifest file on the left. Heurix re-scans your virtual codebase
-            on every keystroke with zero network calls and synthesizes schema-validated YAML outputs.
+            Pick a sample repo, or edit and toggle its files. The scan reruns in your browser on every change. It
+            uses a TypeScript port of the detectors, so treat it as a preview of what the CLI will write.
           </p>
         </div>
 
@@ -366,9 +365,9 @@ export function Playground() {
 
             <div className="scan-meta" aria-live="polite">
               <span className={`status-chip is-${policyStatus.tone}`}>{policyStatus.label}</span>
-              <span>✔ Scanned in {scanResult.durationMs} ms</span>
-              <span aria-hidden="true">•</span>
-              <span>{outputKeys.length} artifacts</span>
+              <span>
+                {outputKeys.length} files, scanned in {scanResult.durationMs} ms
+              </span>
             </div>
           </div>
 
@@ -552,20 +551,17 @@ export function Playground() {
                 <div className="output-body">
                   <details className="explain-box" open>
                     <summary className="explain-title">
-                      <span>Heuristic reasoning tree</span>
+                      <span>What it found</span>
                       <code>hx generate --explain</code>
                       <span className="explain-count">{scanResult.context.explain_log.length} steps</span>
                     </summary>
                     <ul className="explain-list">
                       {scanResult.context.explain_log.map((step, i) => {
-                        const isWarn = step.startsWith('⚠');
+                        const isWarn = step.startsWith('Warning:');
                         const isSkip = step.startsWith('Skipping');
                         return (
                           <li key={i} className={isWarn ? 'is-warn' : isSkip ? 'is-skip' : undefined}>
-                            <span className="explain-check" aria-hidden="true">
-                              {isWarn ? '!' : isSkip ? '–' : '✔'}
-                            </span>
-                            <span>{isWarn ? step.slice(1).trim() : step}</span>
+                            <span>{step}</span>
                           </li>
                         );
                       })}
@@ -598,7 +594,7 @@ export function Playground() {
                           onClick={handleDownloadZip}
                           title="Download all synthesized configurations in a ZIP archive"
                         >
-                          <span aria-hidden="true">📦</span> Download ZIP
+                          Download ZIP
                         </button>
                         <button
                           type="button"
@@ -606,7 +602,7 @@ export function Playground() {
                           onClick={handleDownloadScript}
                           title="Download bash setup script"
                         >
-                          <span aria-hidden="true">⚡</span> Setup Script
+                          Setup script
                         </button>
                         <button
                           type="button"
@@ -614,8 +610,7 @@ export function Playground() {
                           onClick={handleCopyAll}
                           title="Copy all synthesized YAML configurations"
                         >
-                          <span aria-hidden="true">{copiedAll ? '✔' : '📋'}</span>
-                          {copiedAll ? 'Copied All!' : 'Copy All YAML'}
+                          {copiedAll ? 'Copied' : 'Copy all'}
                         </button>
                       </div>
                     </div>
@@ -624,7 +619,6 @@ export function Playground() {
                   <CodeBlock
                     title={activeOutputPath || 'No targets generated'}
                     code={activeOutputCode}
-                    badge={outputKeys.length > 0 ? '✔ JSON Schema Validated' : undefined}
                   />
                 </div>
               </div>
@@ -638,8 +632,8 @@ export function Playground() {
               >
                 <div className="output-body">
                   <p style={{ fontSize: '0.9375rem' }}>
-                    Generators never touch the filesystem directly—all 8 detectors populate this strongly-typed
-                    <code>ProjectContext</code> Pydantic IR.
+                    The detectors fill in this <code>ProjectContext</code> object, and the generators read only from
+                    it.
                   </p>
                   <CodeBlock
                     title="hx scan (ProjectContext IR)"
@@ -709,14 +703,13 @@ export function Playground() {
 
                   <div className="merge-compare">
                     <CodeBlock
-                      title="Before: Existing .github/workflows/ci.yml (with custom steps)"
+                      title="Before: .github/workflows/ci.yml"
                       code={existingCiSample}
                       highlightDiff
                     />
                     <CodeBlock
-                      title="After: Merged .github/workflows/ci.yml (AST preserved)"
+                      title="After hx generate"
                       code={mergeResult.merged}
-                      badge="✔ Preserved user customizations"
                       highlightDiff
                     />
                   </div>
@@ -733,7 +726,6 @@ export function Playground() {
                 <div className="output-body">
                   {driftNotice && (
                     <div className="drift-notice">
-                      <span aria-hidden="true">💡</span>
                       <span>{driftNotice}</span>
                     </div>
                   )}
@@ -741,7 +733,7 @@ export function Playground() {
                   <div className="drift-scenarios-bar">
                     <div className="drift-scenario-group" role="group" aria-label="Inject drift scenarios">
                       <span style={{ fontSize: '0.78125rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
-                        Inject Drift:
+                        Change the repo:
                       </span>
                       <button
                         type="button"
@@ -749,7 +741,7 @@ export function Playground() {
                         onClick={handleInjectRedis}
                         title="Add Redis dependency to codebase manifest"
                       >
-                        + Redis Dependency
+                        + Redis dependency
                       </button>
                       <button
                         type="button"
@@ -757,7 +749,7 @@ export function Playground() {
                         onClick={handleBumpRuntime}
                         title="Bump runtime version in codebase"
                       >
-                        + Bump Runtime
+                        Bump runtime
                       </button>
                       <button
                         type="button"
@@ -765,7 +757,7 @@ export function Playground() {
                         onClick={handleInjectUv}
                         title="Add uv.lock package manager file"
                       >
-                        + uv Package Manager
+                        + uv.lock
                       </button>
                       <button
                         type="button"
@@ -773,7 +765,7 @@ export function Playground() {
                         onClick={handleInjectPostgres}
                         title="Add PostgreSQL container in compose"
                       >
-                        + Postgres Service
+                        + Postgres service
                       </button>
                       <button
                         type="button"
@@ -781,7 +773,7 @@ export function Playground() {
                         onClick={handleDuplicateService}
                         title="Load a workflow with two services on host port 5432"
                       >
-                        + Port Collision
+                        Port collision
                       </button>
                     </div>
 
@@ -792,7 +784,7 @@ export function Playground() {
                         onClick={handleReconcile}
                         title="Reconcile workflow by running simulated hx generate"
                       >
-                        ⚡ Reconcile Workflow (hx generate)
+                        Run hx generate
                       </button>
                       <button
                         type="button"
@@ -800,15 +792,15 @@ export function Playground() {
                         onClick={handleResetStale}
                         title="Reset to stale workflow baseline"
                       >
-                        Reset to Stale
+                        Reset
                       </button>
                     </div>
                   </div>
 
                   <CodeBlock
-                    title="Terminal Simulation: hx check"
+                    title="hx check"
                     code={cliCheckOutput}
-                    badge={driftFindings.length === 0 ? '✔ Exit Code 0 (Pass)' : `⚠ Exit Code 1 (${driftFindings.length} drift)`}
+                    badge={driftFindings.length === 0 ? 'exit 0' : `exit 1`}
                   />
 
                   <div style={{ display: 'flex', justifyContent: 'flex-end', marginBlockStart: '-0.25rem' }}>
@@ -818,13 +810,13 @@ export function Playground() {
                       onClick={() => setShowWorkflowYaml((prev) => !prev)}
                       aria-expanded={showWorkflowYaml}
                     >
-                      {showWorkflowYaml ? 'Hide Active Workflow YAML' : 'Inspect Checked .github/workflows/ci.yml'}
+                      {showWorkflowYaml ? 'Hide workflow' : 'Show the workflow being checked'}
                     </button>
                   </div>
 
                   {showWorkflowYaml && (
                     <CodeBlock
-                      title="Active .github/workflows/ci.yml (Workflow Under Inspection)"
+                      title=".github/workflows/ci.yml"
                       code={activeCheckedWorkflow}
                     />
                   )}

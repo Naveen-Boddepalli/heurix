@@ -18,64 +18,30 @@ export const SITE_DOCS: {
 export const HX_VERSION = '0.3.0';
 export const REPO_URL = 'https://github.com/Naveen-Boddepalli/heurix';
 
-export const HERO_STATS = [
-  { value: '8', label: 'ecosystem detectors' },
-  { value: '5', label: 'languages' },
-  { value: '<50ms', label: 'typical scan' },
-  { value: '0', label: 'network calls' },
-];
-
-export const HOW_IT_WORKS = [
-  {
-    step: '01',
-    title: 'Scan',
-    cmd: 'hx scan',
-    body: 'Indexes .gitignore-filtered files once and runs 8 detectors over lockfiles, version pins, Dockerfiles, compose services, and env templates into a typed ProjectContext IR.',
-  },
-  {
-    step: '02',
-    title: 'Synthesize',
-    cmd: 'hx generate',
-    body: 'Renders GitHub Actions CI, Dependabot, and (for containerized repos) hardened Kubernetes manifests, then validates every document against JSON Schema before writing.',
-  },
-  {
-    step: '03',
-    title: 'Merge',
-    cmd: 'hx diff',
-    body: 'Round-trips existing YAML through a ruamel.yaml AST so comments, custom jobs, and # @heurix:preserve steps or keys survive. Lists every hand-edited value it would replace.',
-  },
-  {
-    step: '04',
-    title: 'Guard',
-    cmd: 'hx check',
-    body: 'Structurally compares workflows with the codebase and exits 1 on drift: missing services, runtime mismatches, port collisions, or an invalid .heurix.toml.',
-  },
-];
-
 export const INSTALL_METHODS = [
   {
     id: 'pipx',
-    label: 'pipx (Recommended)',
+    label: 'pipx',
     command: 'pipx install heurix',
-    note: 'Installs hx globally in an isolated Python >= 3.10 environment.',
+    note: 'Recommended. Installs hx in its own environment. Needs Python 3.10 or newer.',
   },
   {
     id: 'pip',
     label: 'pip',
     command: 'pip install heurix',
-    note: 'Standard PyPI package installation into your active virtual environment.',
+    note: 'Installs into whatever environment is active.',
   },
   {
     id: 'curl',
     label: 'Shell script',
     command: 'curl -fsSL https://raw.githubusercontent.com/Naveen-Boddepalli/heurix/main/install.sh | bash',
-    note: 'One-line installer that sets up a dedicated environment and exposes hx.',
+    note: 'Sets up a dedicated environment and puts hx on your PATH. Read the script before piping it to bash.',
   },
   {
     id: 'docker',
     label: 'Docker',
     command: 'docker run --rm -v "$(pwd):/workspace" ghcr.io/naveen-boddepalli/heurix:latest generate --dry-run',
-    note: 'Zero Python dependency — runs multi-arch linux/amd64 and linux/arm64 images.',
+    note: 'No local Python needed. Images are built for linux/amd64 and linux/arm64.',
   },
 ];
 
@@ -91,65 +57,65 @@ export interface HeuristicCardData {
 export const HEURISTIC_CARDS: HeuristicCardData[] = [
   {
     id: 'versions',
-    title: 'Exact Version Pinning',
+    title: 'Runtime versions',
     detector: 'Language Detectors',
-    summary: 'Reads runtime pins directly from repository files rather than falling back to stale defaults.',
+    summary: 'Reads the version you pinned instead of assuming a default.',
     signals: ['.python-version', '.nvmrc', 'rust-toolchain.toml', 'go.mod', 'CMakeLists.txt'],
-    output: 'Pins actions/setup-python, setup-node, rust-toolchain, setup-go',
+    output: 'Version passed to setup-python, setup-node, rust-toolchain, setup-go',
   },
   {
     id: 'lockfiles',
-    title: 'Lockfile & Cache Fingerprinting',
+    title: 'Package managers',
     detector: 'Python & Node',
-    summary: 'Selects frozen install flags and native CI caching actions tailored to the exact package manager.',
+    summary: 'Picks the install command, frozen-lockfile flags, and cache setup for the package manager you use.',
     signals: ['uv.lock', 'poetry.lock', 'pnpm-lock.yaml', 'yarn.lock', 'bun.lockb'],
     output: 'astral-sh/setup-uv, pnpm/action-setup, Swatinem/rust-cache',
   },
   {
     id: 'services',
-    title: 'Service Auto-Provisioning',
+    title: 'Databases and caches',
     detector: 'Deps & Compose',
-    summary: 'Infers Postgres, Redis, and MongoDB from client libraries or compose services, and merges duplicates so two containers never fight over one host port.',
+    summary: 'Adds Postgres, Redis, or MongoDB service containers when your dependencies or docker-compose.yml use them. Duplicates are merged into one.',
     signals: ['psycopg / psycopg2 / asyncpg', 'prisma / pg', 'redis / ioredis', 'docker-compose.yml'],
     output: 'One CI service per backend with credentials, ports, and health checks',
   },
   {
     id: 'secrets',
-    title: 'Env & Secret Wiring',
+    title: 'Env vars and secrets',
     detector: 'EnvDetector',
-    summary: 'Separates safe defaults from sensitive keys in env templates, and keeps deploy credentials out of test jobs and app pods.',
+    summary: 'Splits .env.example into plain defaults and secrets. Deploy tokens are only given to deploy jobs.',
     signals: ['.env.example', '.env.template', 'SECRET / TOKEN / KEY / URL / DSN'],
     output: 'env: defaults, ${{ secrets.* }}, k8s/secret.yaml without VERCEL_* / FIREBASE_*',
   },
   {
     id: 'monorepo',
-    title: 'Monorepo Topology',
+    title: 'Monorepos',
     detector: 'NodeDetector',
-    summary: 'Detects workspace managers and enumerates sub-packages for path-filtered CI triggers (including root files and workflows) and Dependabot.',
+    summary: 'Finds workspace packages and gives each one its own job, path filter, and Dependabot entry.',
     signals: ['pnpm-workspace.yaml', 'turbo.json', 'nx.json', 'Cargo workspaces'],
     output: 'Per-package jobs, path triggers, and dependabot.yml entries',
   },
   {
     id: 'containers',
-    title: 'Container & K8s Sync',
+    title: 'Containers and Kubernetes',
     detector: 'Docker + Kubernetes',
-    summary: 'Parses multi-stage Dockerfiles for ports and health checks. Manifests are generated only for containerized repos, with a non-root, read-only securityContext.',
+    summary: 'Reads ports and health checks from your Dockerfile. Manifests are only generated if there is one, and run as non-root with a read-only filesystem.',
     signals: ['Dockerfile FROM/EXPOSE', 'HEALTHCHECK', 'FastAPI / Next.js / Streamlit'],
     output: 'k8s/deployment, service, ingress, configmap, secret, kind-config',
   },
   {
     id: 'cloud',
-    title: 'Cloud Deployment Targets',
+    title: 'Vercel and Firebase',
     detector: 'CloudDetector',
-    summary: 'Identifies Vercel and Firebase project configs and generates gated production deploy jobs.',
+    summary: 'Adds a deploy job that runs after tests pass on main.',
     signals: ['vercel.json', '.vercel', 'firebase.json', '.firebaserc'],
     output: 'deploy_vercel / deploy_firebase jobs gated by needs: test',
   },
   {
     id: 'maintenance',
-    title: 'Ecosystem Hygiene',
+    title: 'Dependabot',
     detector: 'MaintenanceSynthesizer',
-    summary: 'Synthesizes weekly Dependabot update schedules across every package ecosystem and container detected.',
+    summary: 'Weekly update checks for every package ecosystem found, plus GitHub Actions and Docker.',
     signals: ['github-actions', 'pip', 'npm', 'cargo', 'gomod', 'docker'],
     output: '.github/dependabot.yml covering root and monorepo sub-dirs',
   },
@@ -158,29 +124,29 @@ export const HEURISTIC_CARDS: HeuristicCardData[] = [
 export const CLI_COMMANDS = [
   {
     cmd: 'hx generate',
-    title: 'Scan, explain, and write',
-    desc: 'Runs every detector, prints the reasoning tree, validates against JSON Schema, and smart-merges into existing files. Before writing, it lists each hand-edited value it is about to replace.',
+    title: 'Write the files',
+    desc: 'Prints what it found, validates the output, and merges it into any existing files. If it is about to overwrite something you edited, it says so first.',
     snippet: `$ hx generate
-🔍 Codebase Scan: billing-api
-├── ✔ Detected Python 3.12 (via .python-version)
-├── ✔ Detected Package Manager: uv (via uv.lock)
-├── ✔ Detected Framework: FastAPI
-├── ✔ Inferred Backing Service: PostgreSQL 16 (via python dependencies)
-├── ✔ Parsed Dockerfile 'Dockerfile': exposed=[8000], healthcheck=True
-└── ✔ Loaded configuration policy from .heurix.toml
+Codebase Scan: billing-api
+├── Detected Python 3.12 (via .python-version)
+├── Detected Package Manager: uv (via uv.lock)
+├── Detected Framework: FastAPI
+├── Inferred Backing Service: PostgreSQL 16 (via python dependencies)
+├── Parsed Dockerfile 'Dockerfile': exposed=[8000], healthcheck=True
+└── Loaded configuration policy from .heurix.toml
 
-⚠ .github/workflows/ci.yml: these existing values will be replaced:
-  • jobs.test.steps['Run tests (python)'].run: 'pytest -q' -> 'uv run python -m pytest'
+.github/workflows/ci.yml: these existing values will be replaced:
+  - jobs.test.steps['Run tests (python)'].run: 'pytest -q' -> 'uv run python -m pytest'
   To keep your version, add '# @heurix:preserve' to the end of that key's line (or on the line above a step).
 
-✔ Written: .github/workflows/ci.yml
-✔ Written: k8s/deployment.yaml  (+6 more)
+Written: .github/workflows/ci.yml
+Written: k8s/deployment.yaml  (+6 more)
 Successfully synthesized 8 file(s)!`,
   },
   {
     cmd: 'hx diff',
-    title: 'Non-destructive AST diff preview',
-    desc: 'Shorthand for generate --dry-run --diff --yes. Compares files on disk with the smart-merged output; # @heurix:preserve steps and keys stay put.',
+    title: 'Preview the changes',
+    desc: 'Same as generate --dry-run --diff --yes. Shows a diff against what is on disk and writes nothing.',
     snippet: `$ hx diff
 --- a/.github/workflows/ci.yml
 +++ b/.github/workflows/ci.yml
@@ -202,21 +168,21 @@ Successfully synthesized 8 file(s)!`,
   },
   {
     cmd: 'hx check',
-    title: 'Drift detection for CI and pre-commit',
-    desc: 'Structurally verifies workflows against current dependencies, runtime pins, and package managers. Exits 1 on drift, port collisions, or an unparseable .heurix.toml.',
+    title: 'Check for drift',
+    desc: 'Exits 1 if the workflow no longer matches the repo: a missing service, an old runtime version, two services on one port, or a broken .heurix.toml. Useful in CI and as a pre-commit hook.',
     snippet: `$ hx check
-⚠️ Drift Detected (2 issue(s)):
+Drift Detected (2 issue(s)):
 
 [ERROR] .github/workflows/ci.yml: Job 'test': services 'postgres', 'db' all bind host port 5432; only one can start, so the job will fail.
-  ↳ Recommendation: Run 'hx generate' to merge duplicate services, or remove the extra service.
+  Recommendation: Run 'hx generate' to merge duplicate services, or remove the extra service.
 
 [WARNING] .github/workflows/ci.yml: Service 'redis' is required by codebase dependencies (python dependencies) but missing from workflow.
-  ↳ Recommendation: Run 'hx generate' to inject service 'redis'.`,
+  Recommendation: Run 'hx generate' to inject service 'redis'.`,
   },
   {
     cmd: 'hx scan',
-    title: 'Inspect the ProjectContext IR',
-    desc: 'Prints the strongly-typed Pydantic Intermediate Representation the detectors produced, for debugging or for piping repository facts into your own tooling.',
+    title: 'See what was detected',
+    desc: 'Prints the detected project as JSON. Handy for debugging or for feeding other scripts.',
     snippet: `$ hx scan
 {
   "repo_name": "billing-api",
@@ -236,10 +202,10 @@ Successfully synthesized 8 file(s)!`,
   },
   {
     cmd: 'hx init',
-    title: 'Create a .heurix.toml policy',
-    desc: 'Writes a commented policy file. include_k8s mirrors whether k8s/deployment.yaml already exists, so a new policy never makes hx check fail on missing manifests.',
+    title: 'Add a config file',
+    desc: 'Writes a commented .heurix.toml. include_k8s is set based on whether you already have k8s/deployment.yaml.',
     snippet: `$ hx init
-✔ Created .heurix.toml
+Created .heurix.toml
 
 $ cat .heurix.toml
 [engine]

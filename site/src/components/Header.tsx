@@ -6,7 +6,7 @@ const NAV_ITEMS = [
   { href: '#heuristics', label: 'Heuristics' },
   { href: '#cli', label: 'CLI' },
   { href: '#config', label: 'Config' },
-  { href: '#changelog', label: "What's new" },
+  { href: '#changelog', label: 'Changelog' },
   { href: '#docs', label: 'Docs' },
   { href: '#visibility', label: 'AI' },
 ];

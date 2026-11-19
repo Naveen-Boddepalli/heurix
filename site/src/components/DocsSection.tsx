@@ -244,11 +244,10 @@ export function DocsSection() {
     <section id="docs" className="section">
       <div className="container">
         <div className="section-header">
-          <span className="eyebrow">Documentation &amp; Guides</span>
-          <h2>Reference synced directly from the repository</h2>
+          <h2>Docs</h2>
           <p>
-            Every guide in <code>docs/</code> is built into this viewer and compiled automatically into{' '}
-            <code>llms-full.txt</code> so human readers and AI assistants see the exact same specification.
+            The Markdown files from <code>docs/</code> in the repo, rendered at build time. The same text is bundled
+            into <code>llms-full.txt</code>.
           </p>
         </div>
 
@@ -277,7 +276,6 @@ export function DocsSection() {
 
             {visibleDocs.length === 0 ? (
               <div className="docs-empty-search">
-                <span aria-hidden="true">🔎</span>
                 <span>No guides matching &ldquo;{searchQuery}&rdquo;.</span>
                 <button
                   type="button"
@@ -326,13 +324,12 @@ export function DocsSection() {
                 target="_blank"
                 rel="noreferrer"
               >
-                View on GitHub →
+                View on GitHub
               </a>
             </div>
 
             {q && currentDocItem.matchCount > 0 && (
               <div className="drift-notice">
-                <span aria-hidden="true">🔍</span>
                 <span>
                   Found <strong>{currentDocItem.matchCount}</strong> match(es) for &ldquo;{searchQuery}&rdquo; in this guide.
                 </span>

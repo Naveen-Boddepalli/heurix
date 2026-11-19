@@ -36,7 +36,7 @@ export function Footer() {
       <div className="container footer-inner">
         <div className="footer-brand">
           <strong>Heurix (hx)</strong>
-          <p>Deterministic codebase scanner &amp; YAML synthesizer for CI/CD, Dependabot, and Kubernetes.</p>
+          <p>Generates GitHub Actions, Dependabot, and Kubernetes config from your repo.</p>
           <p className="footer-meta">
             v{HX_VERSION} · MIT licensed ·{' '}
             <a href={`${REPO_URL}/blob/main/CHANGELOG.md`} target="_blank" rel="noreferrer">

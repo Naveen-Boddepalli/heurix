@@ -1529,7 +1529,7 @@ export function runHeurixScan(repoName: string, files: VirtualFile[]): ScanResul
   };
 
   if (policy.error) {
-    context.explain_log.push(`⚠ Invalid Policy: .heurix.toml could not be parsed (${policy.error}); using defaults`);
+    context.explain_log.push(`Warning: Invalid Policy: .heurix.toml could not be parsed (${policy.error}); using defaults`);
   } else if (policy.source) {
     const notes: string[] = [];
     if (policy.runner) notes.push(`runner=${policy.runner}`);

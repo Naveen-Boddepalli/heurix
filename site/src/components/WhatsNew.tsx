@@ -9,11 +9,10 @@ export function WhatsNew() {
     <section id="changelog" className="section" aria-labelledby="changelog-title">
       <div className="container">
         <div className="section-header">
-          <span className="eyebrow">What&rsquo;s new</span>
-          <h2 id="changelog-title">Release notes</h2>
+          <h2 id="changelog-title">Changelog</h2>
           <p>
-            Upgrading? Re-run <code>hx generate</code>, review the list of values it will replace, then run{' '}
-            <code>hx check</code> to confirm there&rsquo;s no drift.
+            To upgrade, re-run <code>hx generate</code>, read the list of values it says it will replace, then run{' '}
+            <code>hx check</code>.
           </p>
         </div>
 
@@ -23,7 +22,7 @@ export function WhatsNew() {
               <header className="release-head">
                 <div className="release-version">
                   <span className="release-tag">v{rel.version}</span>
-                  {idx === 0 && <span className="new-badge">Latest</span>}
+                  {idx === 0 && <span className="new-badge">latest</span>}
                 </div>
                 <h3>{rel.headline}</h3>
                 <time dateTime={rel.date}>
@@ -58,7 +57,7 @@ export function WhatsNew() {
             </button>
           )}
           <a className="btn" href={`${REPO_URL}/blob/main/CHANGELOG.md`} target="_blank" rel="noreferrer">
-            Full CHANGELOG.md →
+            Full CHANGELOG.md
           </a>
         </div>
       </div>

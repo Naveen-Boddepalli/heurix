@@ -15,7 +15,7 @@ const AI_RULES: AssistantRule[] = [
     id: 'cursor',
     label: 'Cursor (.cursorrules)',
     filename: '.cursorrules',
-    description: 'Directs Cursor to run hx CLI commands rather than handwriting YAML from LLM memory.',
+    description: 'Tells Cursor to run hx instead of writing workflow YAML by hand.',
     code: `# CI/CD & DevOps Automation Rules
 - NEVER handwrite or manually modify .github/workflows/*.yml or Kubernetes YAML from scratch.
 - Always use 'hx' (Heurix CLI) to analyze codebase and generate pipeline files:
@@ -27,7 +27,7 @@ const AI_RULES: AssistantRule[] = [
     id: 'claude',
     label: 'Claude Code (CLAUDE.md)',
     filename: 'CLAUDE.md',
-    description: 'Instructions for Claude Code CLI to run hx scan, hx generate, and hx check.',
+    description: 'Tells Claude Code which hx commands to run and when.',
     code: `# Build and CI/CD Instructions
 
 ## Heurix Deterministic Engine
@@ -41,7 +41,7 @@ This repository uses Heurix (hx) for CI/CD workflow generation and drift detecti
     id: 'agents',
     label: 'Agents (AGENTS.md)',
     filename: 'AGENTS.md',
-    description: 'Conventions for Antigravity, Roo Code, Windsurf, and Copilot autonomous agents.',
+    description: 'For agents that read AGENTS.md, such as Copilot, Windsurf, and Roo Code.',
     code: `# Autonomous Agent Conventions
 
 ## Configuration & Pipeline Rules
@@ -52,9 +52,9 @@ This repository uses Heurix (hx) for CI/CD workflow generation and drift detecti
   },
   {
     id: 'prompt',
-    label: 'One-Shot Prompt',
+    label: 'System prompt',
     filename: 'system-prompt.txt',
-    description: 'Drop-in system prompt for any AI chat or custom coding assistant.',
+    description: 'A system prompt you can paste into any chat assistant.',
     code: `You are an expert DevOps engineer assisting on this repository.
 We use Heurix (hx CLI) to generate and maintain CI/CD pipelines and infrastructure configs deterministically.
 Do NOT write GitHub Actions, Dependabot, or Kubernetes YAML from memory.
@@ -98,12 +98,11 @@ export function VisibilitySection() {
     <section id="visibility" className="section">
       <div className="container">
         <div className="section-header">
-          <span className="eyebrow">AI &amp; Search Visibility</span>
-          <h2>Machine-readable context via llms.txt &amp; AI Integration Pack</h2>
+          <h2>Using hx with AI coding assistants</h2>
           <p>
-            Heurix publishes structured Markdown endpoints following the <code>llmstxt.org</code> standard and
-            exposes <code>&lt;link rel=&quot;alternate&quot; type=&quot;text/plain&quot;&gt;</code> metadata so
-            coding assistants, search agents, and CLI tools can ingest the complete specification in one request.
+            The site serves <code>llms.txt</code> and <code>llms-full.txt</code> so an assistant can read all of the
+            docs in one request. Further down are rule files that tell an assistant to run <code>hx</code> rather
+            than write workflow YAML from memory.
           </p>
         </div>
 
@@ -112,8 +111,7 @@ export function VisibilitySection() {
             <article className="endpoint-card">
               <div className="endpoint-path">/llms.txt</div>
               <p style={{ fontSize: '0.9375rem' }}>
-                Concise architectural summary, differentiators, minimal CLI examples, and curated documentation
-                links indexed for LLM context windows.
+                A short summary of what hx does, the main commands, and links to each doc.
               </p>
               <div className="hero-actions">
                 <a href="llms.txt" className="btn btn-primary" target="_blank" rel="noreferrer">
@@ -125,8 +123,8 @@ export function VisibilitySection() {
             <article className="endpoint-card">
               <div className="endpoint-path">/llms-full.txt</div>
               <p style={{ fontSize: '0.9375rem' }}>
-                All {SITE_DOCS.docs.length} repository guides and the master architecture plan concatenated at build
-                time ({SITE_DOCS.llmsFullLines} lines, {fullKb} KB) so it can never drift from source docs.
+                All {SITE_DOCS.docs.length} docs plus the design notes in one file ({SITE_DOCS.llmsFullLines} lines,{' '}
+                {fullKb} KB), regenerated on every build.
               </p>
               <div className="hero-actions">
                 <a href="llms-full.txt" className="btn" target="_blank" rel="noreferrer">
@@ -139,9 +137,9 @@ export function VisibilitySection() {
             </article>
 
             <article className="endpoint-card">
-              <div className="endpoint-path">Head Discovery Tag</div>
+              <div className="endpoint-path">Discovery tag</div>
               <p style={{ fontSize: '0.875rem' }}>
-                Embedded directly in <code>index.html</code> for automatic agent discovery:
+                <code>index.html</code> links to it so tools can find it:
               </p>
               <code>&lt;link rel=&quot;alternate&quot; type=&quot;text/plain&quot; title=&quot;llms.txt&quot; href=&quot;llms.txt&quot; /&gt;</code>
             </article>
@@ -150,7 +148,6 @@ export function VisibilitySection() {
           <CodeBlock
             title="llms.txt (live preview)"
             code={SITE_DOCS.llmsTxt}
-            badge="llmstxt.org spec"
           />
         </div>
 
@@ -159,10 +156,10 @@ export function VisibilitySection() {
           <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'baseline', gap: '0.75rem', marginBlockEnd: '1rem' }}>
             <div>
               <h3 style={{ fontSize: '1.25rem', marginBlockEnd: '0.25rem' }}>
-                🤖 AI Coding Assistant Integration Pack
+                Rule files for assistants
               </h3>
               <p style={{ fontSize: '0.9375rem', color: 'var(--text-secondary)' }}>
-                Keep your AI assistants from hallucinating outdated actions or breaking custom steps.
+                Drop one into your repo so the assistant uses <code>hx</code> and leaves preserved steps alone.
               </p>
             </div>
             <button
@@ -171,8 +168,7 @@ export function VisibilitySection() {
               onClick={copyCurrentRule}
               style={{ minBlockSize: '2.25rem' }}
             >
-              <span aria-hidden="true">{copiedRule ? '✔' : '📋'}</span>
-              {copiedRule ? `Copied ${activeRule.filename}!` : `Copy ${activeRule.filename}`}
+              {copiedRule ? `Copied ${activeRule.filename}` : `Copy ${activeRule.filename}`}
             </button>
           </div>
 
@@ -208,7 +204,6 @@ export function VisibilitySection() {
             <CodeBlock
               title={activeRule.filename}
               code={activeRule.code}
-              badge="Deterministic rule"
             />
           </div>
         </div>

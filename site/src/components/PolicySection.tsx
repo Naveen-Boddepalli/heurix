@@ -6,35 +6,33 @@ export function PolicySection() {
     <section id="config" className="section" aria-labelledby="config-title">
       <div className="container">
         <div className="section-header">
-          <span className="eyebrow">Configuration</span>
-          <h2 id="config-title">
-            Zero-config by default. <code>.heurix.toml</code> when you need it.
-          </h2>
+          <h2 id="config-title">Configuration</h2>
           <p>
-            Run <code>hx init</code> to create a commented policy. Every key is validated; an unparseable file makes{' '}
-            <code>hx check</code> exit 1 with an &ldquo;Invalid Policy&rdquo; error instead of being silently
-            ignored.
+            No config file is needed. To change the defaults, run <code>hx init</code> to create a commented{' '}
+            <code>.heurix.toml</code>. If the file can&rsquo;t be parsed, <code>hx check</code> fails with an
+            &ldquo;Invalid Policy&rdquo; error instead of quietly ignoring it.
           </p>
         </div>
 
         <div className="policy-grid">
           <div className="policy-example">
-            <CodeBlock title=".heurix.toml" code={POLICY_EXAMPLE} badge="hx init" />
-            <div className="callout-stack">
-              <div className="callout">
-                <strong>Path filters (0.3.0).</strong> With only <code>paths_ignore</code>, CI gets a{' '}
-                <code>paths-ignore:</code> block. With <code>paths</code> too, the ignores are appended to{' '}
-                <code>paths</code> as <code>!pattern</code> entries, because GitHub rejects both keys on one event.
-              </div>
-              <div className="callout">
-                <strong>Kubernetes is opt-in by shape.</strong> Manifests are generated for repos with a Dockerfile,
-                or when <code>include_k8s = true</code>. A detected framework alone no longer produces a Deployment.
-              </div>
-              <div className="callout">
-                <strong>Try it live.</strong> The FastAPI preset in the{' '}
-                <a href="#playground">playground</a> ships a <code>.heurix.toml</code>; edit it and watch the
-                trigger filters and runner change.
-              </div>
+            <CodeBlock title=".heurix.toml" code={POLICY_EXAMPLE} />
+            <div className="policy-notes">
+              <h3>Path filters</h3>
+              <p>
+                With only <code>paths_ignore</code>, the workflow gets a <code>paths-ignore:</code> block. If you set{' '}
+                <code>paths</code> as well, the ignores are added to <code>paths</code> as <code>!pattern</code>{' '}
+                entries, because GitHub doesn&rsquo;t allow both keys on the same event.
+              </p>
+              <h3>Kubernetes</h3>
+              <p>
+                Manifests are only generated when the repo has a Dockerfile, or when you set{' '}
+                <code>include_k8s = true</code>.
+              </p>
+              <p>
+                The FastAPI sample in the <a href="#playground">playground</a> includes a <code>.heurix.toml</code>{' '}
+                you can edit.
+              </p>
             </div>
           </div>
 
@@ -54,7 +52,7 @@ export function PolicySection() {
                     <th scope="row">
                       <span className="policy-section-name">{row.section}</span>
                       <code>{row.key}</code>
-                      {row.isNew && <span className="new-badge">New</span>}
+                      {row.isNew && <span className="new-badge">since 0.3.0</span>}
                     </th>
                     <td>
                       <code className="policy-example-value">{row.example}</code>

@@ -42,8 +42,8 @@ export function ComparisonTable() {
               <tr>
                 <th scope="row">Preserving manual edits</th>
                 <td className="col-heurix">
-                  <strong>AST round-trip Smart Merge</strong> preserves custom jobs and{' '}
-                  <code># @heurix:preserve</code> blocks.
+                  <strong>AST round-trip Smart Merge</strong> preserves custom jobs, preserved steps and keys, and
+                  lists every value it will replace before writing.
                 </td>
                 <td>Frequently drops comments or alters unrelated workflow steps.</td>
                 <td>Overwrites files or fails on existing configs.</td>
@@ -68,10 +68,20 @@ export function ComparisonTable() {
               <tr>
                 <th scope="row">Continuous drift detection</th>
                 <td className="col-heurix">
-                  <code>hx check</code> exits <code>1</code> in CI/pre-commit when dependencies drift from workflows.
+                  <code>hx check</code> exits <code>1</code> in CI/pre-commit on drift, port collisions, or an invalid
+                  policy.
                 </td>
                 <td>No built-in drift verification.</td>
                 <td>No drift verification.</td>
+              </tr>
+              <tr>
+                <th scope="row">Secret hygiene</th>
+                <td className="col-heurix">
+                  Sensitive keys become <code>{'${{ secrets.* }}'}</code>; deploy credentials never reach test jobs or
+                  pods.
+                </td>
+                <td>May inline secrets or wire deploy tokens everywhere.</td>
+                <td>Left entirely to you.</td>
               </tr>
             </tbody>
           </table>

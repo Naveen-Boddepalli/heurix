@@ -33,8 +33,8 @@ const AI_RULES: AssistantRule[] = [
 ## Heurix Deterministic Engine
 This repository uses Heurix (hx) for CI/CD workflow generation and drift detection:
 - hx scan - Inspect detected languages, runtimes, package managers, and backing services.
-- hx generate - Synthesize schema-validated GitHub Actions workflows and Dockerfiles.
-- hx generate --update - Reconcile existing workflows while preserving '# @heurix:preserve' blocks.
+- hx generate - Synthesize schema-validated GitHub Actions, Dependabot, and Kubernetes YAML; smart-merges into existing files.
+- hx diff - Preview the smart-merged result without writing; generate keeps '# @heurix:preserve' blocks.
 - hx check - Verify zero drift between codebase manifest files and CI/CD workflows (exit code 0 = synchronized).`,
   },
   {
@@ -47,7 +47,7 @@ This repository uses Heurix (hx) for CI/CD workflow generation and drift detecti
 ## Configuration & Pipeline Rules
 - Codebase manifests (pyproject.toml, package.json, Cargo.toml, go.mod, docker-compose.yml) are authoritative.
 - Whenever a package or runtime version changes, run 'hx check'.
-- If drift is detected, run 'hx generate --update' to reconcile workflows automatically.
+- If drift is detected, run 'hx generate' to reconcile workflows (it lists any hand-edited value it will replace).
 - Custom steps in existing workflows marked with '# @heurix:preserve' must never be deleted or overwritten.`,
   },
   {
@@ -57,7 +57,7 @@ This repository uses Heurix (hx) for CI/CD workflow generation and drift detecti
     description: 'Drop-in system prompt for any AI chat or custom coding assistant.',
     code: `You are an expert DevOps engineer assisting on this repository.
 We use Heurix (hx CLI) to generate and maintain CI/CD pipelines and infrastructure configs deterministically.
-Do NOT write GitHub Actions YAML or Dockerfiles from memory.
+Do NOT write GitHub Actions, Dependabot, or Kubernetes YAML from memory.
 Instead:
 1. Recommend running 'hx scan' to inspect detected frameworks and services.
 2. Recommend running 'hx generate' to synthesize verified YAML configs.

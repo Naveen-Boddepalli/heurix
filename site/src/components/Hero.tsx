@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { INSTALL_METHODS } from '../data/siteData';
+import { HERO_STATS, HX_VERSION, INSTALL_METHODS, RELEASES } from '../data/siteData';
 import { CodeBlock } from './CodeBlock';
 
 export function Hero() {
@@ -24,22 +24,29 @@ export function Hero() {
     <section id="top" className="hero">
       <div className="container hero-grid">
         <div className="hero-copy">
-          <div className="hero-pills">
-            <span className="pill">100% Deterministic</span>
-            <span className="pill">Offline-Capable (&lt;50ms)</span>
-            <span className="pill">AST Smart Merge</span>
-            <span className="pill">Schema Validated</span>
-          </div>
+          <a href="#changelog" className="release-banner">
+            <span className="release-banner-tag">New in v{HX_VERSION}</span>
+            <span>{RELEASES[0].headline}</span>
+            <span aria-hidden="true">→</span>
+          </a>
 
           <h1 id="main-content" tabIndex={-1}>
             Deterministic codebase scanner &amp; YAML synthesizer.
           </h1>
 
-          <p style={{ fontSize: '1.125rem' }}>
-            Heurix (<code>hx</code>) inspects repository manifests, runtime pins, lockfiles, Dockerfiles, and
-            environment templates using pure-logic heuristics—then synthesizes production-ready GitHub Actions CI/CD,
-            Dependabot, and Kubernetes YAML without LLM hallucinations or overwriting custom edits.
+          <p className="hero-lede">
+            Heurix (<code>hx</code>) reads your manifests, runtime pins, lockfiles, Dockerfiles, and env templates
+            with pure-logic heuristics, then writes GitHub Actions CI, Dependabot, and Kubernetes YAML. No LLM, no
+            network calls, and your hand edits survive every re-run.
           </p>
+
+          <div className="hero-pills" aria-label="Key properties">
+            <span className="pill">100% deterministic</span>
+            <span className="pill">Offline</span>
+            <span className="pill">AST smart merge</span>
+            <span className="pill">Schema validated</span>
+            <span className="pill">Drift guard</span>
+          </div>
 
           <div className="hero-actions">
             <a href="#playground" className="btn btn-primary">
@@ -48,10 +55,16 @@ export function Hero() {
             <a href="#docs" className="btn">
               Read documentation
             </a>
-            <a href="llms.txt" className="btn">
-              View llms.txt
-            </a>
           </div>
+
+          <dl className="hero-stats">
+            {HERO_STATS.map((s) => (
+              <div key={s.label} className="hero-stat">
+                <dt>{s.label}</dt>
+                <dd>{s.value}</dd>
+              </div>
+            ))}
+          </dl>
         </div>
 
         <aside className="install-card" aria-label="Install Heurix">
@@ -93,6 +106,11 @@ export function Hero() {
               </div>
             );
           })}
+
+          <div className="install-next">
+            <span className="install-next-label">Then, in your repo:</span>
+            <CodeBlock title="First run" code={'hx generate --dry-run   # preview, writes nothing\nhx generate             # write + smart-merge\nhx check                # exit 1 on drift'} />
+          </div>
         </aside>
       </div>
     </section>

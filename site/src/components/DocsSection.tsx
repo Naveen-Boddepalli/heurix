@@ -217,6 +217,16 @@ export function DocsSection() {
     return docsWithMatches.filter((item) => item.matchCount > 0);
   }, [docsWithMatches, q]);
 
+  const groupedDocs = useMemo(() => {
+    const groups = new Map<string, typeof visibleDocs>();
+    for (const item of visibleDocs) {
+      const list = groups.get(item.doc.group) ?? [];
+      list.push(item);
+      groups.set(item.doc.group, list);
+    }
+    return [...groups.entries()];
+  }, [visibleDocs]);
+
   // If search query is active and currentDoc is not among visibleDocs, fall back to first visible doc
   const effectiveDocId = useMemo(() => {
     if (!q || visibleDocs.length === 0) return selectedDocId;
@@ -279,25 +289,32 @@ export function DocsSection() {
                 </button>
               </div>
             ) : (
-              <ul className="docs-nav-list">
-                {visibleDocs.map(({ doc, matchCount }) => (
-                  <li key={doc.id}>
-                    <button
-                      type="button"
-                      className="docs-nav-btn"
-                      aria-current={doc.id === currentDoc.id ? 'true' : undefined}
-                      onClick={() => setSelectedDocId(doc.id)}
-                    >
-                      <span>{doc.title}</span>
-                      {q && matchCount > 0 && (
-                        <span className="docs-match-badge" title={`${matchCount} match(es)`}>
-                          {matchCount}
-                        </span>
-                      )}
-                    </button>
-                  </li>
+              <div className="docs-nav-groups">
+                {groupedDocs.map(([group, items]) => (
+                  <div key={group} className="docs-nav-group">
+                    <h3 className="docs-nav-group-title">{group}</h3>
+                    <ul className="docs-nav-list">
+                      {items.map(({ doc, matchCount }) => (
+                        <li key={doc.id}>
+                          <button
+                            type="button"
+                            className="docs-nav-btn"
+                            aria-current={doc.id === currentDoc.id ? 'true' : undefined}
+                            onClick={() => setSelectedDocId(doc.id)}
+                          >
+                            <span>{doc.title}</span>
+                            {q && matchCount > 0 && (
+                              <span className="docs-match-badge" title={`${matchCount} match(es)`}>
+                                {matchCount}
+                              </span>
+                            )}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
                 ))}
-              </ul>
+              </div>
             )}
           </nav>
 

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { HX_VERSION, REPO_URL } from '../data/siteData';
 import { links, type PageId } from '../lib/links';
+import { playThemeRewrite } from '../lib/themeTransition';
 import { prefersReducedMotion } from '../lib/useReducedMotion';
 
 const NAV_ITEMS: { href: string; label: string; page: PageId | null }[] = [
@@ -59,16 +60,16 @@ export function Header({ current }: { current: PageId }) {
       applyThemeToggle();
       return;
     }
-    // Circular reveal of the new theme, expanding from the toggle button
+    // Rewrite the page in the new theme line by line, sweeping from the toggle's side
     const rect = e.currentTarget.getBoundingClientRect();
-    const x = rect.left + rect.width / 2;
-    const y = rect.top + rect.height / 2;
-    const r = Math.hypot(Math.max(x, window.innerWidth - x), Math.max(y, window.innerHeight - y));
-    root.style.setProperty('--vt-x', `${x}px`);
-    root.style.setProperty('--vt-y', `${y}px`);
-    root.style.setProperty('--vt-r', `${r}px`);
+    const fromRight = rect.left + rect.width / 2 > window.innerWidth / 2;
     root.classList.add('theme-vt');
     const transition = document.startViewTransition(applyThemeToggle);
+    transition.ready
+      .then(() => playThemeRewrite(fromRight))
+      .catch(() => {
+        // Pseudo-element animations unsupported: the swap still happens, just without the sweep
+      });
     transition.finished.finally(() => root.classList.remove('theme-vt'));
   }
 

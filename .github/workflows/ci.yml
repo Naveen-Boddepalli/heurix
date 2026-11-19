@@ -42,5 +42,25 @@ jobs:
           cache: pip
       - name: Install dependencies
         run: pip install -e '.[dev]'
+      - name: Lint code (python)
+        run: ruff check .
+      # @heurix:preserve
       - name: Run tests (python)
-        run: pytest
+        run: pytest --cov=heurix --cov-report=term-missing:skip-covered
+  quality:
+    name: Format and type check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+      - name: Set up Python
+        uses: actions/setup-python@v7.1.0
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install dependencies
+        run: pip install -e '.[dev]'
+      - name: Check formatting (ruff format)
+        run: ruff format --check .
+      - name: Type check (mypy)
+        run: mypy

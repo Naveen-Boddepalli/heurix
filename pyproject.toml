@@ -90,6 +90,7 @@ pythonpath = ["src"]
 target-version = "py310"
 line-length = 120
 src = ["src", "tests"]
+extend-exclude = ["*.md", "site"]
 
 [tool.ruff.lint]
 select = [
@@ -129,7 +130,7 @@ module = ["questionary.*", "pathspec.*", "tomli"]
 ignore_missing_imports = true
 
 [tool.coverage.run]
-source = ["heurix"]
+source_pkgs = ["heurix"]
 branch = true
 
 [tool.coverage.report]

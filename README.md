@@ -70,7 +70,7 @@ Or execute directly from the repository root using `./hx`.
 ## Deployment & CI/CD Pipelines
 
 The repository includes automated build, test, and publishing workflows:
-- **Continuous Integration (`.github/workflows/ci.yml`):** Runs the test suite on pull requests and pushes to `main`.
+- **Continuous Integration (`.github/workflows/ci.yml`):** On pull requests and pushes to `main`, lints with ruff and runs the test suite with branch coverage (85% floor) on Python 3.10–3.12, plus a job that checks `ruff format` and `mypy`.
 - **PyPI Trusted Publishing (`.github/workflows/publish-pypi.yml`):** Builds sdist and wheel distributions and publishes to PyPI via GitHub Actions OIDC trusted publishing on release or `v*.*.*` tag push (plus manual `workflow_dispatch` for TestPyPI/PyPI).
 - **Multi-Platform Docker Publishing (`.github/workflows/docker-publish.yml`):** Builds multi-arch (`linux/amd64`, `linux/arm64`) container images and publishes to `ghcr.io/naveen-boddepalli/heurix:latest`.
 - **GitHub Pages Docs & Playground (`.github/workflows/pages.yml`):** Syncs `docs/` and `llms.txt`, builds the React + Vite frontend (`site/`), and deploys to GitHub Pages on push to `main`.
@@ -195,16 +195,19 @@ heurix/
 │           ├── console.py          # Rich explain-tree and summary tables
 │           ├── differ.py           # Colorized terminal diff viewer
 │           └── prompts.py          # Interactive conflict resolution prompts
-└── tests/                          # Full test suite (168 tests across 14 test modules)
+└── tests/                          # pytest suite (coverage gated in CI)
 ```
 
 ---
 
-## Running Tests & Site Build
+## Running Tests, Quality Gates & Site Build
 
 ```bash
-# Run full test suite (168 tests)
+# Run full test suite
 .venv/bin/pytest -v
+
+# Run every CI gate: ruff lint, ruff format check, mypy, and tests with coverage (85% floor)
+make qa
 
 # Check repository CI drift
 .venv/bin/hx check

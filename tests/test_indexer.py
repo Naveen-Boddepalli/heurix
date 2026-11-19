@@ -6,6 +6,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from heurix.core.indexer import RepoIndexer
 
 
@@ -406,6 +408,7 @@ def test_nested_gitignore_negation_over_default_and_deep_hierarchy(tmp_path: Pat
     assert metrics["node"]["score"] == 1
 
 
+@pytest.mark.perf
 def test_indexing_benchmark_under_50ms(tmp_path: Path):
     import time
 

@@ -85,6 +85,10 @@ heurix = ["templates/**/*.j2", "templates/*.j2"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+addopts = ["--strict-markers"]
+markers = [
+    "perf: timing budget tests; run without coverage tracing (pytest -m perf)",
+]
 
 [tool.ruff]
 target-version = "py310"

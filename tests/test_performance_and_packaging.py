@@ -13,6 +13,7 @@ import time
 import zipfile
 from pathlib import Path
 
+import pytest
 from ruamel.yaml import YAML
 
 from heurix.core.validator import PreflightValidator
@@ -336,6 +337,7 @@ def test_packaging_wheel_homebrew_docker_and_workflows(tmp_path: Path) -> None:
         assert trigger_path in docker_wf_text
 
 
+@pytest.mark.perf
 def test_cli_subsecond_latency_benchmarks(tmp_path: Path) -> None:
     """
     Verify NFR-04 sub-second (< 1.0s) CLI subprocess latency on cold startup,

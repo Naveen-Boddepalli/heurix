@@ -2,7 +2,7 @@
 # Makefile for Heurix (hx) Development & Deployment
 # ==============================================================================
 
-.PHONY: help test cov lint format typecheck qa check build docker-build docker-run site-dev site-build clean install
+.PHONY: help test cov perf lint format typecheck qa check build docker-build docker-run site-dev site-build clean install
 
 VENV = .venv
 PYTHON = $(VENV)/bin/python
@@ -16,6 +16,7 @@ help:
 	@echo "Heurix (hx) Development & Deployment Commands:"
 	@echo "  make test          Run test suite with pytest"
 	@echo "  make cov           Run tests with coverage (fails below the pyproject.toml floor)"
+	@echo "  make perf          Run timing benchmarks without coverage tracing"
 	@echo "  make lint          Lint with ruff"
 	@echo "  make format        Format code with ruff"
 	@echo "  make typecheck     Type check with mypy"
@@ -32,7 +33,10 @@ test:
 	$(PYTEST) -v
 
 cov:
-	$(PYTEST) --cov=heurix --cov-report=term-missing:skip-covered
+	$(PYTEST) -m "not perf" --cov=heurix --cov-report=term-missing:skip-covered
+
+perf:
+	$(PYTEST) -m perf
 
 lint:
 	$(RUFF) check .
@@ -43,7 +47,7 @@ format:
 typecheck:
 	$(MYPY)
 
-qa: lint typecheck cov
+qa: lint typecheck cov perf
 	$(RUFF) format --check .
 
 check:

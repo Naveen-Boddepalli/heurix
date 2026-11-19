@@ -1,6 +1,8 @@
-import { useMemo, useState, type ReactNode } from 'react';
-import { SITE_DOCS } from '../data/siteData';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { SITE_DOCS } from '../data/docsData';
 import { CodeBlock } from './CodeBlock';
+import { LlmsContent } from './LlmsContent';
+import { PolicyContent } from './PolicyContent';
 
 function escapeRegExp(string: string): string {
   return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -110,9 +112,13 @@ function MarkdownView({ markdown, highlight }: { markdown: string; highlight?: s
       continue;
     }
 
-    // Headings (mapped inside h2 section as h3/h4 to preserve hierarchy)
+    // Headings: the page has a hidden h1, so a doc's # title becomes h2
     if (line.startsWith('# ')) {
-      blocks.push(<h3 key={`h-${i}`}>{renderInline(line.slice(2), highlight)}</h3>);
+      blocks.push(
+        <h2 key={`h-${i}`} className="doc-title">
+          {renderInline(line.slice(2), highlight)}
+        </h2>
+      );
       i += 1;
       continue;
     }
@@ -166,6 +172,29 @@ function MarkdownView({ markdown, highlight }: { markdown: string; highlight?: s
       continue;
     }
 
+    // Ordered list
+    if (/^\s*\d+\.\s/.test(line)) {
+      const items: string[] = [];
+      while (i < lines.length && /^\s*\d+\.\s/.test(lines[i])) {
+        let item = lines[i].trim().replace(/^\d+\.\s+/, '');
+        i += 1;
+        // Indented continuation lines belong to the same item
+        while (i < lines.length && /^\s{2,}\S/.test(lines[i]) && !/^\s*(\d+\.|-|\*)\s/.test(lines[i])) {
+          item += ` ${lines[i].trim()}`;
+          i += 1;
+        }
+        items.push(item);
+      }
+      blocks.push(
+        <ol key={`ol-${i}`}>
+          {items.map((it, idx) => (
+            <li key={idx}>{renderInline(it, highlight)}</li>
+          ))}
+        </ol>
+      );
+      continue;
+    }
+
     // Empty line
     if (!line.trim()) {
       i += 1;
@@ -183,6 +212,7 @@ function MarkdownView({ markdown, highlight }: { markdown: string; highlight?: s
       !lines[i].startsWith('>') &&
       !lines[i].trim().startsWith('- ') &&
       !lines[i].trim().startsWith('* ') &&
+      !/^\s*\d+\.\s/.test(lines[i]) &&
       !lines[i].trim().startsWith('|')
     ) {
       paraLines.push(lines[i]);
@@ -194,61 +224,144 @@ function MarkdownView({ markdown, highlight }: { markdown: string; highlight?: s
   return <div className="markdown-render">{blocks}</div>;
 }
 
+interface DocView {
+  id: string;
+  title: string;
+  group: string;
+  /** Repo file the page comes from, for the "View on GitHub" link. */
+  file: string | null;
+  /** Text used for search matching. */
+  searchText: string;
+  render: (highlight: string) => ReactNode;
+}
+
+const CUSTOM_PAGES: Record<string, { after: string; view: DocView }> = {
+  configuration: {
+    after: 'cli-reference',
+    view: {
+      id: 'configuration',
+      title: 'Configuration',
+      group: 'Reference',
+      file: null,
+      searchText:
+        '.heurix.toml configuration policy hx init runner paths paths_ignore include_k8s include_dependabot action_shas secrets deploy kubernetes image_tag overrides',
+      render: () => <PolicyContent />,
+    },
+  },
+  'llms-txt': {
+    after: 'changelog',
+    view: {
+      id: 'llms-txt',
+      title: 'llms.txt',
+      group: 'Project',
+      file: 'llms.txt',
+      searchText: `llms.txt llms-full.txt ${SITE_DOCS.llmsTxt}`,
+      render: () => <LlmsContent />,
+    },
+  },
+};
+
+function buildDocViews(): DocView[] {
+  const views: DocView[] = [];
+  for (const doc of SITE_DOCS.docs) {
+    views.push({
+      id: doc.id,
+      title: doc.title,
+      group: doc.group,
+      file: doc.file,
+      searchText: doc.markdown,
+      render: (highlight) => <MarkdownView markdown={doc.markdown} highlight={highlight} />,
+    });
+    for (const custom of Object.values(CUSTOM_PAGES)) {
+      if (custom.after === doc.id) views.push(custom.view);
+    }
+  }
+  return views;
+}
+
+const DOC_VIEWS = buildDocViews();
+const DEFAULT_DOC = 'getting-started';
+
+function docIdFromHash(): string {
+  const id = decodeURIComponent(window.location.hash.slice(1));
+  return DOC_VIEWS.some((d) => d.id === id) ? id : DEFAULT_DOC;
+}
+
+function countMatches(haystack: string, q: string): number {
+  return (haystack.toLowerCase().match(new RegExp(escapeRegExp(q), 'g')) || []).length;
+}
+
 export function DocsSection() {
-  const [selectedDocId, setSelectedDocId] = useState(SITE_DOCS.docs[1]?.id ?? SITE_DOCS.docs[0].id);
+  const [selectedDocId, setSelectedDocId] = useState(docIdFromHash);
   const [searchQuery, setSearchQuery] = useState('');
+  const articleRef = useRef<HTMLElement | null>(null);
 
   const q = searchQuery.trim().toLowerCase();
 
-  const docsWithMatches = useMemo(() => {
-    return SITE_DOCS.docs.map((doc) => {
-      if (!q) return { doc, matchCount: 0 };
-      const titleMatches = (doc.title.toLowerCase().match(new RegExp(escapeRegExp(q), 'g')) || []).length;
-      const contentMatches = (doc.markdown.toLowerCase().match(new RegExp(escapeRegExp(q), 'g')) || []).length;
-      return {
+  // Keep the selected doc in sync with the URL hash (links, back/forward buttons).
+  useEffect(() => {
+    const onHash = () => setSelectedDocId(docIdFromHash());
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, []);
+
+  const docsWithMatches = useMemo(
+    () =>
+      DOC_VIEWS.map((doc) => ({
         doc,
-        matchCount: titleMatches * 3 + contentMatches,
-      };
-    });
-  }, [q]);
+        matchCount: q ? countMatches(doc.title, q) * 3 + countMatches(doc.searchText, q) : 0,
+      })),
+    [q]
+  );
 
-  const visibleDocs = useMemo(() => {
-    if (!q) return docsWithMatches;
-    return docsWithMatches.filter((item) => item.matchCount > 0);
-  }, [docsWithMatches, q]);
+  const visibleDocs = useMemo(
+    () => (q ? docsWithMatches.filter((item) => item.matchCount > 0) : docsWithMatches),
+    [docsWithMatches, q]
+  );
 
-  // If search query is active and currentDoc is not among visibleDocs, fall back to first visible doc
-  const effectiveDocId = useMemo(() => {
-    if (!q || visibleDocs.length === 0) return selectedDocId;
-    if (visibleDocs.some((item) => item.doc.id === selectedDocId)) {
-      return selectedDocId;
+  const groupedDocs = useMemo(() => {
+    const groups = new Map<string, typeof visibleDocs>();
+    for (const item of visibleDocs) {
+      const list = groups.get(item.doc.group) ?? [];
+      list.push(item);
+      groups.set(item.doc.group, list);
     }
-    return visibleDocs[0]?.doc.id ?? selectedDocId;
-  }, [q, selectedDocId, visibleDocs]);
+    return [...groups.entries()];
+  }, [visibleDocs]);
 
-  const currentDocItem =
-    docsWithMatches.find((item) => item.doc.id === effectiveDocId) ?? docsWithMatches[0];
-  const currentDoc = currentDocItem.doc;
+  const currentIndex = Math.max(
+    0,
+    DOC_VIEWS.findIndex((d) => d.id === selectedDocId)
+  );
+  const currentDoc = DOC_VIEWS[currentIndex];
+  const currentMatches = docsWithMatches[currentIndex]?.matchCount ?? 0;
+  const prevDoc = DOC_VIEWS[currentIndex - 1];
+  const nextDoc = DOC_VIEWS[currentIndex + 1];
+
+  useEffect(() => {
+    document.title = `${currentDoc.title} · Heurix docs`;
+  }, [currentDoc.title]);
+
+  function openDoc(id: string) {
+    if (id !== selectedDocId) {
+      window.location.hash = id;
+    }
+    setSelectedDocId(id);
+    const top = (articleRef.current?.getBoundingClientRect().top ?? 0) + window.scrollY - 80;
+    if (window.scrollY > top) window.scrollTo({ top, behavior: 'instant' as ScrollBehavior });
+  }
 
   return (
-    <section id="docs" className="section">
-      <div className="container">
-        <div className="section-header">
-          <span className="eyebrow">Documentation &amp; Guides</span>
-          <h2>Reference synced directly from the repository</h2>
-          <p>
-            Every guide in <code>docs/</code> is built into this viewer and compiled automatically into{' '}
-            <code>llms-full.txt</code> so human readers and AI assistants see the exact same specification.
-          </p>
-        </div>
-
+    <section id="docs" className="page-section">
+      <h1 className="visually-hidden">Heurix documentation</h1>
+      <div className="container container-wide">
         <div className="docs-layout">
-          <nav className="docs-sidebar" aria-label="Documentation guides">
+          <nav className="docs-sidebar" aria-label="Documentation">
             <div className="docs-search-box">
               <input
                 type="search"
                 className="docs-search-input"
-                placeholder="Search guides & heuristics..."
+                placeholder="Search the docs"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 aria-label="Search documentation"
@@ -265,10 +378,25 @@ export function DocsSection() {
               )}
             </div>
 
+            <label className="docs-mobile-picker">
+              <span className="visually-hidden">Choose a page</span>
+              <select className="form-select" value={currentDoc.id} onChange={(e) => openDoc(e.target.value)}>
+                {groupedDocs.map(([group, items]) => (
+                  <optgroup key={group} label={group}>
+                    {items.map(({ doc, matchCount }) => (
+                      <option key={doc.id} value={doc.id}>
+                        {doc.title}
+                        {q && matchCount > 0 ? ` (${matchCount})` : ''}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
+            </label>
+
             {visibleDocs.length === 0 ? (
               <div className="docs-empty-search">
-                <span aria-hidden="true">🔎</span>
-                <span>No guides matching &ldquo;{searchQuery}&rdquo;.</span>
+                <span>No pages match &ldquo;{searchQuery}&rdquo;.</span>
                 <button
                   type="button"
                   className="btn"
@@ -279,50 +407,93 @@ export function DocsSection() {
                 </button>
               </div>
             ) : (
-              <ul className="docs-nav-list">
-                {visibleDocs.map(({ doc, matchCount }) => (
-                  <li key={doc.id}>
-                    <button
-                      type="button"
-                      className="docs-nav-btn"
-                      aria-current={doc.id === currentDoc.id ? 'true' : undefined}
-                      onClick={() => setSelectedDocId(doc.id)}
-                    >
-                      <span>{doc.title}</span>
-                      {q && matchCount > 0 && (
-                        <span className="docs-match-badge" title={`${matchCount} match(es)`}>
-                          {matchCount}
-                        </span>
-                      )}
-                    </button>
-                  </li>
+              <div className="docs-nav-groups">
+                {groupedDocs.map(([group, items]) => (
+                  <div key={group} className="docs-nav-group">
+                    <h2 className="docs-nav-group-title">{group}</h2>
+                    <ul className="docs-nav-list">
+                      {items.map(({ doc, matchCount }) => (
+                        <li key={doc.id}>
+                          <a
+                            href={`#${doc.id}`}
+                            className="docs-nav-btn"
+                            aria-current={doc.id === currentDoc.id ? 'page' : undefined}
+                            onClick={(e) => {
+                              e.preventDefault();
+                              openDoc(doc.id);
+                            }}
+                          >
+                            <span>{doc.title}</span>
+                            {q && matchCount > 0 && (
+                              <span className="docs-match-badge" title={`${matchCount} match(es)`}>
+                                {matchCount}
+                              </span>
+                            )}
+                          </a>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
                 ))}
-              </ul>
+              </div>
             )}
           </nav>
 
-          <article className="docs-article">
-            <div className="docs-article-meta">
-              <span>Source: {currentDoc.file}</span>
-              <a
-                href={`https://github.com/Naveen-Boddepalli/heurix/blob/main/${currentDoc.file}`}
-                target="_blank"
-                rel="noreferrer"
-              >
-                View on GitHub →
-              </a>
-            </div>
+          <article id="main-content" tabIndex={-1} className="docs-article" ref={articleRef}>
+            {currentDoc.file && (
+              <div className="docs-article-meta">
+                <span>{currentDoc.file}</span>
+                <a
+                  href={`https://github.com/Naveen-Boddepalli/heurix/blob/main/${currentDoc.file}`}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  View on GitHub
+                </a>
+              </div>
+            )}
 
-            {q && currentDocItem.matchCount > 0 && (
+            {q && currentMatches > 0 && (
               <div className="drift-notice">
-                <span aria-hidden="true">🔍</span>
                 <span>
-                  Found <strong>{currentDocItem.matchCount}</strong> match(es) for &ldquo;{searchQuery}&rdquo; in this guide.
+                  {currentMatches} match{currentMatches === 1 ? '' : 'es'} for &ldquo;{searchQuery}&rdquo; on this
+                  page.
                 </span>
               </div>
             )}
 
-            <MarkdownView markdown={currentDoc.markdown} highlight={q} />
+            {currentDoc.render(q)}
+
+            <nav className="docs-pager" aria-label="Previous and next page">
+              {prevDoc ? (
+                <a
+                  href={`#${prevDoc.id}`}
+                  className="docs-pager-link"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    openDoc(prevDoc.id);
+                  }}
+                >
+                  <span className="docs-pager-label">Previous</span>
+                  <span>{prevDoc.title}</span>
+                </a>
+              ) : (
+                <span />
+              )}
+              {nextDoc && (
+                <a
+                  href={`#${nextDoc.id}`}
+                  className="docs-pager-link is-next"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    openDoc(nextDoc.id);
+                  }}
+                >
+                  <span className="docs-pager-label">Next</span>
+                  <span>{nextDoc.title}</span>
+                </a>
+              )}
+            </nav>
           </article>
         </div>
       </div>

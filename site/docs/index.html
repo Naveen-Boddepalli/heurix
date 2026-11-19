@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <script>
+      try {
+        var saved = localStorage.getItem('color-scheme');
+        if (saved === 'light' || saved === 'dark') {
+          document.querySelector('meta[name="color-scheme"]').content = saved;
+        }
+      } catch (e) {}
+    </script>
+    <title>Docs · Heurix (hx)</title>
+    <meta name="description" content="Heurix documentation: getting started, CLI reference, configuration, smart merge, drift detection, and the changelog." />
+    <link rel="icon" type="image/svg+xml" href="%BASE_URL%favicon.svg" />
+    <link rel="alternate" type="text/plain" title="llms.txt" href="%BASE_URL%llms.txt" />
+    <meta property="og:title" content="Docs · Heurix (hx)" />
+    <meta property="og:description" content="Heurix documentation: getting started, CLI reference, configuration, smart merge, drift detection, and the changelog." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/pages/docs.tsx"></script>
+  </body>
+</html>

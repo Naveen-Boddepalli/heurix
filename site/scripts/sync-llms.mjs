@@ -27,6 +27,7 @@ const docSources = [
   { id: 'drift-detection', title: 'Continuous Drift Detection', file: 'docs/drift-detection.md', group: 'Guides' },
   { id: 'ai-integration', title: 'AI Assistant Integration', file: 'docs/ai-integration.md', group: 'Guides' },
   { id: 'architecture', title: 'System Architecture & IR', file: 'docs/architecture.md', group: 'Architecture' },
+  { id: 'changelog', title: 'Changelog', file: 'CHANGELOG.md', group: 'Project' },
 ];
 
 const fullChunks = [];

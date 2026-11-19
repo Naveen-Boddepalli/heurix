@@ -11,11 +11,11 @@ import { CodeBlock } from './CodeBlock';
 
 type OutputTab = 'generate' | 'scan' | 'merge' | 'drift';
 
-const OUTPUT_TABS: { id: OutputTab; label: string }[] = [
-  { id: 'generate', label: 'hx generate (YAML)' },
-  { id: 'scan', label: 'hx scan (IR JSON)' },
-  { id: 'merge', label: 'hx diff (# @heurix:preserve)' },
-  { id: 'drift', label: 'hx check (Drift Guard)' },
+const OUTPUT_TABS: { id: OutputTab; label: string; hint: string }[] = [
+  { id: 'generate', label: 'hx generate', hint: 'YAML' },
+  { id: 'scan', label: 'hx scan', hint: 'IR JSON' },
+  { id: 'merge', label: 'hx diff', hint: 'Smart merge' },
+  { id: 'drift', label: 'hx check', hint: 'Drift guard' },
 ];
 
 export function Playground() {
@@ -38,6 +38,7 @@ export function Playground() {
   const [isAddingFile, setIsAddingFile] = useState(false);
   const [newFilePath, setNewFilePath] = useState(STARTER_FILE_TEMPLATES[1].defaultPath);
   const [templateIdx, setTemplateIdx] = useState(1);
+  const [addFileError, setAddFileError] = useState<string | null>(null);
 
   const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
@@ -48,6 +49,7 @@ export function Playground() {
     setSelectedFilePath(next.files[0]?.path ?? '');
     setSelectedOutputFile('.github/workflows/ci.yml');
     setIsAddingFile(false);
+    setAddFileError(null);
     setSimulatedCi(null);
     setDriftNotice(null);
   }
@@ -70,9 +72,10 @@ export function Playground() {
     if (!cleanPath) return;
 
     if (files.some((f) => f.path === cleanPath)) {
-      alert(`File "${cleanPath}" already exists.`);
+      setAddFileError(`"${cleanPath}" already exists. Pick another path or edit the existing file.`);
       return;
     }
+    setAddFileError(null);
 
     const tpl = STARTER_FILE_TEMPLATES[templateIdx] ?? STARTER_FILE_TEMPLATES[0];
     const newFile: VirtualFile = {
@@ -137,7 +140,7 @@ export function Playground() {
     : outputKeys[0] ?? '';
   const activeOutputCode = activeOutputPath
     ? scanResult.synthesized[activeOutputPath]
-    : '# Enable at least one language or deployment config file to synthesize YAML.';
+    : '# Turn on at least one language or deploy config file to generate YAML.';
 
   const activeFile = files.find((f) => f.path === selectedFilePath) ?? files[0];
 
@@ -145,7 +148,7 @@ export function Playground() {
     currentPreset.existingCiForMerge ??
     `name: CI\non:\n  push:\n    branches: [main]\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      # @heurix:preserve\n      - name: Custom security & SBOM upload\n        run: ./scripts/upload-sbom.sh\n  slack_notify:\n    needs: test\n    if: failure()\n    runs-on: ubuntu-latest\n    steps:\n      - uses: slackapi/slack-github-action@v1`;
 
-  const mergedCiOutput = useMemo(
+  const mergeResult = useMemo(
     () =>
       simulateSmartMerge(
         existingCiSample,
@@ -161,24 +164,30 @@ export function Playground() {
   const activeCheckedWorkflow = simulatedCi ?? staleBaselineCi;
 
   const driftFindings = useMemo(() => {
-    return checkDrift(scanResult.context, activeCheckedWorkflow);
-  }, [scanResult.context, activeCheckedWorkflow]);
+    return checkDrift(scanResult.context, activeCheckedWorkflow, scanResult.policy);
+  }, [scanResult.context, scanResult.policy, activeCheckedWorkflow]);
+
+  const policyStatus = scanResult.policy.error
+    ? { tone: 'danger', label: 'Invalid .heurix.toml' }
+    : scanResult.policy.source
+      ? { tone: 'accent', label: '.heurix.toml applied' }
+      : { tone: 'muted', label: 'No .heurix.toml' };
 
   const cliCheckOutput = useMemo(() => {
     if (driftFindings.length === 0) {
-      return `$ hx check\n✔ Zero Drift Detected: CI/CD workflows are completely synchronized with the codebase!\n\nExit code: 0 (PASS)`;
+      return `$ hx check\nNo drift detected.\n\nexit code 0`;
     }
     const lines = [
       `$ hx check`,
-      `⚠️ Drift Detected (${driftFindings.length} issue(s)):`,
+      `Drift Detected (${driftFindings.length} issue(s)):`,
       '',
     ];
     for (const f of driftFindings) {
       lines.push(`[${f.severity}] ${f.file_path}: ${f.issue}`);
-      lines.push(`  ↳ Recommendation: ${f.recommendation}`);
+      lines.push(`  Recommendation: ${f.recommendation}`);
       lines.push('');
     }
-    lines.push(`Error: Process completed with exit code 1.`);
+    lines.push(`exit code 1`);
     return lines.join('\n');
   }, [driftFindings]);
 
@@ -228,7 +237,7 @@ export function Playground() {
         },
       ];
     });
-    setDriftNotice('⚡ Injected Redis into codebase dependencies. Workflow is missing Redis service!');
+    setDriftNotice('Added a Redis dependency. The workflow has no redis service yet.');
   }
 
   function handleBumpRuntime() {
@@ -249,7 +258,7 @@ export function Playground() {
       }
       return [...prev, { path: '.python-version', enabled: true, content: '3.13\n' }];
     });
-    setDriftNotice('⚡ Bumped runtime version in codebase. Workflow does not match new runtime requirement!');
+    setDriftNotice('Bumped the runtime version. The workflow still pins the old one.');
   }
 
   function handleInjectUv() {
@@ -257,7 +266,7 @@ export function Playground() {
       if (prev.some((f) => f.path === 'uv.lock')) return prev;
       return [...prev, { path: 'uv.lock', enabled: true, content: '# uv lockfile v1\nversion = 1\n' }];
     });
-    setDriftNotice('⚡ Added uv.lock! Heurix detected uv, but workflow does not use setup-uv.');
+    setDriftNotice('Added uv.lock. The workflow does not set up uv.');
   }
 
   function handleInjectPostgres() {
@@ -282,20 +291,37 @@ export function Playground() {
         },
       ];
     });
-    setDriftNotice('⚡ Injected PostgreSQL service requirement. Workflow is missing postgres container!');
+    setDriftNotice('Added a Postgres service to docker-compose.yml. The workflow has no postgres service yet.');
+  }
+
+  function handleDuplicateService() {
+    const base = scanResult.synthesized['.github/workflows/ci.yml'] ?? staleBaselineCi;
+    const dupBlock = [
+      '      db:',
+      '        image: postgres:15',
+      '        ports:',
+      "          - '5432:5432'",
+    ].join('\n');
+    const withServices = /^    services:$/m.test(base)
+      ? base.replace(/^    services:$/m, `    services:\n${dupBlock}`)
+      : base.replace(/^(    runs-on: .*)$/m, `$1\n    services:\n      postgres:\n        image: postgres:16-alpine\n        ports:\n          - 5432:5432\n${dupBlock}`);
+    setSimulatedCi(withServices);
+    setDriftNotice(
+      'Loaded a workflow like the ones older versions generated: "db" from compose and "postgres" from dependencies both use host port 5432.'
+    );
   }
 
   function handleReconcile() {
     const currentGenerated = scanResult.synthesized['.github/workflows/ci.yml'];
     if (currentGenerated) {
       setSimulatedCi(currentGenerated);
-      setDriftNotice('✔ Reconciled! Ran simulated hx generate — workflow now matches all codebase requirements.');
+      setDriftNotice('Replaced the workflow with the current hx generate output.');
     }
   }
 
   function handleResetStale() {
     setSimulatedCi(staleBaselineCi);
-    setDriftNotice('Reset workflow to stale baseline (Exit code 1).');
+    setDriftNotice('Reset to the outdated workflow.');
   }
 
   function handleTabKeyDown(e: React.KeyboardEvent<HTMLButtonElement>, index: number) {
@@ -313,14 +339,15 @@ export function Playground() {
   }
 
   return (
-    <section id="playground" className="section">
-      <div className="container">
+    <section id="playground" className="page-section">
+      <div className="container container-wide">
         <div className="section-header">
-          <span className="eyebrow">Interactive Playground</span>
-          <h2>Run the deterministic engine live in your browser</h2>
+          <h1 id="main-content" tabIndex={-1}>
+            Playground
+          </h1>
           <p>
-            Select a preset repository or edit any manifest file on the left. Heurix re-scans your virtual codebase
-            on every keystroke with zero network calls and synthesizes schema-validated YAML outputs.
+            Pick a sample repo, or edit and toggle its files. The scan reruns in your browser on every change. It
+            uses a TypeScript port of the detectors, so treat it as a preview of what the CLI will write.
           </p>
         </div>
 
@@ -339,9 +366,10 @@ export function Playground() {
             ))}
 
             <div className="scan-meta" aria-live="polite">
-              <span>✔ Scanned in {scanResult.durationMs} ms</span>
-              <span>•</span>
-              <span>{outputKeys.length} artifacts</span>
+              <span className={`status-chip is-${policyStatus.tone}`}>{policyStatus.label}</span>
+              <span>
+                {outputKeys.length} files, scanned in {scanResult.durationMs} ms
+              </span>
             </div>
           </div>
 
@@ -417,7 +445,10 @@ export function Playground() {
                       type="text"
                       className="form-input"
                       value={newFilePath}
-                      onChange={(e) => setNewFilePath(e.target.value)}
+                      onChange={(e) => {
+                        setNewFilePath(e.target.value);
+                        setAddFileError(null);
+                      }}
                       placeholder="e.g. Dockerfile"
                       required
                     />
@@ -425,6 +456,11 @@ export function Playground() {
                       Add
                     </button>
                   </div>
+                  {addFileError && (
+                    <p className="form-error" role="alert">
+                      {addFileError}
+                    </p>
+                  )}
                 </form>
               )}
 
@@ -501,7 +537,8 @@ export function Playground() {
                     onClick={() => setActiveTab(tab.id)}
                     onKeyDown={(e) => handleTabKeyDown(e, idx)}
                   >
-                    {tab.label}
+                    <code className="tab-cmd">{tab.label}</code>
+                    <span className="tab-hint">{tab.hint}</span>
                   </button>
                 ))}
               </div>
@@ -514,21 +551,24 @@ export function Playground() {
                 tabIndex={activeTab === 'generate' ? 0 : undefined}
               >
                 <div className="output-body">
-                  <div className="explain-box">
-                    <div className="explain-title">
-                      🔍 Heuristic Reasoning Tree (`hx generate --explain`)
-                    </div>
+                  <details className="explain-box" open>
+                    <summary className="explain-title">
+                      <span>What it found</span>
+                      <code>hx generate --explain</code>
+                      <span className="explain-count">{scanResult.context.explain_log.length} steps</span>
+                    </summary>
                     <ul className="explain-list">
-                      {scanResult.context.explain_log.map((step, i) => (
-                        <li key={i}>
-                          <span className="explain-check" aria-hidden="true">
-                            ✔
-                          </span>
-                          <span>{step}</span>
-                        </li>
-                      ))}
+                      {scanResult.context.explain_log.map((step, i) => {
+                        const isWarn = step.startsWith('Warning:');
+                        const isSkip = step.startsWith('Skipping');
+                        return (
+                          <li key={i} className={isWarn ? 'is-warn' : isSkip ? 'is-skip' : undefined}>
+                            <span>{step}</span>
+                          </li>
+                        );
+                      })}
                     </ul>
-                  </div>
+                  </details>
 
                   {outputKeys.length > 0 && (
                     <div className="export-actions-bar">
@@ -556,7 +596,7 @@ export function Playground() {
                           onClick={handleDownloadZip}
                           title="Download all synthesized configurations in a ZIP archive"
                         >
-                          <span aria-hidden="true">📦</span> Download ZIP
+                          Download ZIP
                         </button>
                         <button
                           type="button"
@@ -564,7 +604,7 @@ export function Playground() {
                           onClick={handleDownloadScript}
                           title="Download bash setup script"
                         >
-                          <span aria-hidden="true">⚡</span> Setup Script
+                          Setup script
                         </button>
                         <button
                           type="button"
@@ -572,8 +612,7 @@ export function Playground() {
                           onClick={handleCopyAll}
                           title="Copy all synthesized YAML configurations"
                         >
-                          <span aria-hidden="true">{copiedAll ? '✔' : '📋'}</span>
-                          {copiedAll ? 'Copied All!' : 'Copy All YAML'}
+                          {copiedAll ? 'Copied' : 'Copy all'}
                         </button>
                       </div>
                     </div>
@@ -582,7 +621,6 @@ export function Playground() {
                   <CodeBlock
                     title={activeOutputPath || 'No targets generated'}
                     code={activeOutputCode}
-                    badge={outputKeys.length > 0 ? '✔ JSON Schema Validated' : undefined}
                   />
                 </div>
               </div>
@@ -596,8 +634,8 @@ export function Playground() {
               >
                 <div className="output-body">
                   <p style={{ fontSize: '0.9375rem' }}>
-                    Generators never touch the filesystem directly—all 8 detectors populate this strongly-typed
-                    <code>ProjectContext</code> Pydantic IR.
+                    The detectors fill in this <code>ProjectContext</code> object, and the generators read only from
+                    it.
                   </p>
                   <CodeBlock
                     title="hx scan (ProjectContext IR)"
@@ -618,18 +656,62 @@ export function Playground() {
                   <p style={{ fontSize: '0.9375rem' }}>
                     <code>SmartMerger</code> parses existing YAML via <code>ruamel.yaml</code> AST round-tripping.
                     Custom jobs (like <code>slack_notify</code>) and any step marked with{' '}
-                    <code># @heurix:preserve</code> survive regeneration intact while managed steps update.
+                    <code># @heurix:preserve</code> survive regeneration intact while managed steps update. Put the
+                    marker at the end of a <code>runs-on</code>, <code>services</code>, <code>needs</code>, or{' '}
+                    <code>strategy</code> line to keep just that value.
                   </p>
-                  <div style={{ display: 'grid', gap: '1rem' }}>
+
+                  <div className="merge-report" aria-label="Merge report">
+                    <div className="merge-report-col">
+                      <h3 className="merge-report-title is-warn">
+                        Values that will be replaced <span className="count-pill">{mergeResult.replaced.length}</span>
+                      </h3>
+                      {mergeResult.replaced.length === 0 ? (
+                        <p className="merge-report-empty">No hand-edited managed values are overwritten.</p>
+                      ) : (
+                        <ul>
+                          {mergeResult.replaced.map((note) => (
+                            <li key={note}>
+                              <code>{note}</code>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                    <div className="merge-report-col">
+                      <h3 className="merge-report-title is-ok">
+                        Kept by <code>@heurix:preserve</code>{' '}
+                        <span className="count-pill">
+                          {mergeResult.keptKeys.length + (existingCiSample.match(/^\s*# @heurix:preserve/gm)?.length ?? 0)}
+                        </span>
+                      </h3>
+                      <ul>
+                        {mergeResult.keptKeys.map((k) => (
+                          <li key={k}>
+                            <code>{k}</code> <span className="muted">(key-level)</span>
+                          </li>
+                        ))}
+                        {(existingCiSample.match(/# @heurix:preserve\n\s*- name: (.+)/g) ?? []).map((m) => (
+                          <li key={m}>
+                            step <code>{m.split('- name: ')[1]}</code>
+                          </li>
+                        ))}
+                        {mergeResult.keptKeys.length === 0 && !/^\s*# @heurix:preserve/m.test(existingCiSample) && (
+                          <li className="muted">No preserve markers in this workflow.</li>
+                        )}
+                      </ul>
+                    </div>
+                  </div>
+
+                  <div className="merge-compare">
                     <CodeBlock
-                      title="Before: Existing .github/workflows/ci.yml (with custom steps)"
+                      title="Before: .github/workflows/ci.yml"
                       code={existingCiSample}
                       highlightDiff
                     />
                     <CodeBlock
-                      title="After: Merged .github/workflows/ci.yml (AST preserved)"
-                      code={mergedCiOutput}
-                      badge="✔ Preserved user customizations"
+                      title="After hx generate"
+                      code={mergeResult.merged}
                       highlightDiff
                     />
                   </div>
@@ -646,7 +728,6 @@ export function Playground() {
                 <div className="output-body">
                   {driftNotice && (
                     <div className="drift-notice">
-                      <span aria-hidden="true">💡</span>
                       <span>{driftNotice}</span>
                     </div>
                   )}
@@ -654,7 +735,7 @@ export function Playground() {
                   <div className="drift-scenarios-bar">
                     <div className="drift-scenario-group" role="group" aria-label="Inject drift scenarios">
                       <span style={{ fontSize: '0.78125rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
-                        Inject Drift:
+                        Change the repo:
                       </span>
                       <button
                         type="button"
@@ -662,7 +743,7 @@ export function Playground() {
                         onClick={handleInjectRedis}
                         title="Add Redis dependency to codebase manifest"
                       >
-                        + Redis Dependency
+                        + Redis dependency
                       </button>
                       <button
                         type="button"
@@ -670,7 +751,7 @@ export function Playground() {
                         onClick={handleBumpRuntime}
                         title="Bump runtime version in codebase"
                       >
-                        + Bump Runtime
+                        Bump runtime
                       </button>
                       <button
                         type="button"
@@ -678,7 +759,7 @@ export function Playground() {
                         onClick={handleInjectUv}
                         title="Add uv.lock package manager file"
                       >
-                        + uv Package Manager
+                        + uv.lock
                       </button>
                       <button
                         type="button"
@@ -686,7 +767,15 @@ export function Playground() {
                         onClick={handleInjectPostgres}
                         title="Add PostgreSQL container in compose"
                       >
-                        + Postgres Service
+                        + Postgres service
+                      </button>
+                      <button
+                        type="button"
+                        className="drift-scenario-btn"
+                        onClick={handleDuplicateService}
+                        title="Load a workflow with two services on host port 5432"
+                      >
+                        Port collision
                       </button>
                     </div>
 
@@ -697,7 +786,7 @@ export function Playground() {
                         onClick={handleReconcile}
                         title="Reconcile workflow by running simulated hx generate"
                       >
-                        ⚡ Reconcile Workflow (hx generate)
+                        Run hx generate
                       </button>
                       <button
                         type="button"
@@ -705,15 +794,15 @@ export function Playground() {
                         onClick={handleResetStale}
                         title="Reset to stale workflow baseline"
                       >
-                        Reset to Stale
+                        Reset
                       </button>
                     </div>
                   </div>
 
                   <CodeBlock
-                    title="Terminal Simulation: hx check"
+                    title="hx check"
                     code={cliCheckOutput}
-                    badge={driftFindings.length === 0 ? '✔ Exit Code 0 (Pass)' : `⚠ Exit Code 1 (${driftFindings.length} drift)`}
+                    badge={driftFindings.length === 0 ? 'exit 0' : `exit 1`}
                   />
 
                   <div style={{ display: 'flex', justifyContent: 'flex-end', marginBlockStart: '-0.25rem' }}>
@@ -723,13 +812,13 @@ export function Playground() {
                       onClick={() => setShowWorkflowYaml((prev) => !prev)}
                       aria-expanded={showWorkflowYaml}
                     >
-                      {showWorkflowYaml ? 'Hide Active Workflow YAML' : 'Inspect Checked .github/workflows/ci.yml'}
+                      {showWorkflowYaml ? 'Hide workflow' : 'Show the workflow being checked'}
                     </button>
                   </div>
 
                   {showWorkflowYaml && (
                     <CodeBlock
-                      title="Active .github/workflows/ci.yml (Workflow Under Inspection)"
+                      title=".github/workflows/ci.yml"
                       code={activeCheckedWorkflow}
                     />
                   )}

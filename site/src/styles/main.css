@@ -267,6 +267,8 @@ code {
   background-color: var(--bg-elevated);
   border: 1px solid var(--border-subtle);
   overflow-wrap: break-word;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
 }
 
 /* Layout containers */
@@ -276,23 +278,13 @@ code {
 }
 
 .section {
-  padding-block: clamp(2.5rem, 5vw, 4.5rem);
-  border-block-start: 1px solid var(--border-subtle);
+  padding-block: clamp(2rem, 4vw, 3.5rem);
 }
 
 .section-header {
   display: grid;
   gap: 0.75rem;
   margin-block-end: 2rem;
-}
-
-.eyebrow {
-  font-family: var(--font-mono);
-  font-size: 0.8125rem;
-  font-weight: 600;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  color: var(--accent);
 }
 
 /* ==========================================================================
@@ -383,7 +375,7 @@ code {
     align-items: center;
   }
 
-  .menu-button {
+  .icon-btn.menu-button {
     display: none;
   }
 }
@@ -511,7 +503,7 @@ code {
    Hero & Install Widget
    ========================================================================== */
 .hero {
-  padding-block: clamp(3rem, 7vw, 5.5rem);
+  padding-block: clamp(3rem, 7vw, 5.5rem) clamp(1.5rem, 3vw, 2.5rem);
 }
 
 .hero-grid {
@@ -529,26 +521,6 @@ code {
 .hero-copy {
   display: grid;
   gap: 1.25rem;
-}
-
-.hero-pills {
-  display: flex;
-  flex-wrap: wrap;
-  flex-wrap: balance;
-  gap: 0.5rem;
-}
-
-.pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.375rem;
-  padding: 0.25rem 0.65rem;
-  border-radius: 999px;
-  border: 1px solid var(--border-subtle);
-  background-color: var(--bg-surface);
-  font-family: var(--font-mono);
-  font-size: 0.8125rem;
-  color: var(--text-secondary);
 }
 
 .hero-actions {
@@ -825,6 +797,7 @@ code {
 .scan-meta {
   margin-inline-start: auto;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.5rem;
   font-family: var(--font-mono);
@@ -1041,12 +1014,6 @@ code {
   gap: 0.5rem;
   color: var(--text-primary);
   overflow-wrap: anywhere;
-}
-
-.explain-check {
-  color: var(--success);
-  font-weight: 700;
-  flex-shrink: 0;
 }
 
 /* Output file switcher & Export bar */
@@ -1464,6 +1431,11 @@ code {
 }
 
 .docs-nav-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  text-decoration: none;
   inline-size: 100%;
   min-block-size: 2.5rem;
   padding: 0.5rem 0.75rem;
@@ -1483,7 +1455,7 @@ code {
   background-color: var(--bg-elevated);
 }
 
-.docs-nav-btn[aria-current='true'] {
+.docs-nav-btn[aria-current='page'] {
   color: var(--text-primary);
   background-color: var(--accent-soft);
   border-color: var(--accent);
@@ -1519,7 +1491,8 @@ code {
   max-inline-size: 72ch;
 }
 
-.markdown-render ul {
+.markdown-render ul,
+.markdown-render ol {
   margin: 0;
   padding-inline-start: 1.25rem;
   display: grid;
@@ -1528,25 +1501,8 @@ code {
 }
 
 /* ==========================================================================
-   LLM Visibility Section & Footer
+   Endpoint cards & Footer
    ========================================================================== */
-.visibility-grid {
-  display: grid;
-  gap: 1.5rem;
-  align-items: start;
-}
-
-@media (min-width: 56rem) {
-  .visibility-grid {
-    grid-template-columns: 0.9fr 1.1fr;
-  }
-}
-
-.visibility-endpoints {
-  display: grid;
-  gap: 1rem;
-}
-
 .endpoint-card {
   padding: 1.125rem;
   border: 1px solid var(--border-subtle);
@@ -1570,29 +1526,450 @@ code {
 }
 
 .footer-inner {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1.5rem;
+  display: grid;
+  gap: 2rem;
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+}
+
+.footer-brand {
+  display: grid;
+  gap: 0.5rem;
+  align-content: start;
+  grid-column: 1 / -1;
+}
+
+@media (min-width: 48rem) {
+  .footer-inner {
+    grid-template-columns: 1.6fr repeat(3, 1fr);
+  }
+
+  .footer-brand {
+    grid-column: auto;
+  }
+}
+
+.footer-brand p {
+  font-size: 0.9375rem;
+}
+
+.footer-meta {
+  font-family: var(--font-mono);
+  font-size: 0.8125rem !important;
+}
+
+.footer-meta a {
+  color: var(--accent);
+}
+
+.footer-col-title {
+  font-size: 0.8125rem;
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary);
+  margin-block-end: 0.75rem;
 }
 
 .footer-links {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 1.25rem;
+  display: grid;
+  gap: 0.5rem;
   list-style: none;
   margin: 0;
   padding: 0;
 }
 
 .footer-links a {
-  color: var(--text-secondary);
+  color: var(--text-primary);
   text-decoration: none;
   font-size: 0.9375rem;
 }
 
 .footer-links a:hover {
-  color: var(--text-primary);
+  color: var(--accent);
   text-decoration: underline;
+}
+
+/* ==========================================================================
+   v0.3.0 additions: hero banner & stats, flow, policy, releases, merge report
+   ========================================================================== */
+.section-tight {
+  padding-block: clamp(2rem, 4vw, 3.25rem);
+}
+
+.hero-lede {
+  font-size: 1.125rem;
+}
+
+.install-next {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0 1rem 1rem;
+}
+
+.install-next-label {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+@media (max-width: 40rem) {
+  .github-label {
+    display: none;
+  }
+}
+
+/* Playground: tabs, status, merge report */
+.tab-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.tab-cmd {
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: 0.8125rem;
+  font-weight: 700;
+}
+
+.tab-hint {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.status-chip {
+  padding: 0.12rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.status-chip.is-accent {
+  color: var(--accent);
+}
+
+.status-chip.is-danger {
+  color: var(--danger);
+}
+
+.status-chip.is-muted {
+  color: var(--text-secondary);
+}
+
+.form-error {
+  font-size: 0.8125rem;
+  color: var(--danger);
+}
+
+details.explain-box > summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  list-style: none;
+  margin-block-end: 0;
+}
+
+details.explain-box > summary::-webkit-details-marker {
+  display: none;
+}
+
+details.explain-box > summary::before {
+  content: '▸';
+  transition: transform 0.15s ease;
+}
+
+details.explain-box[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+details.explain-box[open] > summary {
+  margin-block-end: 0.75rem;
+}
+
+details.explain-box > summary code {
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.explain-count {
+  margin-inline-start: auto;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.explain-list {
+  max-block-size: 16rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.explain-list li.is-warn {
+  color: var(--danger);
+}
+
+.explain-list li.is-skip {
+  color: var(--text-secondary);
+}
+
+/* Long YAML stays scannable: cap output height inside the playground */
+.workbench-main .code-pre {
+  max-block-size: 34rem;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.merge-report {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+}
+
+.merge-report-col {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 0.875rem 1rem;
+  background-color: var(--bg-elevated);
+  min-inline-size: 0;
+}
+
+.merge-report-col ul {
+  margin: 0;
+  padding-inline-start: 1.1rem;
+  display: grid;
+  gap: 0.35rem;
+  font-size: 0.8125rem;
+}
+
+.merge-report-col code {
+  overflow-wrap: anywhere;
+}
+
+.merge-report-title {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.875rem;
+  margin-block-end: 0.5rem;
+}
+
+.merge-report-empty,
+.muted {
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+}
+
+.count-pill {
+  margin-inline-start: auto;
+  min-inline-size: 1.5rem;
+  padding: 0 0.4rem;
+  border-radius: 999px;
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  text-align: center;
+}
+
+.merge-compare {
+  display: grid;
+  gap: 1rem;
+}
+
+@container workbench (inline-size >= 80rem) {
+  .merge-compare {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+.policy-table th[scope='row'] {
+  white-space: nowrap;
+}
+
+.policy-section-name {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.policy-example-value {
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.new-badge {
+  margin-inline-start: 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+/* Grouped docs sidebar */
+.docs-nav-groups {
+  display: grid;
+  gap: 0.875rem;
+}
+
+.docs-nav-group-title {
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
+  padding-inline: 0.5rem;
+  margin-block-end: 0.25rem;
+}
+
+@media (min-width: 54rem) {
+  .docs-sidebar {
+    position: sticky;
+    inset-block-start: 5rem;
+    max-block-size: calc(100dvh - 6rem);
+    overflow-y: auto;
+  }
+}
+
+/* Compact header on phones so the menu button always fits */
+@media (max-width: 30rem) {
+  .brand-badge,
+  .theme-toggle span > span,
+  .menu-button > span {
+    display: none;
+  }
+
+  .header-actions {
+    gap: 0.375rem;
+  }
+
+  .icon-btn {
+    padding-inline: 0.55rem;
+  }
+}
+
+@media (max-width: 40rem) {
+  .preset-strip {
+    gap: 0.375rem;
+    padding: 0.75rem;
+  }
+
+  .preset-btn {
+    min-block-size: 2rem;
+    padding-inline: 0.625rem;
+    font-size: 0.8125rem;
+  }
+
+  .scan-meta {
+    margin-inline-start: 0;
+    inline-size: 100%;
+  }
+}
+
+.hero-release {
+  font-size: 0.9375rem;
+}
+
+.hero-release a,
+.markdown-render a {
+  color: var(--accent);
+}
+
+/* ==========================================================================
+   Multi-page layout: page sections, wide container, CTA, docs pager
+   ========================================================================== */
+.page-section {
+  padding-block: clamp(1.75rem, 4vw, 3rem) clamp(2.5rem, 5vw, 4rem);
+}
+
+.container-wide {
+  --content-max: 90rem;
+}
+
+.cta-band {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.25rem;
+}
+
+.cta-band > div:first-child {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.doc-title {
+  font-size: clamp(1.5rem, 1.2rem + 1vw, 2rem);
+}
+
+.markdown-render h3 {
+  margin-block-start: 0.75rem;
+}
+
+.endpoint-list {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+}
+
+.endpoint-card p {
+  font-size: 0.9375rem;
+}
+
+.docs-mobile-picker {
+  display: none;
+}
+
+@media (max-width: 53.99rem) {
+  .docs-mobile-picker {
+    display: block;
+  }
+
+  .docs-mobile-picker .form-select {
+    inline-size: 100%;
+  }
+
+  .docs-sidebar .docs-nav-groups {
+    display: none;
+  }
+}
+
+.docs-pager {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+  margin-block-start: 1.5rem;
+  padding-block-start: 1.25rem;
+  border-block-start: 1px solid var(--border-subtle);
+}
+
+.docs-pager-link {
+  display: grid;
+  gap: 0.15rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 0.9375rem;
+}
+
+.docs-pager-link:hover {
+  border-color: var(--accent);
+}
+
+.docs-pager-link.is-next {
+  grid-column: 2;
+  text-align: end;
+}
+
+.docs-pager-label {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--text-secondary);
 }

@@ -159,7 +159,7 @@ export function generateSetupShellScript(files: ExportableFile[]): string {
     lines.push(`cat << 'EOF' > "${file.path}"`);
     lines.push(file.content.trimEnd());
     lines.push('EOF');
-    lines.push(`echo "✔ Created ${file.path}"`);
+    lines.push(`echo "Created ${file.path}"`);
     lines.push('');
   }
 

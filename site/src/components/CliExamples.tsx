@@ -1,4 +1,5 @@
 import { CLI_COMMANDS } from '../data/siteData';
+import { links } from '../lib/links';
 import { CodeBlock } from './CodeBlock';
 
 export function CliExamples() {
@@ -6,11 +7,11 @@ export function CliExamples() {
     <section id="cli" className="section">
       <div className="container">
         <div className="section-header">
-          <span className="eyebrow">CLI Workflows &amp; Examples</span>
-          <h2>Transparent commands built for developer trust</h2>
+          <h2>Commands</h2>
           <p>
-            Every command explains what it detected and previews diffs before touching disk. Run{' '}
-            <code>hx</code> interactively locally or pass <code>--yes</code> in headless automation.
+            Running <code>hx</code> on its own is the same as <code>hx generate</code>. It asks before changing an
+            existing file; pass <code>--yes</code> to skip the prompts in CI. <code>hx scan</code> and{' '}
+            <code>hx init</code> are covered in the <a href={links.docs('cli-reference')}>CLI reference</a>.
           </p>
         </div>
 

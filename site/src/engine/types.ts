@@ -84,8 +84,23 @@ export interface DriftFinding {
   recommendation: string;
 }
 
+export interface HeurixPolicy {
+  /** Path of the policy file, or null when no `.heurix.toml` is enabled. */
+  source: string | null;
+  /** Parse error message when `.heurix.toml` exists but is invalid. */
+  error: string | null;
+  runner: string | null;
+  includeK8s: boolean | null;
+  includeDependabot: boolean;
+  paths: string[] | null;
+  pathsIgnore: string[];
+  imageTag: string | null;
+  overrides: Record<string, string>;
+}
+
 export interface ScanResult {
   context: ProjectContext;
+  policy: HeurixPolicy;
   synthesized: Record<string, string>;
   durationMs: number;
 }

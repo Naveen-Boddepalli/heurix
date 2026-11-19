@@ -4,7 +4,7 @@ export function HeuristicsGrid() {
   return (
     <section id="heuristics" className="section">
       <div className="container">
-        <div className="section-header">
+        <div className="section-header reveal">
           <h2>What it detects</h2>
           <p>
             Each detector looks at a specific set of files. Their results go into one project description (run{' '}
@@ -13,8 +13,12 @@ export function HeuristicsGrid() {
         </div>
 
         <div className="cards-grid">
-          {HEURISTIC_CARDS.map((card) => (
-            <article key={card.id} className="heuristic-card">
+          {HEURISTIC_CARDS.map((card, i) => (
+            <article
+              key={card.id}
+              className="heuristic-card reveal"
+              style={{ '--i': i % 3 } as React.CSSProperties}
+            >
               <header className="card-meta-top">
                 <h3>{card.title}</h3>
                 <span className="card-tag">{card.detector}</span>

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { HX_VERSION, REPO_URL } from '../data/siteData';
 import { links, type PageId } from '../lib/links';
+import { prefersReducedMotion } from '../lib/useReducedMotion';
 
 const NAV_ITEMS: { href: string; label: string; page: PageId | null }[] = [
   { href: links.playground, label: 'Playground', page: 'playground' },
@@ -52,7 +53,26 @@ export function Header({ current }: { current: PageId }) {
     return () => window.removeEventListener('storage', onStorage);
   }, []);
 
-  function handleThemeToggle() {
+  function handleThemeToggle(e: React.MouseEvent<HTMLButtonElement>) {
+    const root = document.documentElement;
+    if (!document.startViewTransition || prefersReducedMotion()) {
+      applyThemeToggle();
+      return;
+    }
+    // Circular reveal of the new theme, expanding from the toggle button
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = rect.left + rect.width / 2;
+    const y = rect.top + rect.height / 2;
+    const r = Math.hypot(Math.max(x, window.innerWidth - x), Math.max(y, window.innerHeight - y));
+    root.style.setProperty('--vt-x', `${x}px`);
+    root.style.setProperty('--vt-y', `${y}px`);
+    root.style.setProperty('--vt-r', `${r}px`);
+    root.classList.add('theme-vt');
+    const transition = document.startViewTransition(applyThemeToggle);
+    transition.finished.finally(() => root.classList.remove('theme-vt'));
+  }
+
+  function applyThemeToggle() {
     const meta = document.querySelector<HTMLMetaElement>('meta[name="color-scheme"]');
     if (!meta) return;
 
@@ -84,6 +104,7 @@ export function Header({ current }: { current: PageId }) {
 
   return (
     <header ref={headerRef} className={`site-header${hiddenOnScroll ? ' is-hidden' : ''}`}>
+      <div className="scroll-progress" aria-hidden="true" />
       <a href="#main-content" className="skip-link">
         Skip to main content
       </a>

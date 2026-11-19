@@ -98,3 +98,110 @@
     transition-delay: 0s !important;
   }
 }
+
+/* --------------------------------------------------------------------------
+   Scroll reveals (driven by useReveal; hidden state only under html.js-reveal)
+   -------------------------------------------------------------------------- */
+@media (prefers-reduced-motion: no-preference) {
+  .js-reveal .reveal {
+    opacity: 0;
+    translate: 0 18px;
+    transition:
+      opacity var(--motion-slow) var(--ease-out),
+      translate var(--motion-slow) var(--ease-out);
+    transition-delay: calc(var(--i, 0) * 80ms);
+  }
+
+  .js-reveal .reveal.is-visible {
+    opacity: 1;
+    translate: 0 0;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Cross-page view transitions (home <-> playground <-> docs)
+   -------------------------------------------------------------------------- */
+@media (prefers-reduced-motion: no-preference) {
+  @view-transition {
+    navigation: auto;
+  }
+}
+
+.site-header {
+  view-transition-name: site-header;
+}
+
+::view-transition-old(root) {
+  animation: vt-page-out 180ms var(--ease-in-out) both;
+}
+
+::view-transition-new(root) {
+  animation: vt-page-in 320ms var(--ease-out) both;
+}
+
+@keyframes vt-page-out {
+  to {
+    opacity: 0;
+    translate: 0 -6px;
+  }
+}
+
+@keyframes vt-page-in {
+  from {
+    opacity: 0;
+    translate: 0 10px;
+  }
+}
+
+/* Theme toggle: one circular reveal of the whole page, header included */
+.theme-vt .site-header {
+  view-transition-name: none;
+}
+
+.theme-vt::view-transition-old(root) {
+  animation: none;
+}
+
+.theme-vt::view-transition-new(root) {
+  animation: theme-reveal 560ms var(--ease-in-out) both;
+}
+
+@keyframes theme-reveal {
+  from {
+    clip-path: circle(0 at var(--vt-x, 50%) var(--vt-y, 0));
+  }
+  to {
+    clip-path: circle(var(--vt-r, 150vmax) at var(--vt-x, 50%) var(--vt-y, 0));
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Scroll progress hairline under the sticky header
+   -------------------------------------------------------------------------- */
+.scroll-progress {
+  display: none;
+}
+
+@supports (animation-timeline: scroll()) {
+  @media (prefers-reduced-motion: no-preference) {
+    .scroll-progress {
+      display: block;
+      position: absolute;
+      inset-inline: 0;
+      inset-block-end: -1px;
+      block-size: 2px;
+      background: linear-gradient(90deg, var(--accent), color-mix(in oklab, var(--accent) 55%, #a78bfa));
+      transform-origin: 0 50%;
+      scale: 0 1;
+      animation: grow-x linear both;
+      animation-timeline: scroll(root block);
+      pointer-events: none;
+    }
+  }
+}
+
+@keyframes grow-x {
+  to {
+    scale: 1 1;
+  }
+}

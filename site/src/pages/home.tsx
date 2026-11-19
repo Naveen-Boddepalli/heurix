@@ -13,7 +13,7 @@ mountPage(
     <CliExamples />
     <ComparisonTable />
     <section className="section">
-      <div className="container cta-band">
+      <div className="container cta-band reveal">
         <div>
           <h2>See it on a real repo</h2>
           <p>

@@ -6,7 +6,7 @@ export function CliExamples() {
   return (
     <section id="cli" className="section">
       <div className="container">
-        <div className="section-header">
+        <div className="section-header reveal">
           <h2>Commands</h2>
           <p>
             Running <code>hx</code> on its own is the same as <code>hx generate</code>. It asks before changing an
@@ -16,8 +16,8 @@ export function CliExamples() {
         </div>
 
         <div className="cli-grid">
-          {CLI_COMMANDS.map((item) => (
-            <article key={item.cmd} className="cli-card">
+          {CLI_COMMANDS.map((item, i) => (
+            <article key={item.cmd} className="cli-card reveal" style={{ '--i': i % 2 } as React.CSSProperties}>
               <header style={{ display: 'grid', gap: '0.35rem' }}>
                 <span className="card-tag">{item.cmd}</span>
                 <h3>{item.title}</h3>

@@ -65,7 +65,7 @@ export function ComparisonTable() {
   return (
     <section id="why-heurix" className="section">
       <div className="container">
-        <div className="section-header">
+        <div className="section-header reveal">
           <h2>Why not an LLM or a starter template?</h2>
           <p>
             CI files decide what gets built, which secrets are exposed, and what gets deployed. They should be easy
@@ -73,7 +73,7 @@ export function ComparisonTable() {
           </p>
         </div>
 
-        <div className="table-scroll">
+        <div className="table-scroll reveal">
           <table className="compare-table">
             <caption>How hx compares with LLM-generated YAML and starter templates</caption>
             <thead>

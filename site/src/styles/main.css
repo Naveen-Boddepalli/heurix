@@ -267,6 +267,8 @@ code {
   background-color: var(--bg-elevated);
   border: 1px solid var(--border-subtle);
   overflow-wrap: break-word;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
 }
 
 /* Layout containers */
@@ -276,8 +278,7 @@ code {
 }
 
 .section {
-  padding-block: clamp(2.5rem, 5vw, 4.5rem);
-  border-block-start: 1px solid var(--border-subtle);
+  padding-block: clamp(2rem, 4vw, 3.5rem);
 }
 
 .section-header {
@@ -502,7 +503,7 @@ code {
    Hero & Install Widget
    ========================================================================== */
 .hero {
-  padding-block: clamp(3rem, 7vw, 5.5rem);
+  padding-block: clamp(3rem, 7vw, 5.5rem) clamp(1.5rem, 3vw, 2.5rem);
 }
 
 .hero-grid {
@@ -1620,7 +1621,7 @@ code {
 /* Playground: tabs, status, merge report */
 .tab-btn {
   display: inline-flex;
-  align-items: baseline;
+  align-items: center;
   gap: 0.4rem;
 }
 

@@ -7,7 +7,7 @@ interface CodeBlockProps {
   highlightDiff?: boolean;
 }
 
-function highlightYamlLine(line: string): ReactNode {
+export function highlightYamlLine(line: string): ReactNode {
   // Whole-line preserve directive
   if (line.includes('@heurix:preserve') || line.includes('@autoyaml:preserve')) {
     return <span className="tok-preserve">{line}</span>;

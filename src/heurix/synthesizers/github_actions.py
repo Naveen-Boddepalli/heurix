@@ -4,12 +4,14 @@ GitHub Actions CI/CD Workflow Synthesizer.
 
 from __future__ import annotations
 
-from collections import Counter
 import copy
-from dataclasses import dataclass, replace
 import re
-from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
+from collections import Counter
+from collections.abc import Sequence
+from dataclasses import dataclass, replace
+from typing import Any
 from urllib.parse import quote
+
 from heurix.core.context import ProjectContext, ServiceRequirement
 from heurix.core.policy import (
     HeurixPolicy,
@@ -21,7 +23,7 @@ from heurix.core.policy import (
 from heurix.synthesizers.base import BaseSynthesizer
 from heurix.synthesizers.templating import render_yaml_template
 
-ACTION_VERSIONS: Dict[str, str] = {
+ACTION_VERSIONS: dict[str, str] = {
     "actions/checkout": "v7",
     "astral-sh/setup-uv": "v5",
     "actions/setup-python": "v7.1.0",
@@ -41,15 +43,18 @@ _SHA40_RE = re.compile(r"^[0-9a-fA-F]{40}$")
 _INVALID_JOB_ID_CHARS_RE = re.compile(r"[^a-zA-Z0-9_-]+")
 _MULTI_HYPHEN_RE = re.compile(r"-{2,}")
 
-_ECOSYSTEM_SOURCE_TOKENS: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
-    ("python", ("python", "pyproject.toml", "requirements", "uv.lock", "poetry.lock", "pipfile", "setup.py", "setup.cfg")),
+_ECOSYSTEM_SOURCE_TOKENS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    (
+        "python",
+        ("python", "pyproject.toml", "requirements", "uv.lock", "poetry.lock", "pipfile", "setup.py", "setup.cfg"),
+    ),
     ("node", ("node", "package.json", "pnpm", "yarn", "bun")),
     ("rust", ("rust", "cargo.toml", "cargo.lock")),
     ("go", ("go.mod", "go.sum")),
     ("cpp", ("cmakelists", "conan", "vcpkg")),
 )
 
-MATRIX_VERSION_KEYS: Dict[str, str] = {
+MATRIX_VERSION_KEYS: dict[str, str] = {
     "python": "python-version",
     "node": "node-version",
     "go": "go-version",
@@ -65,22 +70,22 @@ class _BuildUnit:
     package_manager: str
     runtime_version: str
     version_source: str
-    install_cmd: Optional[str]
-    build_cmd: Optional[str]
-    test_cmd: Optional[str]
-    lint_cmd: Optional[str]
-    framework: Optional[str]
-    cache_dependency_path: Optional[str]
-    matrix_versions: Tuple[str, ...]
-    unit_test_runner: Optional[str] = None
-    e2e_test_runner: Optional[str] = None
-    e2e_cmd: Optional[str] = None
-    package_manager_spec_file: Optional[str] = None
+    install_cmd: str | None
+    build_cmd: str | None
+    test_cmd: str | None
+    lint_cmd: str | None
+    framework: str | None
+    cache_dependency_path: str | None
+    matrix_versions: tuple[str, ...]
+    unit_test_runner: str | None = None
+    e2e_test_runner: str | None = None
+    e2e_cmd: str | None = None
+    package_manager_spec_file: str | None = None
     # Directory holding this crate's target/ (repo root for Cargo workspace members)
-    cargo_target_root: Optional[str] = None
+    cargo_target_root: str | None = None
 
 
-def _normalize_working_dir(raw_path: Optional[str]) -> str:
+def _normalize_working_dir(raw_path: str | None) -> str:
     """Normalize a relative package or working directory to '.' or POSIX subpath."""
     cleaned = (raw_path or "").strip().replace("\\", "/")
     while cleaned.startswith("./"):
@@ -89,7 +94,7 @@ def _normalize_working_dir(raw_path: Optional[str]) -> str:
     return cleaned if cleaned and cleaned != "." else "."
 
 
-def sanitize_job_id(raw_slug: str, used_ids: Set[str]) -> str:
+def sanitize_job_id(raw_slug: str, used_ids: set[str]) -> str:
     """
     Sanitize a raw package path or language slug into a unique GitHub Actions job ID
     matching ^[a-zA-Z_][a-zA-Z0-9_-]*$ with length <= 100 chars.
@@ -119,19 +124,19 @@ def sanitize_job_id(raw_slug: str, used_ids: Set[str]) -> str:
         counter += 1
 
 
-def _collect_build_units(context: ProjectContext) -> List[_BuildUnit]:
+def _collect_build_units(context: ProjectContext) -> list[_BuildUnit]:
     """
     Build normalized, deduplicated execution units from MonorepoPackage and LanguageContext.
     Prefers MonorepoPackage on (working_dir, language) collisions and skips workspace coordinators.
     """
-    fallback_versions: Dict[str, str] = {}
+    fallback_versions: dict[str, str] = {}
     for lang in context.languages:
         lang_key = lang.language.lower()
         if lang_key not in fallback_versions and lang.runtime_version:
             fallback_versions[lang_key] = lang.runtime_version
 
-    units: List[_BuildUnit] = []
-    seen_keys: Set[Tuple[str, str]] = set()
+    units: list[_BuildUnit] = []
+    seen_keys: set[tuple[str, str]] = set()
 
     sorted_pkgs = sorted(
         context.monorepo_packages,
@@ -167,7 +172,7 @@ def _collect_build_units(context: ProjectContext) -> List[_BuildUnit]:
             )
         )
 
-    subpkg_langs: Set[str] = {u.language for u in units if u.working_dir != "."}
+    subpkg_langs: set[str] = {u.language for u in units if u.working_dir != "."}
 
     for lang in context.languages:
         lang_key = lang.language.lower()
@@ -207,15 +212,14 @@ def _collect_build_units(context: ProjectContext) -> List[_BuildUnit]:
 
     if context.cargo_workspace:
         units = [
-            replace(u, cargo_target_root=".") if u.language == "rust" and u.working_dir != "." else u
-            for u in units
+            replace(u, cargo_target_root=".") if u.language == "rust" and u.working_dir != "." else u for u in units
         ]
 
     units.sort(key=lambda u: (0 if u.working_dir == "." else 1, u.working_dir, u.language))
     return units
 
 
-def _infer_service_language(source_file: str) -> Optional[str]:
+def _infer_service_language(source_file: str) -> str | None:
     src_lower = source_file.lower()
     for lang, tokens in _ECOSYSTEM_SOURCE_TOKENS:
         if any(tok in src_lower for tok in tokens):
@@ -228,9 +232,9 @@ def _infer_service_language(source_file: str) -> Optional[str]:
 def _scope_services_for_units(
     services: Sequence[ServiceRequirement],
     units: Sequence[_BuildUnit],
-) -> Dict[int, List[ServiceRequirement]]:
+) -> dict[int, list[ServiceRequirement]]:
     """Scope each ServiceRequirement cleanly to matching test job indices."""
-    scoped: Dict[int, List[ServiceRequirement]] = {i: [] for i in range(len(units))}
+    scoped: dict[int, list[ServiceRequirement]] = {i: [] for i in range(len(units))}
     if not services or not units:
         return scoped
 
@@ -239,7 +243,7 @@ def _scope_services_for_units(
         return scoped
 
     for svc in services:
-        matched: List[int] = []
+        matched: list[int] = []
         if svc.package_path is not None:
             norm_pkg = _normalize_working_dir(svc.package_path)
             if norm_pkg != ".":
@@ -255,8 +259,7 @@ def _scope_services_for_units(
                 matched = [
                     i
                     for i, u in enumerate(units)
-                    if u.working_dir != "."
-                    and (src_norm == u.working_dir or src_norm.startswith(f"{u.working_dir}/"))
+                    if u.working_dir != "." and (src_norm == u.working_dir or src_norm.startswith(f"{u.working_dir}/"))
                 ]
 
         if not matched and svc.source_file:
@@ -273,13 +276,13 @@ def _scope_services_for_units(
     return scoped
 
 
-def _build_services_map_vm(scoped_services: Sequence[ServiceRequirement]) -> Dict[str, Any]:
-    services_dict: Dict[str, Any] = {}
+def _build_services_map_vm(scoped_services: Sequence[ServiceRequirement]) -> dict[str, Any]:
+    services_dict: dict[str, Any] = {}
     for svc in scoped_services:
         svc_key = svc.name.lower()
         if svc_key in services_dict:
             continue
-        svc_entry: Dict[str, Any] = {
+        svc_entry: dict[str, Any] = {
             "image": svc.image,
             "env": dict(svc.env) if svc.env else None,
             "ports": [f"{p}:{p}" for p in svc.ports] if svc.ports else None,
@@ -306,13 +309,13 @@ def _build_services_map_vm(scoped_services: Sequence[ServiceRequirement]) -> Dic
 def _build_action_step_vm(
     name: str,
     action_repo: str,
-    action_shas: Dict[str, str],
-    with_cfg: Optional[Dict[str, Any]] = None,
-    action_versions: Optional[Dict[str, str]] = None,
-) -> Dict[str, Any]:
+    action_shas: dict[str, str],
+    with_cfg: dict[str, Any] | None = None,
+    action_versions: dict[str, str] | None = None,
+) -> dict[str, Any]:
     """Build a plain workflow step view-model referencing a pinned tag or 40-char commit SHA."""
     default_ref = (action_versions or {}).get(action_repo) or ACTION_VERSIONS.get(action_repo, "v4")
-    step: Dict[str, Any] = {"name": name}
+    step: dict[str, Any] = {"name": name}
     pinned_sha = action_shas.get(action_repo, "").strip()
     if pinned_sha and _SHA40_RE.match(pinned_sha):
         step["uses"] = f"{action_repo}@{pinned_sha}"
@@ -324,7 +327,7 @@ def _build_action_step_vm(
     return step
 
 
-def _resolve_job_runner_override(policy: HeurixPolicy, job_id: str) -> Optional[str]:
+def _resolve_job_runner_override(policy: HeurixPolicy, job_id: str) -> str | None:
     """Resolve explicit per-job runner override: [jobs.<id>].runner > [ci.runners].<id>."""
     job_policy = policy.jobs.get(job_id)
     if job_policy and job_policy.runner:
@@ -340,20 +343,16 @@ def _resolve_fallback_runner(context: ProjectContext, policy: HeurixPolicy) -> s
     ctx_runner = (getattr(context, "runner", None) or "").strip()
     if ctx_runner and ctx_runner != "ubuntu-latest":
         return ctx_runner
-    if (
-        "runner" in policy.engine.model_fields_set
-        and "os" not in policy.matrix
-        and "os" not in policy.overrides
-    ):
+    if "runner" in policy.engine.model_fields_set and "os" not in policy.matrix and "os" not in policy.overrides:
         return policy.engine.runner
     return ctx_runner or policy.engine.runner or "ubuntu-latest"
 
 
 def _convert_custom_step_vm(
     step_policy: StepPolicy,
-    action_shas: Dict[str, str],
+    action_shas: dict[str, str],
     pin_actions: bool,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Convert a StepPolicy into a step view-model with optional 40-char SHA pinning."""
     step = step_policy.to_step_dict()
     raw_uses = step.get("uses")
@@ -378,18 +377,16 @@ def _convert_custom_step_vm(
 def _resolve_effective_env_and_secrets(
     context: ProjectContext,
     policy: HeurixPolicy,
-) -> Tuple[Dict[str, str], List[str], Set[str]]:
+) -> tuple[dict[str, str], list[str], set[str]]:
     """Compute idempotent SEC-02/SEC-03 filtered env_vars, test_secrets, and deployment_secrets."""
-    deployment_secret_set: Set[str] = {
-        str(s).strip() for s in context.deployment_secrets if str(s).strip()
-    }
+    deployment_secret_set: set[str] = {str(s).strip() for s in context.deployment_secrets if str(s).strip()}
     for raw_s in policy.secrets.deploy:
         s = str(raw_s).strip()
         if s:
             deployment_secret_set.add(s)
 
-    effective_test_secrets: List[str] = []
-    seen_test_secrets: Set[str] = set()
+    effective_test_secrets: list[str] = []
+    seen_test_secrets: set[str] = set()
     for raw_s in (*context.test_secrets, *policy.secrets.test):
         s = str(raw_s).strip()
         if not s or s in seen_test_secrets:
@@ -399,7 +396,7 @@ def _resolve_effective_env_and_secrets(
         seen_test_secrets.add(s)
         effective_test_secrets.append(s)
 
-    effective_env_vars: Dict[str, str] = {}
+    effective_env_vars: dict[str, str] = {}
     for raw_k, raw_v in context.env_vars.items():
         k = str(raw_k).strip()
         if not k or is_sensitive_env_key(k) or k in deployment_secret_set or k in seen_test_secrets:
@@ -414,7 +411,7 @@ def _resolve_effective_env_and_secrets(
     return effective_env_vars, effective_test_secrets, deployment_secret_set
 
 
-def _resolve_os_matrix(context: ProjectContext, runner_override: Optional[str]) -> List[str]:
+def _resolve_os_matrix(context: ProjectContext, runner_override: str | None) -> list[str]:
     """Resolve deduplicated OS build matrix when no per-job runner override is active."""
     if runner_override is not None:
         return []
@@ -425,23 +422,19 @@ def _resolve_os_matrix(context: ProjectContext, runner_override: Optional[str]) 
 
 def _build_step_env(
     context: ProjectContext,
-    effective_env_vars: Optional[Dict[str, str]],
-    effective_test_secrets: Optional[Sequence[str]],
-    effective_deployment_secrets: Optional[Set[str]],
-    scoped_services: Optional[Sequence[ServiceRequirement]] = None,
-) -> Dict[str, str]:
+    effective_env_vars: dict[str, str] | None,
+    effective_test_secrets: Sequence[str] | None,
+    effective_deployment_secrets: set[str] | None,
+    scoped_services: Sequence[ServiceRequirement] | None = None,
+) -> dict[str, str]:
     """Build SEC-02/SEC-03 filtered environment dictionary for test and E2E steps."""
     env_source = effective_env_vars if effective_env_vars is not None else context.env_vars
-    test_sec_source = (
-        effective_test_secrets if effective_test_secrets is not None else context.test_secrets
-    )
+    test_sec_source = effective_test_secrets if effective_test_secrets is not None else context.test_secrets
     deployment_secret_set = (
-        effective_deployment_secrets
-        if effective_deployment_secrets is not None
-        else set(context.deployment_secrets)
+        effective_deployment_secrets if effective_deployment_secrets is not None else set(context.deployment_secrets)
     )
 
-    step_env: Dict[str, str] = {}
+    step_env: dict[str, str] = {}
     for k, v in env_source.items():
         if not is_sensitive_env_key(k) and k not in deployment_secret_set:
             step_env[k] = str(v)
@@ -449,10 +442,8 @@ def _build_step_env(
         if s not in deployment_secret_set and not is_deployment_secret_key(s):
             step_env[s] = f"${{{{ secrets.{s} }}}}"
 
-    ci_policy_env: Dict[str, str] = (
-        HeurixPolicy.from_raw(context.policy_config).ci.env if scoped_services else {}
-    )
-    for svc in (scoped_services or []):
+    ci_policy_env: dict[str, str] = HeurixPolicy.from_raw(context.policy_config).ci.env if scoped_services else {}
+    for svc in scoped_services or []:
         svc_name = svc.name.lower()
         if "postgres" in svc_name or "postgres" in svc.image.lower():
             pg_user = quote(svc.env.get("POSTGRES_USER", "test_user") if svc.env else "test_user", safe="")
@@ -501,16 +492,18 @@ def _playwright_install_cmd(unit: _BuildUnit) -> str:
     return "npx playwright install --with-deps"
 
 
-def _build_e2e_steps(unit: _BuildUnit, step_env: Dict[str, str]) -> List[Dict[str, Any]]:
+def _build_e2e_steps(unit: _BuildUnit, step_env: dict[str, str]) -> list[dict[str, Any]]:
     """Build browser setup (when Playwright) and E2E execution step with SEC-03 isolated env."""
-    e2e_steps: List[Dict[str, Any]] = []
+    e2e_steps: list[dict[str, Any]] = []
     if unit.e2e_test_runner == "playwright":
-        e2e_steps.append({
-            "name": "Install Playwright browsers",
-            "run": _playwright_install_cmd(unit),
-        })
+        e2e_steps.append(
+            {
+                "name": "Install Playwright browsers",
+                "run": _playwright_install_cmd(unit),
+            }
+        )
     if unit.e2e_cmd and unit.e2e_cmd.strip():
-        run_step: Dict[str, Any] = {
+        run_step: dict[str, Any] = {
             "name": f"Run E2E tests ({unit.e2e_test_runner})",
             "run": unit.e2e_cmd.strip(),
         }
@@ -523,26 +516,21 @@ def _build_e2e_steps(unit: _BuildUnit, step_env: Dict[str, str]) -> List[Dict[st
 def _build_runtime_setup_steps(
     unit: _BuildUnit,
     *,
-    action_shas: Dict[str, str],
+    action_shas: dict[str, str],
     effective_version: str,
     effective_runs_on: str,
     ver_matrix: Sequence[str],
     job_id: str,
-    action_versions: Optional[Dict[str, str]] = None,
-) -> List[Dict[str, Any]]:
+    action_versions: dict[str, str] | None = None,
+) -> list[dict[str, Any]]:
     """Build checkout, pinned runtime setup, package manager setup, and install steps."""
-    def _action(name: str, repo: str, with_cfg: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+
+    def _action(name: str, repo: str, with_cfg: dict[str, Any] | None = None) -> dict[str, Any]:
         return _build_action_step_vm(name, repo, action_shas, with_cfg, action_versions=action_versions)
 
-    steps: List[Dict[str, Any]] = [
-        _action("Checkout repository", "actions/checkout")
-    ]
+    steps: list[dict[str, Any]] = [_action("Checkout repository", "actions/checkout")]
 
-    install_cmd = (
-        unit.install_cmd.strip()
-        if isinstance(unit.install_cmd, str) and unit.install_cmd.strip()
-        else None
-    )
+    install_cmd = unit.install_cmd.strip() if isinstance(unit.install_cmd, str) and unit.install_cmd.strip() else None
     cache_dep_path = (
         unit.cache_dependency_path.strip()
         if isinstance(unit.cache_dependency_path, str) and unit.cache_dependency_path.strip()
@@ -552,7 +540,7 @@ def _build_runtime_setup_steps(
     if unit.language == "python":
         py_label = f"Set up Python {effective_version}" if effective_version else "Set up Python"
         if unit.package_manager == "uv":
-            uv_with: Dict[str, Any] = {"enable-cache": True}
+            uv_with: dict[str, Any] = {"enable-cache": True}
             if unit.working_dir != ".":
                 uv_with["working-directory"] = unit.working_dir
             if ver_matrix and effective_version:
@@ -564,7 +552,7 @@ def _build_runtime_setup_steps(
                     uv_with,
                 )
             )
-            py_with: Dict[str, Any] = {}
+            py_with: dict[str, Any] = {}
             if effective_version:
                 py_with["python-version"] = effective_version
             steps.append(
@@ -575,10 +563,12 @@ def _build_runtime_setup_steps(
                 )
             )
             if install_cmd:
-                steps.append({
-                    "name": "Install dependencies",
-                    "run": install_cmd,
-                })
+                steps.append(
+                    {
+                        "name": "Install dependencies",
+                        "run": install_cmd,
+                    }
+                )
         elif unit.package_manager == "poetry":
             py_with = {"cache": "poetry"}
             if effective_version:
@@ -601,10 +591,12 @@ def _build_runtime_setup_steps(
                 )
             )
             if install_cmd:
-                steps.append({
-                    "name": "Install dependencies",
-                    "run": install_cmd,
-                })
+                steps.append(
+                    {
+                        "name": "Install dependencies",
+                        "run": install_cmd,
+                    }
+                )
         else:
             py_with = {}
             if effective_version:
@@ -622,10 +614,12 @@ def _build_runtime_setup_steps(
                 )
             )
             if install_cmd:
-                steps.append({
-                    "name": "Install dependencies",
-                    "run": install_cmd,
-                })
+                steps.append(
+                    {
+                        "name": "Install dependencies",
+                        "run": install_cmd,
+                    }
+                )
 
     elif unit.language == "node":
         node_label = f"Set up Node.js {effective_version}" if effective_version else "Set up Node.js"
@@ -634,7 +628,7 @@ def _build_runtime_setup_steps(
             # are set, so defer to `packageManager` whenever the project pins it.
             spec_file = unit.package_manager_spec_file
             if spec_file:
-                pnpm_with: Optional[Dict[str, Any]] = (
+                pnpm_with: dict[str, Any] | None = (
                     None if spec_file == "package.json" else {"package_json_file": spec_file}
                 )
             else:
@@ -646,7 +640,7 @@ def _build_runtime_setup_steps(
                     pnpm_with,
                 )
             )
-            node_with: Dict[str, Any] = {"cache": "pnpm"}
+            node_with: dict[str, Any] = {"cache": "pnpm"}
             if effective_version:
                 node_with["node-version"] = effective_version
             if cache_dep_path:
@@ -659,10 +653,12 @@ def _build_runtime_setup_steps(
                 )
             )
             if install_cmd:
-                steps.append({
-                    "name": "Install dependencies",
-                    "run": install_cmd,
-                })
+                steps.append(
+                    {
+                        "name": "Install dependencies",
+                        "run": install_cmd,
+                    }
+                )
         elif unit.package_manager == "yarn":
             node_with = {"cache": "yarn"}
             if effective_version:
@@ -677,10 +673,12 @@ def _build_runtime_setup_steps(
                 )
             )
             if install_cmd:
-                steps.append({
-                    "name": "Install dependencies",
-                    "run": install_cmd,
-                })
+                steps.append(
+                    {
+                        "name": "Install dependencies",
+                        "run": install_cmd,
+                    }
+                )
         elif unit.package_manager == "bun":
             steps.append(
                 _action(
@@ -690,10 +688,12 @@ def _build_runtime_setup_steps(
                 )
             )
             if install_cmd:
-                steps.append({
-                    "name": "Install dependencies",
-                    "run": install_cmd,
-                })
+                steps.append(
+                    {
+                        "name": "Install dependencies",
+                        "run": install_cmd,
+                    }
+                )
         else:
             node_with = {"cache": "npm"}
             if effective_version:
@@ -708,14 +708,16 @@ def _build_runtime_setup_steps(
                 )
             )
             if install_cmd:
-                steps.append({
-                    "name": "Install dependencies",
-                    "run": install_cmd,
-                })
+                steps.append(
+                    {
+                        "name": "Install dependencies",
+                        "run": install_cmd,
+                    }
+                )
 
     elif unit.language == "rust":
         rust_label = f"Set up Rust ({effective_version})" if effective_version else "Set up Rust"
-        rust_with: Optional[Dict[str, Any]] = {"toolchain": effective_version} if effective_version else None
+        rust_with: dict[str, Any] | None = {"toolchain": effective_version} if effective_version else None
         steps.append(
             _action(
                 rust_label,
@@ -723,19 +725,17 @@ def _build_runtime_setup_steps(
                 rust_with,
             )
         )
-        rust_cache_with: Optional[Dict[str, Any]] = None
+        rust_cache_with: dict[str, Any] | None = None
         if unit.working_dir != ".":
             rust_cache_with = {
                 "workspaces": f"{unit.cargo_target_root or unit.working_dir} -> target",
                 "prefix-key": job_id,
             }
-        steps.append(
-            _action("Rust Cache", "Swatinem/rust-cache", rust_cache_with)
-        )
+        steps.append(_action("Rust Cache", "Swatinem/rust-cache", rust_cache_with))
 
     elif unit.language == "go":
         go_label = f"Set up Go {effective_version}" if effective_version else "Set up Go"
-        go_with: Dict[str, Any] = {"cache": True}
+        go_with: dict[str, Any] = {"cache": True}
         if effective_version:
             go_with["go-version"] = effective_version
         if cache_dep_path:
@@ -748,10 +748,12 @@ def _build_runtime_setup_steps(
             )
         )
         if install_cmd:
-            steps.append({
-                "name": "Download Go dependencies",
-                "run": install_cmd,
-            })
+            steps.append(
+                {
+                    "name": "Download Go dependencies",
+                    "run": install_cmd,
+                }
+            )
 
     elif unit.language == "cpp":
         apt_pkgs = "cmake ninja-build build-essential"
@@ -761,21 +763,27 @@ def _build_runtime_setup_steps(
         ver_suffix = f" ({unit.runtime_version})" if unit.runtime_version else ""
 
         if effective_runs_on == "${{ matrix.os }}":
-            steps.append({
-                "name": f"Install build tools (Linux){ver_suffix}",
-                "if": "runner.os == 'Linux'",
-                "run": cpp_apt_run,
-            })
-            steps.append({
-                "name": f"Install build tools (macOS){ver_suffix}",
-                "if": "runner.os == 'macOS'",
-                "run": "brew install cmake ninja",
-            })
-            steps.append({
-                "name": f"Install build tools (Windows){ver_suffix}",
-                "if": "runner.os == 'Windows'",
-                "run": "choco install cmake ninja",
-            })
+            steps.append(
+                {
+                    "name": f"Install build tools (Linux){ver_suffix}",
+                    "if": "runner.os == 'Linux'",
+                    "run": cpp_apt_run,
+                }
+            )
+            steps.append(
+                {
+                    "name": f"Install build tools (macOS){ver_suffix}",
+                    "if": "runner.os == 'macOS'",
+                    "run": "brew install cmake ninja",
+                }
+            )
+            steps.append(
+                {
+                    "name": f"Install build tools (Windows){ver_suffix}",
+                    "if": "runner.os == 'Windows'",
+                    "run": "choco install cmake ninja",
+                }
+            )
         else:
             runner_lower = effective_runs_on.lower()
             if "macos" in runner_lower:
@@ -784,10 +792,12 @@ def _build_runtime_setup_steps(
                 cpp_install_run = "choco install cmake ninja"
             else:
                 cpp_install_run = cpp_apt_run
-            steps.append({
-                "name": f"Install build tools{ver_suffix}",
-                "run": cpp_install_run,
-            })
+            steps.append(
+                {
+                    "name": f"Install build tools{ver_suffix}",
+                    "run": cpp_install_run,
+                }
+            )
 
     return steps
 
@@ -796,19 +806,19 @@ def _build_test_job_vm(
     unit: _BuildUnit,
     context: ProjectContext,
     runner: str,
-    action_shas: Dict[str, str],
+    action_shas: dict[str, str],
     job_id: str,
     scoped_services: Sequence[ServiceRequirement],
     *,
-    runner_override: Optional[str] = None,
-    pre_steps: Sequence[Dict[str, Any]] = (),
-    post_steps: Sequence[Dict[str, Any]] = (),
-    effective_env_vars: Optional[Dict[str, str]] = None,
-    effective_test_secrets: Optional[Sequence[str]] = None,
-    effective_deployment_secrets: Optional[Set[str]] = None,
+    runner_override: str | None = None,
+    pre_steps: Sequence[dict[str, Any]] = (),
+    post_steps: Sequence[dict[str, Any]] = (),
+    effective_env_vars: dict[str, str] | None = None,
+    effective_test_secrets: Sequence[str] | None = None,
+    effective_deployment_secrets: set[str] | None = None,
     include_combined_e2e: bool = False,
-    action_versions: Optional[Dict[str, str]] = None,
-) -> Dict[str, Any]:
+    action_versions: dict[str, str] | None = None,
+) -> dict[str, Any]:
     """Build a single CI test job view-model for a normalized _BuildUnit."""
     os_matrix = _resolve_os_matrix(context, runner_override)
 
@@ -819,24 +829,18 @@ def _build_test_job_vm(
         ver_matrix = []
     ver_matrix = ver_matrix if (matrix_key and len(ver_matrix) > 1) else []
 
-    matrix_dict: Dict[str, List[str]] = {}
+    matrix_dict: dict[str, list[str]] = {}
     if os_matrix:
         matrix_dict["os"] = os_matrix
     if ver_matrix and matrix_key:
         matrix_dict[matrix_key] = ver_matrix
 
     effective_runs_on = (
-        runner_override
-        if runner_override is not None
-        else ("${{ matrix.os }}" if os_matrix else runner)
+        runner_override if runner_override is not None else ("${{ matrix.os }}" if os_matrix else runner)
     )
-    effective_version = (
-        f"${{{{ matrix.{matrix_key} }}}}"
-        if (ver_matrix and matrix_key)
-        else unit.runtime_version
-    )
+    effective_version = f"${{{{ matrix.{matrix_key} }}}}" if (ver_matrix and matrix_key) else unit.runtime_version
 
-    job: Dict[str, Any] = {
+    job: dict[str, Any] = {
         "name": None,
         "needs": None,
         "if": None,
@@ -863,18 +867,22 @@ def _build_test_job_vm(
     # Build and Lint steps (run build before lint for cpp to generate compile_commands.json)
     if unit.language == "cpp":
         if unit.build_cmd:
-            steps.append({
-                "name": f"Build ({unit.language})",
-                "run": unit.build_cmd,
-            })
+            steps.append(
+                {
+                    "name": f"Build ({unit.language})",
+                    "run": unit.build_cmd,
+                }
+            )
         if unit.lint_cmd:
-            steps.append({
-                "name": f"Lint code ({unit.language})",
-                "run": unit.lint_cmd,
-            })
+            steps.append(
+                {
+                    "name": f"Lint code ({unit.language})",
+                    "run": unit.lint_cmd,
+                }
+            )
     elif unit.language == "go":
         if unit.lint_cmd:
-            lint_with: Dict[str, Any] = {"version": "v1.57"}
+            lint_with: dict[str, Any] = {"version": "v1.57"}
             if unit.working_dir != ".":
                 lint_with["working-directory"] = unit.working_dir
             steps.append(
@@ -886,21 +894,27 @@ def _build_test_job_vm(
                 )
             )
         if unit.build_cmd:
-            steps.append({
-                "name": f"Build ({unit.language})",
-                "run": unit.build_cmd,
-            })
+            steps.append(
+                {
+                    "name": f"Build ({unit.language})",
+                    "run": unit.build_cmd,
+                }
+            )
     else:
         if unit.lint_cmd:
-            steps.append({
-                "name": f"Lint code ({unit.language})",
-                "run": unit.lint_cmd,
-            })
+            steps.append(
+                {
+                    "name": f"Lint code ({unit.language})",
+                    "run": unit.lint_cmd,
+                }
+            )
         if unit.build_cmd:
-            steps.append({
-                "name": f"Build ({unit.language})",
-                "run": unit.build_cmd,
-            })
+            steps.append(
+                {
+                    "name": f"Build ({unit.language})",
+                    "run": unit.build_cmd,
+                }
+            )
 
     step_env = _build_step_env(
         context,
@@ -912,7 +926,7 @@ def _build_test_job_vm(
 
     # Test step (SEC-02 env redaction + SEC-03 secret isolation)
     if unit.test_cmd:
-        step_obj: Dict[str, Any] = {
+        step_obj: dict[str, Any] = {
             "name": f"Run tests ({unit.language})",
             "run": unit.test_cmd,
         }
@@ -940,23 +954,21 @@ def _build_e2e_job_vm(
     unit: _BuildUnit,
     context: ProjectContext,
     runner: str,
-    action_shas: Dict[str, str],
+    action_shas: dict[str, str],
     job_id: str,
     *,
-    runner_override: Optional[str] = None,
-    pre_steps: Sequence[Dict[str, Any]] = (),
-    post_steps: Sequence[Dict[str, Any]] = (),
-    effective_env_vars: Optional[Dict[str, str]] = None,
-    effective_test_secrets: Optional[Sequence[str]] = None,
-    effective_deployment_secrets: Optional[Set[str]] = None,
-) -> Dict[str, Any]:
+    runner_override: str | None = None,
+    pre_steps: Sequence[dict[str, Any]] = (),
+    post_steps: Sequence[dict[str, Any]] = (),
+    effective_env_vars: dict[str, str] | None = None,
+    effective_test_secrets: Sequence[str] | None = None,
+    effective_deployment_secrets: set[str] | None = None,
+) -> dict[str, Any]:
     """Build a parallel CI E2E job view-model with pinned runtime, browser setup, and SEC-03 isolation."""
     os_matrix = _resolve_os_matrix(context, runner_override)
-    matrix_dict: Dict[str, List[str]] = {"os": os_matrix} if os_matrix else {}
+    matrix_dict: dict[str, list[str]] = {"os": os_matrix} if os_matrix else {}
     effective_runs_on = (
-        runner_override
-        if runner_override is not None
-        else ("${{ matrix.os }}" if os_matrix else runner)
+        runner_override if runner_override is not None else ("${{ matrix.os }}" if os_matrix else runner)
     )
 
     steps = _build_runtime_setup_steps(
@@ -999,11 +1011,11 @@ def _build_deploy_jobs_vm(
     context: ProjectContext,
     deploy_needs: Any,
     deploy_if: str,
-    action_shas: Dict[str, str],
+    action_shas: dict[str, str],
     policy: HeurixPolicy,
-) -> Dict[str, Dict[str, Any]]:
+) -> dict[str, dict[str, Any]]:
     """Build deployment job view-models for detected cloud deployment targets."""
-    deploy_jobs: Dict[str, Dict[str, Any]] = {}
+    deploy_jobs: dict[str, dict[str, Any]] = {}
     for target in getattr(context, "deployment_targets", []):
         if target.platform == "vercel":
             job_policy = policy.jobs.get("deploy_vercel")
@@ -1083,56 +1095,46 @@ class GitHubActionsSynthesizer(BaseSynthesizer):
     def name(self) -> str:
         return "GitHub Actions CI"
 
-    def synthesize(self, context: ProjectContext) -> Dict[str, str]:
+    def synthesize(self, context: ProjectContext) -> dict[str, str]:
         policy = HeurixPolicy.from_raw(context.policy_config)
 
         default_branch = policy.ci.default_branch
-        trigger_branches: List[str] = []
+        trigger_branches: list[str] = []
         for branch in (default_branch, "main", "master"):
             if branch not in trigger_branches:
                 trigger_branches.append(branch)
 
-        action_shas: Dict[str, str] = (
-            {str(k): str(v) for k, v in policy.ci.action_shas.items()}
-            if policy.ci.pin_actions
-            else {}
+        action_shas: dict[str, str] = (
+            {str(k): str(v) for k, v in policy.ci.action_shas.items()} if policy.ci.pin_actions else {}
         )
 
         fallback_runner = _resolve_fallback_runner(context, policy)
 
         excluded_services = {
-            normalize_service_name(item)
-            for item in policy.services.exclude
-            if isinstance(item, str) and item.strip()
+            normalize_service_name(item) for item in policy.services.exclude if isinstance(item, str) and item.strip()
         }
         effective_services = [
-            svc
-            for svc in context.services
-            if normalize_service_name(svc.name) not in excluded_services
+            svc for svc in context.services if normalize_service_name(svc.name) not in excluded_services
         ]
 
         raw_units = _collect_build_units(context)
         units = [
-            replace(u, lint_cmd=None)
-            if (u.lint_cmd and not policy.linters.is_enabled_for(u.language))
-            else u
+            replace(u, lint_cmd=None) if (u.lint_cmd and not policy.linters.is_enabled_for(u.language)) else u
             for u in raw_units
         ]
 
-        effective_env_vars, effective_test_secrets, effective_deployment_secrets = (
-            _resolve_effective_env_and_secrets(context, policy)
+        effective_env_vars, effective_test_secrets, effective_deployment_secrets = _resolve_effective_env_and_secrets(
+            context, policy
         )
 
         global_pre_steps = [
-            _convert_custom_step_vm(s, action_shas, policy.ci.pin_actions)
-            for s in policy.ci.steps.pre_test
+            _convert_custom_step_vm(s, action_shas, policy.ci.pin_actions) for s in policy.ci.steps.pre_test
         ]
         global_post_steps = [
-            _convert_custom_step_vm(s, action_shas, policy.ci.pin_actions)
-            for s in policy.ci.steps.post_test
+            _convert_custom_step_vm(s, action_shas, policy.ci.pin_actions) for s in policy.ci.steps.post_test
         ]
 
-        def _explicit_job_steps(job_id: str) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        def _explicit_job_steps(job_id: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
             job_policy = policy.jobs.get(job_id)
             job_pre = [
                 _convert_custom_step_vm(s, action_shas, policy.ci.pin_actions)
@@ -1144,11 +1146,11 @@ class GitHubActionsSynthesizer(BaseSynthesizer):
             ]
             return job_pre, job_post
 
-        def _job_steps_for(job_id: str) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        def _job_steps_for(job_id: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
             job_pre, job_post = _explicit_job_steps(job_id)
             return ([*global_pre_steps, *job_pre], [*job_post, *global_post_steps])
 
-        path_filters: Optional[List[str]] = None
+        path_filters: list[str] | None = None
         if context.is_monorepo:
             has_root_unit = any(u.working_dir == "." for u in units)
             sub_paths = sorted(
@@ -1163,14 +1165,10 @@ class GitHubActionsSynthesizer(BaseSynthesizer):
             )
             # Root files (lockfiles, workspace manifests, turbo.json) and the workflow
             # itself affect every package, so changes to them must still trigger CI.
-            path_filters = (
-                ["**"]
-                if (has_root_unit or not sub_paths)
-                else ["*", ".github/workflows/**", *sub_paths]
-            )
+            path_filters = ["**"] if (has_root_unit or not sub_paths) else ["*", ".github/workflows/**", *sub_paths]
 
         # Explicit [ci].paths / [ci].paths_ignore policy wins over the inferred filter.
-        path_ignore_filters: Optional[List[str]] = None
+        path_ignore_filters: list[str] | None = None
         if policy.ci.paths is not None:
             path_filters = list(policy.ci.paths) or None
         if policy.ci.paths_ignore:
@@ -1187,8 +1185,8 @@ class GitHubActionsSynthesizer(BaseSynthesizer):
         split_e2e = getattr(context, "split_e2e_jobs", None)
         combined_e2e = split_e2e is False
 
-        jobs_vm: Dict[str, Dict[str, Any]] = {}
-        test_job_ids: List[str] = []
+        jobs_vm: dict[str, dict[str, Any]] = {}
+        test_job_ids: list[str] = []
         if not units:
             pre_steps, post_steps = _job_steps_for("test")
             runner_override = _resolve_job_runner_override(policy, "test")
@@ -1235,7 +1233,7 @@ class GitHubActionsSynthesizer(BaseSynthesizer):
                 test_job_ids.append("test")
             else:
                 wd_counts = Counter(u.working_dir for u in units)
-                used_ids: Set[str] = set()
+                used_ids: set[str] = set()
                 for idx, unit in enumerate(units):
                     if unit.working_dir == ".":
                         raw_slug = unit.language
@@ -1264,7 +1262,7 @@ class GitHubActionsSynthesizer(BaseSynthesizer):
                     test_job_ids.append(job_id)
 
             if has_unit_and_e2e and split_e2e is not False:
-                e2e_used_ids: Set[str] = set(jobs_vm.keys())
+                e2e_used_ids: set[str] = set(jobs_vm.keys())
                 for e2e_unit in e2e_units:
                     if len(e2e_units) == 1 and "test-e2e" not in e2e_used_ids:
                         e2e_job_id = "test-e2e"
@@ -1292,7 +1290,7 @@ class GitHubActionsSynthesizer(BaseSynthesizer):
         jobs_vm.update(_build_deploy_jobs_vm(context, deploy_needs, deploy_if, action_shas, policy))
 
         permissions_vm = dict(policy.ci.permissions) if policy.ci.permissions else {"contents": "read"}
-        workflow_vm: Dict[str, Any] = {
+        workflow_vm: dict[str, Any] = {
             "name": "CI",
             "permissions": permissions_vm,
             "on": {

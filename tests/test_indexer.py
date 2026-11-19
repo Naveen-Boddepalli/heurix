@@ -4,8 +4,10 @@ Tests for RepoIndexer.
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
+
+import pytest
+
 from heurix.core.indexer import RepoIndexer
 
 
@@ -279,6 +281,7 @@ def test_max_file_size_guard_skips_oversized_and_allows_empty(tmp_path: Path, mo
 
 def test_lru_cache_eviction_by_count_and_bytes(tmp_path: Path):
     from collections import OrderedDict
+
     from heurix.core.indexer import MAX_CACHE_BYTES, MAX_CACHE_ENTRIES
 
     assert MAX_CACHE_ENTRIES == 512
@@ -311,7 +314,7 @@ def test_lru_cache_eviction_by_count_and_bytes(tmp_path: Path):
     # 2. Byte-ceiling LRU eviction + UTF-8 byte tracking
     (tmp_path / "f1.txt").write_text("0123456789", encoding="utf-8")  # 10 bytes
     (tmp_path / "f2.txt").write_text("abcdefghij", encoding="utf-8")  # 10 bytes
-    (tmp_path / "f3.txt").write_text("€" * 4, encoding="utf-8")       # 4 chars = 12 UTF-8 bytes
+    (tmp_path / "f3.txt").write_text("€" * 4, encoding="utf-8")  # 4 chars = 12 UTF-8 bytes
     (tmp_path / "un_cacheable.txt").write_text("z" * 30, encoding="utf-8")  # > 25B cache budget
 
     idx_bytes = RepoIndexer(tmp_path, max_cache_entries=10, max_cache_bytes=25)
@@ -405,6 +408,7 @@ def test_nested_gitignore_negation_over_default_and_deep_hierarchy(tmp_path: Pat
     assert metrics["node"]["score"] == 1
 
 
+@pytest.mark.perf
 def test_indexing_benchmark_under_50ms(tmp_path: Path):
     import time
 
@@ -451,7 +455,3 @@ def test_indexing_benchmark_under_50ms(tmp_path: Path):
     assert not indexer.has_file("packages/pkg_0/dist/out_0.js")
     assert not indexer.has_file("packages/pkg_0/local_build/tmp_0.js")
     assert not indexer.has_file("packages/pkg_0/node_modules/dep_0.js")
-
-
-
-

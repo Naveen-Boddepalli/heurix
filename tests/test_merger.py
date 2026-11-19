@@ -5,6 +5,7 @@ Tests for SmartMerger and AST preservation.
 from __future__ import annotations
 
 from pathlib import Path
+
 from heurix.core.merger import SmartMerger
 
 
@@ -251,6 +252,7 @@ spec:
 
 def test_deep_merge_sequences_by_identifier_keys():
     from ruamel.yaml import YAML
+
     from heurix.core.merger import deep_merge_nodes
 
     yaml = YAML()
@@ -376,9 +378,7 @@ updates:
     assert pip_entry["schedule"]["interval"] == "daily"
     assert pip_entry["open-pull-requests-limit"] == 10
 
-    frontend_npm = next(
-        u for u in updates if u["package-ecosystem"] == "npm" and u["directory"] == "/frontend"
-    )
+    frontend_npm = next(u for u in updates if u["package-ecosystem"] == "npm" and u["directory"] == "/frontend")
     assert frontend_npm["schedule"]["interval"] == "monthly"
     assert frontend_npm["open-pull-requests-limit"] == 5
 
@@ -450,7 +450,11 @@ jobs:
     assert "Configure AWS" in step_names
     assert "Custom Security Scan" in step_names
     assert step_names.index("Pre-checkout setup") < step_names.index("Checkout repository")
-    assert step_names.index("Set up Python 3.12") < step_names.index("Configure AWS") < step_names.index("Install dependencies")
+    assert (
+        step_names.index("Set up Python 3.12")
+        < step_names.index("Configure AWS")
+        < step_names.index("Install dependencies")
+    )
 
 
 def test_step_matching_preserved_step_not_overwritten_or_duplicated():
@@ -521,6 +525,7 @@ jobs:
 
 def test_syntax_error_raises_yaml_syntax_error():
     import pytest
+
     from heurix.core.merger import YamlSyntaxError
 
     malformed_workflow = "jobs:\n  test:\n    - [unbalanced bracket"
@@ -698,6 +703,7 @@ spec:
 
 def test_multidoc_syntax_error_raises():
     import pytest
+
     from heurix.core.merger import YamlSyntaxError
 
     existing_yaml = """apiVersion: apps/v1
@@ -819,7 +825,7 @@ jobs:
     assert web_job["timeout-minutes"] == 15
     assert web_job["defaults"]["run"]["working-directory"] == "apps/web"
     assert web_job["defaults"]["run"]["shell"] == "bash"
-    assert any("actions/checkout@v4" == s.get("uses") for s in web_job["steps"])
+    assert any(s.get("uses") == "actions/checkout@v4" for s in web_job["steps"])
     assert any(s.get("name") == "Custom Frontend Audit" for s in web_job["steps"])
     assert any(s.get("run") == "pnpm test" for s in web_job["steps"])
 
@@ -967,6 +973,7 @@ jobs:
 
 def test_phase3_merger_hpa_and_steps(tmp_path: Path):
     from ruamel.yaml import YAML
+
     from heurix.core.context import ContainerContext, LanguageContext, ProjectContext
     from heurix.synthesizers.github_actions import GitHubActionsSynthesizer
     from heurix.synthesizers.kubernetes import KubernetesSynthesizer

@@ -5,15 +5,17 @@ Docker and Docker Compose Detector.
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, List
+from typing import Any
+
 from ruamel.yaml import YAML
+
 from heurix.core.context import ContainerContext, ProjectContext, ServiceRequirement
 from heurix.core.indexer import RepoIndexer
 from heurix.detectors.base import BaseDetector
 from heurix.detectors.service_reconciler import resolve_compose_value
 
 
-def _parse_port_token(token: str) -> List[int]:
+def _parse_port_token(token: str) -> list[int]:
     """Parse a single port or 'start-end' range token within valid bounds (1-65535)."""
     cleaned = token.strip()
     if not cleaned:
@@ -36,7 +38,7 @@ def _parse_port_token(token: str) -> List[int]:
     return []
 
 
-def extract_container_ports(port_entry: Any) -> List[int]:
+def extract_container_ports(port_entry: Any) -> list[int]:
     """
     Extract internal container port(s) from Docker Compose port definitions:
     - 80 -> [80]
@@ -93,13 +95,15 @@ class DockerDetector(BaseDetector):
         yaml = YAML(typ="safe")
 
         # 1. Inspect Dockerfile
-        dockerfiles = indexer.find_by_name("Dockerfile") + [f for f in indexer.find_files("Dockerfile*") if "/" not in f]
+        dockerfiles = indexer.find_by_name("Dockerfile") + [
+            f for f in indexer.find_files("Dockerfile*") if "/" not in f
+        ]
         for df_name in set(dockerfiles):
             content = indexer.read_text(df_name)
             if not content:
                 continue
 
-            exposed_ports: List[int] = []
+            exposed_ports: list[int] = []
             base_image = ""
             build_target = None
             has_healthcheck = bool(re.search(r"^\s*HEALTHCHECK", content, re.MULTILINE))
@@ -140,7 +144,8 @@ class DockerDetector(BaseDetector):
 
         # 2. Inspect docker-compose.yml / compose.yml
         compose_files = [
-            f for f in ["docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml"]
+            f
+            for f in ["docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml"]
             if indexer.has_file(f)
         ]
 
@@ -170,14 +175,14 @@ class DockerDetector(BaseDetector):
                     ports_raw = svc_cfg.get("ports") or []
                     env_raw = svc_cfg.get("environment") or {}
 
-                    parsed_ports: List[int] = []
+                    parsed_ports: list[int] = []
                     if isinstance(ports_raw, list):
                         for pr in ports_raw:
                             for port in extract_container_ports(pr):
                                 if port not in parsed_ports:
                                     parsed_ports.append(port)
 
-                    raw_pairs: List[tuple] = []
+                    raw_pairs: list[tuple] = []
                     if isinstance(env_raw, dict):
                         raw_pairs = [(str(k), str(v)) for k, v in env_raw.items() if v is not None]
                     elif isinstance(env_raw, list):
@@ -186,7 +191,7 @@ class DockerDetector(BaseDetector):
                                 k, v = str(item).split("=", 1)
                                 raw_pairs.append((k.strip(), v.strip()))
 
-                    parsed_env: Dict[str, str] = {}
+                    parsed_env: dict[str, str] = {}
                     for k, v in raw_pairs:
                         resolved = resolve_compose_value(v)
                         if resolved is None:

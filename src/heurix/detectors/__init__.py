@@ -6,25 +6,25 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import Dict, List, Tuple
 
 if sys.version_info >= (3, 11):
     import tomllib
 else:
-    try:
-        import tomli as tomllib
-    except ImportError:
-        import tomllib  # type: ignore
+    import tomli as tomllib
 
 from heurix.core.context import MonorepoPackage, ProjectContext
 from heurix.core.indexer import RepoIndexer
 from heurix.core.monorepo import discover_monorepo_topology
 from heurix.core.policy import (
     _LANG_KEY_ALIASES,
-    apply_language_version_policy as _apply_language_version_policy,
     apply_policy_to_context,
-    normalize_string_list as _normalize_string_list,
     parse_heurix_policy,
+)
+from heurix.core.policy import (
+    apply_language_version_policy as _apply_language_version_policy,
+)
+from heurix.core.policy import (
+    normalize_string_list as _normalize_string_list,
 )
 from heurix.detectors.base import BaseDetector
 from heurix.detectors.cloud_detector import CloudDetector
@@ -37,7 +37,16 @@ from heurix.detectors.python_detector import PythonDetector
 from heurix.detectors.rust_detector import RustDetector
 from heurix.detectors.service_reconciler import reconcile_services
 
-ALL_DETECTORS: List[BaseDetector] = [
+__all__ = [
+    "ALL_DETECTORS",
+    # Policy helpers re-exported for backward compatibility.
+    "_LANG_KEY_ALIASES",
+    "_apply_language_version_policy",
+    "_normalize_string_list",
+    "analyze_repository",
+]
+
+ALL_DETECTORS: list[BaseDetector] = [
     PythonDetector(),
     NodeDetector(),
     RustDetector(),
@@ -70,7 +79,7 @@ def analyze_repository(root_dir: str | Path) -> ProjectContext:
 
     # Reconcile monorepo topology deterministically across all detectors
     topology = discover_monorepo_topology(indexer)
-    deduped_pkgs: Dict[Tuple[str, str], MonorepoPackage] = {}
+    deduped_pkgs: dict[tuple[str, str], MonorepoPackage] = {}
     for pkg in context.monorepo_packages:
         pkg_key = (pkg.path, pkg.language.lower())
         if pkg_key not in deduped_pkgs:
@@ -82,7 +91,7 @@ def analyze_repository(root_dir: str | Path) -> ProjectContext:
         or len(context.monorepo_packages) >= 2
         or (
             len(context.monorepo_packages) == 1
-            and any(l.working_dir == "." and l.is_workspace_root is False for l in context.languages)
+            and any(lang.working_dir == "." and lang.is_workspace_root is False for lang in context.languages)
         )
     ):
         context.is_monorepo = True

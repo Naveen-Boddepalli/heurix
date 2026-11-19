@@ -52,7 +52,11 @@ def test_framework_without_dockerfile_skips_kubernetes(tmp_path: Path):
 
 
 def test_vercel_deploy_secrets_stay_out_of_kubernetes_secret(tmp_path: Path):
-    _write(tmp_path, "package.json", json.dumps({"name": "web", "scripts": {"build": "next build"}, "dependencies": {"next": "15.0.0"}}))
+    _write(
+        tmp_path,
+        "package.json",
+        json.dumps({"name": "web", "scripts": {"build": "next build"}, "dependencies": {"next": "15.0.0"}}),
+    )
     _write(tmp_path, "package-lock.json", "{}")
     _write(tmp_path, "vercel.json", '{"framework": "nextjs"}')
     _write(tmp_path, "Dockerfile", "FROM node:20\nEXPOSE 3000\n")
@@ -98,7 +102,9 @@ def test_monorepo_paths_filter_includes_root_files_and_workflow(tmp_path: Path):
 def test_cargo_workspace_members_cache_shared_root_target(tmp_path: Path):
     _write(tmp_path, "Cargo.toml", '[workspace]\nmembers = ["crates/a", "crates/b"]\nresolver = "2"\n')
     for name in ("a", "b"):
-        _write(tmp_path, f"crates/{name}/Cargo.toml", f'[package]\nname = "{name}"\nversion = "0.1.0"\nedition = "2021"\n')
+        _write(
+            tmp_path, f"crates/{name}/Cargo.toml", f'[package]\nname = "{name}"\nversion = "0.1.0"\nedition = "2021"\n'
+        )
         _write(tmp_path, f"crates/{name}/src/lib.rs", "pub fn f() {}\n")
     jobs = _generate(tmp_path, "--no-k8s")["jobs"]
     for job_id in ("test-crates-a", "test-crates-b"):
@@ -173,7 +179,7 @@ def test_replaced_user_values_are_reported():
 
 
 def test_unchanged_merge_reports_nothing():
-    merger, out = _merge(_NEW_WF, _NEW_WF)
+    merger, _out = _merge(_NEW_WF, _NEW_WF)
     assert merger.replaced == []
 
 
@@ -182,7 +188,9 @@ def test_generate_prints_replaced_values(tmp_path: Path):
     _write(tmp_path, "app.py", "x = 1\n")
     _generate(tmp_path, "--no-k8s")
     wf = tmp_path / ".github" / "workflows" / "ci.yml"
-    wf.write_text(wf.read_text(encoding="utf-8").replace("run: python -m pytest", "run: python -m pytest -q"), encoding="utf-8")
+    wf.write_text(
+        wf.read_text(encoding="utf-8").replace("run: python -m pytest", "run: python -m pytest -q"), encoding="utf-8"
+    )
     res = _invoke("generate", "--path", str(tmp_path), "--yes", "--no-k8s")
     assert res.exit_code == 0
     assert "will be replaced" in res.stdout

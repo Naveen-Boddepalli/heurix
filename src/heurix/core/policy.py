@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import copy
 import re
-from typing import Annotated, Any, Dict, List, Literal, Mapping, Optional, Sequence, Tuple
+from collections.abc import Mapping, Sequence
+from typing import Annotated, Any, Literal
 
 from pydantic import (
     AfterValidator,
@@ -25,7 +26,7 @@ from pydantic import (
 from heurix.core.context import ProjectContext
 
 # Canonical SEC-02 sensitive environment variable keywords (matching env_detector.py)
-SENSITIVE_KEYWORDS: Tuple[str, ...] = (
+SENSITIVE_KEYWORDS: tuple[str, ...] = (
     "SECRET",
     "PASSWORD",
     "TOKEN",
@@ -43,7 +44,7 @@ SENSITIVE_KEYWORDS: Tuple[str, ...] = (
 )
 
 # Canonical SEC-03 deployment-only secret prefixes
-DEPLOYMENT_SECRET_PREFIXES: Tuple[str, ...] = (
+DEPLOYMENT_SECRET_PREFIXES: tuple[str, ...] = (
     "VERCEL_",
     "FIREBASE_",
     "AWS_",
@@ -66,7 +67,7 @@ _KNOWN_TOP_LEVEL_KEYS = frozenset(
     }
 )
 
-_LOC_KEY_FALLBACKS: Dict[str, str] = {
+_LOC_KEY_FALLBACKS: dict[str, str] = {
     "if": "if_",
     "if_": "if",
     "with": "with_",
@@ -118,7 +119,7 @@ def _coerce_scalar_env_dict(val: Any) -> Any:
     """Coerce scalar int/float/bool values in env mappings into strings."""
     if not isinstance(val, Mapping):
         return val
-    coerced: Dict[Any, Any] = {}
+    coerced: dict[Any, Any] = {}
     for raw_k, raw_v in val.items():
         if isinstance(raw_v, bool):
             coerced[raw_k] = "true" if raw_v else "false"
@@ -129,9 +130,9 @@ def _coerce_scalar_env_dict(val: Any) -> Any:
     return coerced
 
 
-def _deep_merge_dicts(base: Mapping[str, Any], override: Mapping[str, Any]) -> Dict[str, Any]:
+def _deep_merge_dicts(base: Mapping[str, Any], override: Mapping[str, Any]) -> dict[str, Any]:
     """Deep merge two mappings so `override` takes precedence on overlapping leaf values."""
-    merged: Dict[str, Any] = copy.deepcopy(dict(base))
+    merged: dict[str, Any] = copy.deepcopy(dict(base))
     for key, val in override.items():
         if key in merged and isinstance(merged[key], Mapping) and isinstance(val, Mapping):
             merged[key] = _deep_merge_dicts(merged[key], val)
@@ -158,21 +159,21 @@ class _PolicyBase(BaseModel):
 class EnginePolicy(_PolicyBase):
     runner: _NonEmptyStr = "ubuntu-latest"
     non_destructive: bool = True
-    templates_dir: Optional[_NonEmptyStr] = None
+    templates_dir: _NonEmptyStr | None = None
 
 
 class StepPolicy(_PolicyBase):
-    id: Optional[_NonEmptyStr] = None
-    name: Optional[str] = None
-    if_: Optional[str] = Field(default=None, alias="if")
-    uses: Optional[str] = None
-    with_: Optional[Dict[str, Any]] = Field(default=None, alias="with")
-    run: Optional[str] = None
-    env: Dict[str, str] = Field(default_factory=dict)
-    working_directory: Optional[str] = Field(default=None, alias="working-directory")
-    shell: Optional[str] = None
-    continue_on_error: Optional[bool] = Field(default=None, alias="continue-on-error")
-    timeout_minutes: Optional[Annotated[int, BeforeValidator(_reject_bool_for_int), Field(ge=1)]] = Field(
+    id: _NonEmptyStr | None = None
+    name: str | None = None
+    if_: str | None = Field(default=None, alias="if")
+    uses: str | None = None
+    with_: dict[str, Any] | None = Field(default=None, alias="with")
+    run: str | None = None
+    env: dict[str, str] = Field(default_factory=dict)
+    working_directory: str | None = Field(default=None, alias="working-directory")
+    shell: str | None = None
+    continue_on_error: bool | None = Field(default=None, alias="continue-on-error")
+    timeout_minutes: Annotated[int, BeforeValidator(_reject_bool_for_int), Field(ge=1)] | None = Field(
         default=None,
         alias="timeout-minutes",
     )
@@ -183,12 +184,12 @@ class StepPolicy(_PolicyBase):
         return _coerce_scalar_env_dict(val)
 
     @model_validator(mode="after")
-    def _require_uses_or_run(self) -> "StepPolicy":
+    def _require_uses_or_run(self) -> StepPolicy:
         if not (self.uses and self.uses.strip()) and not (self.run and self.run.strip()):
             raise ValueError("Workflow step must specify 'uses' or 'run'")
         return self
 
-    def to_step_dict(self) -> Dict[str, Any]:
+    def to_step_dict(self) -> dict[str, Any]:
         """Serialize step to a plain GitHub Actions step dictionary with canonical aliases."""
         data = self.model_dump(by_alias=True, exclude_none=True, exclude_defaults=False)
         if not data.get("env"):
@@ -197,27 +198,27 @@ class StepPolicy(_PolicyBase):
 
 
 class CiStepsPolicy(_PolicyBase):
-    pre_test: List[StepPolicy] = Field(default_factory=list)
-    post_test: List[StepPolicy] = Field(default_factory=list)
+    pre_test: list[StepPolicy] = Field(default_factory=list)
+    post_test: list[StepPolicy] = Field(default_factory=list)
 
 
 class CiPolicy(_PolicyBase):
     include_dependabot: bool = True
-    include_k8s: Optional[bool] = None
+    include_k8s: bool | None = None
     default_branch: _NonEmptyStr = "main"
     pin_actions: bool = True
-    action_shas: Dict[str, str] = Field(default_factory=dict)
-    action_versions: Dict[str, str] = Field(default_factory=dict)
-    permissions: Dict[str, str] = Field(default_factory=dict)
-    runners: Dict[str, _NonEmptyStr] = Field(default_factory=dict)
+    action_shas: dict[str, str] = Field(default_factory=dict)
+    action_versions: dict[str, str] = Field(default_factory=dict)
+    permissions: dict[str, str] = Field(default_factory=dict)
+    runners: dict[str, _NonEmptyStr] = Field(default_factory=dict)
     steps: CiStepsPolicy = Field(default_factory=CiStepsPolicy)
     # Explicit overrides for CI service-container connection URLs
     # (DATABASE_URL, MONGO_URL, MONGODB_URI, REDIS_URL).
-    env: Dict[str, str] = Field(default_factory=dict)
+    env: dict[str, str] = Field(default_factory=dict)
     # Trigger path filters for push / pull_request. `paths` replaces the inferred
     # monorepo filter; `paths_ignore` skips CI when only matching files change.
-    paths: Optional[List[_PathPattern]] = None
-    paths_ignore: List[_PathPattern] = Field(default_factory=list, alias="paths-ignore")
+    paths: list[_PathPattern] | None = None
+    paths_ignore: list[_PathPattern] = Field(default_factory=list, alias="paths-ignore")
 
     @field_validator("env", mode="before")
     @classmethod
@@ -233,7 +234,7 @@ class CiPolicy(_PolicyBase):
 
     @field_validator("paths", "paths_ignore")
     @classmethod
-    def _validate_path_patterns(cls, val: Optional[List[str]]) -> Optional[List[str]]:
+    def _validate_path_patterns(cls, val: list[str] | None) -> list[str] | None:
         if val is None:
             return None
         return list(dict.fromkeys(val))
@@ -245,21 +246,21 @@ class CiPolicy(_PolicyBase):
 
 
 class JobPolicy(_PolicyBase):
-    runner: Optional[_NonEmptyStr] = None
-    pre_steps: List[StepPolicy] = Field(default_factory=list)
-    post_steps: List[StepPolicy] = Field(default_factory=list)
+    runner: _NonEmptyStr | None = None
+    pre_steps: list[StepPolicy] = Field(default_factory=list)
+    post_steps: list[StepPolicy] = Field(default_factory=list)
 
 
 class ServicesPolicy(_PolicyBase):
-    exclude: List[str] = Field(default_factory=list)
+    exclude: list[str] = Field(default_factory=list)
 
 
 class SecretsPolicy(_PolicyBase):
-    test: List[str] = Field(default_factory=list)
-    deploy: List[str] = Field(default_factory=list)
+    test: list[str] = Field(default_factory=list)
+    deploy: list[str] = Field(default_factory=list)
 
 
-_LINTER_LANG_ALIASES: Dict[str, str] = {
+_LINTER_LANG_ALIASES: dict[str, str] = {
     "c++": "cpp",
     "golang": "go",
     "nodejs": "node",
@@ -268,11 +269,11 @@ _LINTER_LANG_ALIASES: Dict[str, str] = {
 
 class LintersPolicy(_PolicyBase):
     enabled: bool = True
-    python: Optional[bool] = None
-    node: Optional[bool] = None
-    go: Optional[bool] = None
-    rust: Optional[bool] = None
-    cpp: Optional[bool] = None
+    python: bool | None = None
+    node: bool | None = None
+    go: bool | None = None
+    rust: bool | None = None
+    cpp: bool | None = None
 
     def is_enabled_for(self, language: str) -> bool:
         """Return whether linting is enabled globally and for the specified language."""
@@ -288,8 +289,8 @@ class LintersPolicy(_PolicyBase):
 
 
 class K8sResourceSpecPolicy(_PolicyBase):
-    cpu: Optional[_NonEmptyStr] = None
-    memory: Optional[_NonEmptyStr] = None
+    cpu: _NonEmptyStr | None = None
+    memory: _NonEmptyStr | None = None
 
 
 class K8sResourcesPolicy(_PolicyBase):
@@ -299,14 +300,14 @@ class K8sResourcesPolicy(_PolicyBase):
 
 class K8sProbePolicy(_PolicyBase):
     enabled: bool = True
-    type: Optional[Literal["httpGet", "tcpSocket", "exec"]] = None
-    path: Optional[_NonEmptyStr] = None
-    port: Optional[Annotated[int, BeforeValidator(_reject_bool_for_int), Field(ge=1, le=65535)]] = None
-    command: Optional[List[str]] = None
-    initial_delay_seconds: Optional[Annotated[int, BeforeValidator(_reject_bool_for_int), Field(ge=0)]] = None
-    period_seconds: Optional[Annotated[int, BeforeValidator(_reject_bool_for_int), Field(ge=1)]] = None
-    timeout_seconds: Optional[Annotated[int, BeforeValidator(_reject_bool_for_int), Field(ge=1)]] = None
-    failure_threshold: Optional[Annotated[int, BeforeValidator(_reject_bool_for_int), Field(ge=1)]] = None
+    type: Literal["httpGet", "tcpSocket", "exec"] | None = None
+    path: _NonEmptyStr | None = None
+    port: Annotated[int, BeforeValidator(_reject_bool_for_int), Field(ge=1, le=65535)] | None = None
+    command: list[str] | None = None
+    initial_delay_seconds: Annotated[int, BeforeValidator(_reject_bool_for_int), Field(ge=0)] | None = None
+    period_seconds: Annotated[int, BeforeValidator(_reject_bool_for_int), Field(ge=1)] | None = None
+    timeout_seconds: Annotated[int, BeforeValidator(_reject_bool_for_int), Field(ge=1)] | None = None
+    failure_threshold: Annotated[int, BeforeValidator(_reject_bool_for_int), Field(ge=1)] | None = None
 
 
 class K8sHpaPolicy(_PolicyBase):
@@ -316,30 +317,26 @@ class K8sHpaPolicy(_PolicyBase):
     target_cpu_utilization: _StrictInt = Field(default=80, ge=1, le=100)
 
     @model_validator(mode="after")
-    def _validate_replica_bounds(self) -> "K8sHpaPolicy":
+    def _validate_replica_bounds(self) -> K8sHpaPolicy:
         if self.max_replicas < self.min_replicas:
-            raise ValueError(
-                f"max_replicas ({self.max_replicas}) must be >= min_replicas ({self.min_replicas})"
-            )
+            raise ValueError(f"max_replicas ({self.max_replicas}) must be >= min_replicas ({self.min_replicas})")
         return self
 
 
 class KubernetesPolicy(_PolicyBase):
     replicas: _StrictInt = Field(default=2, ge=1)
-    namespace: Optional[_NonEmptyStr] = None
-    image: Optional[_NonEmptyStr] = None
-    image_tag: Optional[_NonEmptyStr] = None
+    namespace: _NonEmptyStr | None = None
+    image: _NonEmptyStr | None = None
+    image_tag: _NonEmptyStr | None = None
 
     @field_validator("image_tag")
     @classmethod
-    def _validate_image_tag(cls, val: Optional[str]) -> Optional[str]:
+    def _validate_image_tag(cls, val: str | None) -> str | None:
         if val is not None and not is_valid_image_tag(val):
-            raise ValueError(
-                "image_tag must match [A-Za-z0-9_][A-Za-z0-9_.-]{0,127} (OCI tag syntax)"
-            )
+            raise ValueError("image_tag must match [A-Za-z0-9_][A-Za-z0-9_.-]{0,127} (OCI tag syntax)")
         return val
 
-    port: Optional[Annotated[int, BeforeValidator(_reject_bool_for_int), Field(ge=1, le=65535)]] = None
+    port: Annotated[int, BeforeValidator(_reject_bool_for_int), Field(ge=1, le=65535)] | None = None
     service_type: Literal["ClusterIP", "NodePort", "LoadBalancer"] = "ClusterIP"
     resources: K8sResourcesPolicy = Field(default_factory=K8sResourcesPolicy)
     liveness_probe: K8sProbePolicy = Field(default_factory=K8sProbePolicy)
@@ -350,11 +347,11 @@ class KubernetesPolicy(_PolicyBase):
 class HeurixPolicy(_PolicyBase):
     engine: EnginePolicy = Field(default_factory=EnginePolicy)
     ci: CiPolicy = Field(default_factory=CiPolicy)
-    jobs: Dict[str, JobPolicy] = Field(default_factory=dict)
-    matrix: Dict[str, Any] = Field(default_factory=dict)
-    overrides: Dict[str, Any] = Field(default_factory=dict)
+    jobs: dict[str, JobPolicy] = Field(default_factory=dict)
+    matrix: dict[str, Any] = Field(default_factory=dict)
+    overrides: dict[str, Any] = Field(default_factory=dict)
     services: ServicesPolicy = Field(default_factory=ServicesPolicy)
-    env: Dict[str, str] = Field(default_factory=dict)
+    env: dict[str, str] = Field(default_factory=dict)
     secrets: SecretsPolicy = Field(default_factory=SecretsPolicy)
     linters: LintersPolicy = Field(default_factory=LintersPolicy)
     kubernetes: KubernetesPolicy = Field(default_factory=KubernetesPolicy)
@@ -381,13 +378,13 @@ class HeurixPolicy(_PolicyBase):
         return normalized
 
     @classmethod
-    def from_raw(cls, raw_cfg: Optional[Mapping[str, Any]]) -> "HeurixPolicy":
+    def from_raw(cls, raw_cfg: Mapping[str, Any] | None) -> HeurixPolicy:
         """Zero-exception helper returning a validated HeurixPolicy from raw dict config."""
         policy, _ = parse_heurix_policy(raw_cfg)
         return policy
 
 
-def _resolve_dict_key(mapping: Dict[Any, Any], segment: Any) -> Tuple[bool, Any]:
+def _resolve_dict_key(mapping: dict[Any, Any], segment: Any) -> tuple[bool, Any]:
     if segment in mapping:
         return True, segment
     if isinstance(segment, str) and segment in _LOC_KEY_FALLBACKS:
@@ -397,7 +394,7 @@ def _resolve_dict_key(mapping: Dict[Any, Any], segment: Any) -> Tuple[bool, Any]
     return False, segment
 
 
-def _prune_loc(target: Any, loc: Tuple[Any, ...]) -> bool:
+def _prune_loc(target: Any, loc: tuple[Any, ...]) -> bool:
     """Delete a single invalid leaf entry addressed by Pydantic ValidationError loc."""
     if not loc:
         return False
@@ -435,14 +432,14 @@ def _count_nodes(obj: Any) -> int:
     return 1
 
 
-def _error_sort_key(err: Mapping[str, Any]) -> Tuple[Any, ...]:
+def _error_sort_key(err: Mapping[str, Any]) -> tuple[Any, ...]:
     loc = tuple(err.get("loc") or ())
     is_list_leaf = 1 if (loc and isinstance(loc[-1], int)) else 0
     path_key = tuple((-part if isinstance(part, int) else 0, str(part)) for part in loc)
     return (is_list_leaf, -len(loc), path_key)
 
 
-def parse_heurix_policy(raw_cfg: Optional[Mapping[str, Any]]) -> Tuple[HeurixPolicy, List[str]]:
+def parse_heurix_policy(raw_cfg: Mapping[str, Any] | None) -> tuple[HeurixPolicy, list[str]]:
     """
     Validate `.heurix.toml` mapping into a typed `HeurixPolicy`.
 
@@ -452,16 +449,14 @@ def parse_heurix_policy(raw_cfg: Optional[Mapping[str, Any]]) -> Tuple[HeurixPol
     if raw_cfg is None:
         return HeurixPolicy(), []
     if not isinstance(raw_cfg, Mapping):
-        return HeurixPolicy(), [
-            "Warning: Invalid .heurix.toml root: expected a table; using defaults."
-        ]
+        return HeurixPolicy(), ["Warning: Invalid .heurix.toml root: expected a table; using defaults."]
 
-    warnings: List[str] = []
+    warnings: list[str] = []
     for key in raw_cfg:
         if key not in _KNOWN_TOP_LEVEL_KEYS:
             warnings.append(f"Warning: Unknown .heurix.toml section '{key}'; ignoring.")
 
-    candidate: Dict[str, Any] = copy.deepcopy(dict(raw_cfg))
+    candidate: dict[str, Any] = copy.deepcopy(dict(raw_cfg))
 
     if (
         "k8s" in candidate
@@ -469,9 +464,7 @@ def parse_heurix_policy(raw_cfg: Optional[Mapping[str, Any]]) -> Tuple[HeurixPol
         and not isinstance(candidate["k8s"], Mapping)
         and isinstance(candidate["kubernetes"], Mapping)
     ):
-        warnings.append(
-            "Warning: Invalid .heurix.toml field 'k8s': Input should be a valid dictionary; ignoring."
-        )
+        warnings.append("Warning: Invalid .heurix.toml field 'k8s': Input should be a valid dictionary; ignoring.")
         candidate.pop("k8s", None)
 
     max_iterations = max(32, _count_nodes(candidate) + 8)
@@ -482,7 +475,7 @@ def parse_heurix_policy(raw_cfg: Optional[Mapping[str, Any]]) -> Tuple[HeurixPol
         except ValidationError as exc:
             errors = sorted(exc.errors(), key=_error_sort_key)
             changed = False
-            seen_locs: set[Tuple[Any, ...]] = set()
+            seen_locs: set[tuple[Any, ...]] = set()
 
             for err in errors:
                 loc = tuple(err.get("loc") or ())
@@ -503,9 +496,7 @@ def parse_heurix_policy(raw_cfg: Optional[Mapping[str, Any]]) -> Tuple[HeurixPol
                 if pruned:
                     field_path = ".".join(str(part) for part in display_loc)
                     msg = str(err.get("msg", "invalid value"))
-                    warnings.append(
-                        f"Warning: Invalid .heurix.toml field '{field_path}': {msg}; using default."
-                    )
+                    warnings.append(f"Warning: Invalid .heurix.toml field '{field_path}': {msg}; using default.")
                     changed = True
 
             if not changed:
@@ -518,7 +509,7 @@ def parse_heurix_policy(raw_cfg: Optional[Mapping[str, Any]]) -> Tuple[HeurixPol
     return HeurixPolicy(), warnings
 
 
-_LANG_KEY_ALIASES: Dict[str, str] = {
+_LANG_KEY_ALIASES: dict[str, str] = {
     "python": "python",
     "python-version": "python",
     "python_version": "python",
@@ -538,7 +529,7 @@ _LANG_KEY_ALIASES: Dict[str, str] = {
     "c++": "cpp",
 }
 
-_SERVICE_EXCLUDE_ALIASES: Dict[str, str] = {
+_SERVICE_EXCLUDE_ALIASES: dict[str, str] = {
     "postgresql": "postgres",
     "mongo": "mongodb",
 }
@@ -550,10 +541,10 @@ def normalize_service_name(name: str) -> str:
     return _SERVICE_EXCLUDE_ALIASES.get(cleaned, cleaned)
 
 
-def normalize_string_list(val: Any) -> List[str]:
+def normalize_string_list(val: Any) -> list[str]:
     """Normalize a TOML scalar or sequence into a deduplicated list of non-empty strings."""
     if isinstance(val, (list, tuple)):
-        result: List[str] = []
+        result: list[str] = []
         for item in val:
             if isinstance(item, bool) or not isinstance(item, (str, int, float)):
                 continue
@@ -632,9 +623,7 @@ def apply_language_version_policy(context: ProjectContext, raw_key: str, raw_val
             lang_ctx.runtime_version = version_str
             lang_ctx.version_source = ".heurix.toml"
             lang_ctx.matrix_versions = []
-            context.add_explain(
-                f"Overrode {lang_name} version: {old_ver} -> {version_str} (via .heurix.toml)"
-            )
+            context.add_explain(f"Overrode {lang_name} version: {old_ver} -> {version_str} (via .heurix.toml)")
         for pkg in matching_pkgs:
             pkg.runtime_version = version_str
             pkg.version_source = ".heurix.toml"
@@ -644,7 +633,7 @@ def apply_language_version_policy(context: ProjectContext, raw_key: str, raw_val
 def apply_policy_to_context(
     context: ProjectContext,
     policy: HeurixPolicy,
-    raw_config: Optional[Mapping[str, Any]] = None,
+    raw_config: Mapping[str, Any] | None = None,
 ) -> None:
     """
     Mutate `ProjectContext` deterministically from validated `HeurixPolicy` rules.
@@ -677,17 +666,13 @@ def apply_policy_to_context(
 
     # 3. Apply [services].exclude with normalized alias mapping
     excluded_services = {
-        normalize_service_name(item)
-        for item in policy.services.exclude
-        if isinstance(item, str) and item.strip()
+        normalize_service_name(item) for item in policy.services.exclude if isinstance(item, str) and item.strip()
     }
     if excluded_services and context.services:
         kept_services = []
         for svc in context.services:
             if normalize_service_name(svc.name) in excluded_services:
-                context.add_explain(
-                    f"Excluded service '{svc.name}' via .heurix.toml [services].exclude"
-                )
+                context.add_explain(f"Excluded service '{svc.name}' via .heurix.toml [services].exclude")
             else:
                 kept_services.append(svc)
         context.services = kept_services
@@ -702,9 +687,7 @@ def apply_policy_to_context(
     for pkg in context.monorepo_packages:
         if pkg.lint_cmd and not policy.linters.is_enabled_for(pkg.language):
             pkg.lint_cmd = None
-            context.add_explain(
-                f"Disabled linter for {pkg.language} package '{pkg.path}' via .heurix.toml [linters]"
-            )
+            context.add_explain(f"Disabled linter for {pkg.language} package '{pkg.path}' via .heurix.toml [linters]")
 
     # 5. Apply [env] overrides while enforcing SEC-02 sensitive keyword redaction
     for raw_key, val in policy.env.items():

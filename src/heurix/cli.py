@@ -4,10 +4,9 @@ Heurix CLI (hx): Deterministic Codebase Scanner & YAML Synthesizer.
 
 from __future__ import annotations
 
-import os
 import shutil
 from pathlib import Path
-from typing import Optional
+
 import typer
 from rich.console import Console
 from rich.markup import escape
@@ -74,7 +73,7 @@ def _resolve_or_exit(repo_path: Path, rel_path: str | Path) -> Path:
                 border_style="red",
             )
         )
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from e
 
 
 def _resolve_repo_dir_or_exit(path: str) -> Path:
@@ -110,7 +109,7 @@ def _synthesize_or_exit(
                 border_style="red",
             )
         )
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from e
 
 
 def _print_context_warnings(context: ProjectContext) -> None:
@@ -151,7 +150,7 @@ def _run_generate(
                 border_style="red",
             )
         )
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from e
 
     print_banner()
 
@@ -249,11 +248,7 @@ def _run_generate(
         if target_file.exists():
             existing_content = target_file.read_text(encoding="utf-8", errors="replace")
             try:
-                merged_content = (
-                    merger.merge_yaml(existing_content, new_content)
-                    if non_destructive
-                    else new_content
-                )
+                merged_content = merger.merge_yaml(existing_content, new_content) if non_destructive else new_content
             except YamlSyntaxError as e:
                 console.print(
                     Panel.fit(
@@ -263,12 +258,10 @@ def _run_generate(
                         border_style="red",
                     )
                 )
-                raise typer.Exit(code=1)
+                raise typer.Exit(code=1) from e
 
             if non_destructive and merger.replaced:
-                console.print(
-                    f"[yellow]⚠ {rel_path}: these existing values will be replaced:[/yellow]"
-                )
+                console.print(f"[yellow]⚠ {rel_path}: these existing values will be replaced:[/yellow]")
                 for note in merger.replaced:
                     console.print(f"  [yellow]•[/yellow] {escape(note)}")
                 console.print(
@@ -327,7 +320,7 @@ def _run_generate(
 @app.callback(invoke_without_command=True)
 def main(
     ctx: typer.Context,
-    version: Optional[bool] = typer.Option(
+    version: bool | None = typer.Option(
         None, "--version", "-v", callback=version_callback, is_eager=True, help="Show version."
     ),
 ):
@@ -362,12 +355,8 @@ def generate(
     ),
     k8s: bool = typer.Option(True, "--k8s/--no-k8s", help="Synthesize Kubernetes manifests if containerized."),
     side_by_side: bool = typer.Option(False, "--side-by-side", help="Render side-by-side diff tables."),
-    diff_style: str = typer.Option(
-        "unified", "--diff-style", help="Diff style: unified, side-by-side, or auto."
-    ),
-    strict: bool = typer.Option(
-        False, "--strict", help="Treat optional manifest validation warnings as fatal errors."
-    ),
+    diff_style: str = typer.Option("unified", "--diff-style", help="Diff style: unified, side-by-side, or auto."),
+    strict: bool = typer.Option(False, "--strict", help="Treat optional manifest validation warnings as fatal errors."),
     allow_empty: bool = typer.Option(
         False, "--allow-empty", help="Allow generating workflow scaffolding even if no code or manifests are detected."
     ),
@@ -395,9 +384,7 @@ def diff(
     path: str = typer.Option(".", "--path", "-p", help="Root directory of repository."),
     k8s: bool = typer.Option(True, "--k8s/--no-k8s", help="Include Kubernetes manifests."),
     side_by_side: bool = typer.Option(False, "--side-by-side", help="Render side-by-side diff tables."),
-    diff_style: str = typer.Option(
-        "unified", "--diff-style", help="Diff style: unified, side-by-side, or auto."
-    ),
+    diff_style: str = typer.Option("unified", "--diff-style", help="Diff style: unified, side-by-side, or auto."),
 ):
     """
     Compare current repository state with synthesized configs without writing changes.
@@ -451,7 +438,9 @@ def check(
     findings = detector.check_drift(context, synthesized)
 
     if not findings:
-        console.print("[bold green]✔ Zero Drift Detected:[/bold green] CI/CD workflows are completely synchronized with the codebase!")
+        console.print(
+            "[bold green]✔ Zero Drift Detected:[/bold green] CI/CD workflows are completely synchronized with the codebase!"
+        )
         raise typer.Exit(code=0)
 
     console.print(f"[bold yellow]⚠️ Drift Detected ({len(findings)} issue(s)):[/bold yellow]\n")
@@ -478,7 +467,7 @@ def scan(
 @app.command()
 def init(
     path: str = typer.Option(".", "--path", "-p", help="Root directory of repository."),
-    hooks: Optional[bool] = typer.Option(
+    hooks: bool | None = typer.Option(
         None,
         "--hooks/--no-hooks",
         help="Install an idempotent Git pre-commit hook running 'hx check'.",
@@ -636,7 +625,7 @@ include_k8s = __INCLUDE_K8S__  # also controls whether `hx check` verifies k8s/ 
                     border_style="red",
                 )
             )
-            raise typer.Exit(code=1)
+            raise typer.Exit(code=1) from e
 
         if hook_result.status == "created":
             console.print(

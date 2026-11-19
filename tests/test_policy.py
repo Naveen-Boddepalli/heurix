@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 import pytest
 
@@ -63,7 +63,7 @@ def test_policy_schema_and_k8s_alias_validation():
             assert not node.module.startswith("heurix.detectors")
 
     # 2. Full schema parsing with [k8s] -> [kubernetes] merge (kubernetes wins on overlap)
-    raw_cfg: Dict[str, Any] = {
+    raw_cfg: dict[str, Any] = {
         "engine": {
             "runner": "ubuntu-24.04",
             "non_destructive": False,
@@ -205,7 +205,7 @@ def test_policy_schema_and_k8s_alias_validation():
         StepPolicy(name="empty")
 
     # 3. Resilient leaf-pruning loop isolates invalid leaf fields & unknown sections
-    bad_cfg: Dict[str, Any] = {
+    bad_cfg: dict[str, Any] = {
         "unknown_top_section": {"foo": "bar"},
         "engine": {
             "runner": "ubuntu-24.04",

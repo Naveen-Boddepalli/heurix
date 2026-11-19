@@ -5,7 +5,8 @@ Go Language Ecosystem Detector.
 from __future__ import annotations
 
 import re
-from typing import Optional, Sequence
+from collections.abc import Sequence
+
 from heurix.core.context import LanguageContext, MonorepoPackage, ProjectContext
 from heurix.core.indexer import RepoIndexer
 from heurix.core.monorepo import NON_PACKAGE_DIRS, discover_monorepo_topology, parse_go_work
@@ -54,7 +55,7 @@ class GoDetector(BaseDetector):
         default_source: str = "default",
         add_language_ctx: bool = True,
         add_monorepo_pkg: bool = False,
-        is_workspace_root: Optional[bool] = None,
+        is_workspace_root: bool | None = None,
     ) -> LanguageContext:
         scope_label = f" in {base_dir}" if base_dir != "." else ""
         go_version = default_version
@@ -71,7 +72,7 @@ class GoDetector(BaseDetector):
 
         context.add_explain(f"Detected Go version{scope_label}: {go_version} (via {version_source})")
 
-        framework: Optional[str] = None
+        framework: str | None = None
         if "github.com/gin-gonic/gin" in go_mod_content:
             framework = "Gin"
         elif "github.com/labstack/echo" in go_mod_content:
@@ -214,4 +215,3 @@ class GoDetector(BaseDetector):
                     add_monorepo_pkg=True,
                     is_workspace_root=None,
                 )
-

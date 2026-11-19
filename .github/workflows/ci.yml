@@ -42,5 +42,26 @@ jobs:
           cache: pip
       - name: Install dependencies
         run: pip install -e '.[dev]'
-      - name: Run tests (python)
-        run: pytest
+      - name: Lint code (python)
+        run: ruff check .
+      - name: Run tests (python)  # @heurix:preserve
+        run: pytest -m "not perf" --cov=heurix --cov-report=term-missing:skip-covered
+      - name: Run timing benchmarks (no coverage tracing)  # @heurix:preserve
+        run: pytest -m perf
+  quality:
+    name: Format and type check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+      - name: Set up Python
+        uses: actions/setup-python@v7.1.0
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install dependencies
+        run: pip install -e '.[dev]'
+      - name: Check formatting (ruff format)
+        run: ruff format --check .
+      - name: Type check (mypy)
+        run: mypy

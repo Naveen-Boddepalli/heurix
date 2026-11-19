@@ -4,8 +4,6 @@ Environment Variables and Secrets Discovery Detector.
 
 from __future__ import annotations
 
-import re
-from typing import Set
 from heurix.core.context import ProjectContext
 from heurix.core.indexer import RepoIndexer
 from heurix.detectors.base import BaseDetector
@@ -54,16 +52,18 @@ class EnvDetector(BaseDetector):
         context.add_explain("Analyzing environment templates and secret definitions...")
 
         env_files = [
-            f for f in [
+            f
+            for f in [
                 ".env.example",
                 ".env.template",
                 ".env.sample",
                 ".env.dist",
                 ".env.local.example",
-            ] if indexer.has_file(f)
+            ]
+            if indexer.has_file(f)
         ]
 
-        found_secrets: Set[str] = set()
+        found_secrets: set[str] = set()
 
         for ef in env_files:
             content = indexer.read_text(ef) or ""
@@ -78,16 +78,15 @@ class EnvDetector(BaseDetector):
                     val = val.strip().strip("'\"")
 
                     key_upper = key.upper()
-                    is_sensitive = (
-                        any(sk in key_upper for sk in SENSITIVE_KEYWORDS)
-                        or "SERVICE_ACCOUNT" in key_upper
-                    )
+                    is_sensitive = any(sk in key_upper for sk in SENSITIVE_KEYWORDS) or "SERVICE_ACCOUNT" in key_upper
                     if is_sensitive:
                         found_secrets.add(key)
                     else:
                         context.env_vars[key] = val
 
-            context.add_explain(f"Scanned {ef}: discovered {len(context.env_vars)} env defaults and {len(found_secrets)} potential secrets")
+            context.add_explain(
+                f"Scanned {ef}: discovered {len(context.env_vars)} env defaults and {len(found_secrets)} potential secrets"
+            )
 
         for s in sorted(found_secrets):
             if s not in context.required_secrets:

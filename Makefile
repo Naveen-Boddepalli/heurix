@@ -2,17 +2,25 @@
 # Makefile for Heurix (hx) Development & Deployment
 # ==============================================================================
 
-.PHONY: help test check build docker-build docker-run site-dev site-build clean install
+.PHONY: help test cov perf lint format typecheck qa check build docker-build docker-run site-dev site-build clean install
 
 VENV = .venv
 PYTHON = $(VENV)/bin/python
 PIP = $(VENV)/bin/pip
 PYTEST = $(VENV)/bin/pytest
+RUFF = $(VENV)/bin/ruff
+MYPY = $(VENV)/bin/mypy
 HX = $(VENV)/bin/hx
 
 help:
 	@echo "Heurix (hx) Development & Deployment Commands:"
 	@echo "  make test          Run test suite with pytest"
+	@echo "  make cov           Run tests with coverage (fails below the pyproject.toml floor)"
+	@echo "  make perf          Run timing benchmarks without coverage tracing"
+	@echo "  make lint          Lint with ruff"
+	@echo "  make format        Format code with ruff"
+	@echo "  make typecheck     Type check with mypy"
+	@echo "  make qa            Run every CI gate: lint, format check, mypy, coverage"
 	@echo "  make check         Run Heurix drift detection"
 	@echo "  make build         Build Python distribution packages (wheel, sdist)"
 	@echo "  make docker-build  Build local Docker container image"
@@ -23,6 +31,24 @@ help:
 
 test:
 	$(PYTEST) -v
+
+cov:
+	$(PYTEST) -m "not perf" --cov=heurix --cov-report=term-missing:skip-covered
+
+perf:
+	$(PYTEST) -m perf
+
+lint:
+	$(RUFF) check .
+
+format:
+	$(RUFF) format .
+
+typecheck:
+	$(MYPY)
+
+qa: lint typecheck cov perf
+	$(RUFF) format --check .
 
 check:
 	$(HX) check
@@ -50,5 +76,5 @@ site-build:
 	pnpm --dir site build
 
 clean:
-	rm -rf dist/ build/ *.egg-info src/*.egg-info .pytest_cache/
+	rm -rf dist/ build/ *.egg-info src/*.egg-info .pytest_cache/ .ruff_cache/ .mypy_cache/ .coverage htmlcov/
 	find . -type d -name "__pycache__" -exec rm -rf {} +

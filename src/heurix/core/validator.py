@@ -5,11 +5,8 @@ Ensures zero invalid YAML is written to disk.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Dict, List, Mapping, Tuple
-
-if TYPE_CHECKING:
-    import jsonschema
 
 from ruamel.yaml import YAML
 
@@ -29,6 +26,7 @@ def __getattr__(name: str):
     if name == "jsonschema":
         return _get_jsonschema()
     raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
+
 
 # Lightweight structural schema for GitHub Actions workflow
 GITHUB_WORKFLOW_SCHEMA = {
@@ -94,10 +92,10 @@ K8S_SCHEMA = {
 class ValidationOutcome:
     """Structured pre-flight validation result distinguishing critical and optional failures."""
 
-    valid_files: Dict[str, str] = field(default_factory=dict)
-    critical_errors: Dict[str, List[str]] = field(default_factory=dict)
-    optional_warnings: Dict[str, List[str]] = field(default_factory=dict)
-    excluded_files: Dict[str, str] = field(default_factory=dict)
+    valid_files: dict[str, str] = field(default_factory=dict)
+    critical_errors: dict[str, list[str]] = field(default_factory=dict)
+    optional_warnings: dict[str, list[str]] = field(default_factory=dict)
+    excluded_files: dict[str, str] = field(default_factory=dict)
 
     @property
     def has_critical_errors(self) -> bool:
@@ -120,8 +118,8 @@ class PreflightValidator:
     def __init__(self):
         self.yaml = YAML(typ="safe")
 
-    def validate(self, rel_path: str, content: str) -> Tuple[bool, List[str]]:
-        errors: List[str] = []
+    def validate(self, rel_path: str, content: str) -> tuple[bool, list[str]]:
+        errors: list[str] = []
 
         # 1. Parse YAML syntax across all documents in stream
         try:
@@ -141,9 +139,7 @@ class PreflightValidator:
         for idx, doc in enumerate(docs, start=1):
             doc_suffix = f" (document {idx})" if multi else ""
             if not isinstance(doc, dict):
-                errors.append(
-                    f"YAML Content in '{rel_path}'{doc_suffix} is not a valid dictionary/mapping."
-                )
+                errors.append(f"YAML Content in '{rel_path}'{doc_suffix} is not a valid dictionary/mapping.")
                 continue
 
             if schema_entry is not None:
@@ -196,7 +192,7 @@ class PreflightValidator:
         return norm.startswith("k8s/") or norm.endswith((".k8s.yaml", ".k8s.yml"))
 
     @staticmethod
-    def _select_schema(rel_path: str) -> Tuple[str, dict] | None:
+    def _select_schema(rel_path: str) -> tuple[str, dict] | None:
         norm = PreflightValidator._normalize_rel_path(rel_path)
         if ".github/workflows" in norm:
             return ("GitHub Workflow Schema Error", GITHUB_WORKFLOW_SCHEMA)

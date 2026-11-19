@@ -5,14 +5,17 @@ Interactive Ambiguity Resolution and Hook Prompts with Non-TTY / EOFError Safety
 from __future__ import annotations
 
 import sys
-from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Sequence, Tuple
-
-if TYPE_CHECKING:
-    import questionary
+from collections.abc import Callable, Sequence
 
 from rich.console import Console
 
-from heurix.core.context import DeploymentTarget, ProjectContext, ServiceRequirement
+from heurix.core.context import (
+    DeploymentTarget,
+    LanguageContext,
+    MonorepoPackage,
+    ProjectContext,
+    ServiceRequirement,
+)
 
 console = Console()
 
@@ -27,6 +30,7 @@ def _get_questionary():
         return globals()["questionary"]
     if _questionary is None:
         import questionary
+
         _questionary = questionary
     return _questionary
 
@@ -59,9 +63,7 @@ def prompt_conflict_resolution(file_path: str, non_interactive: bool = False) ->
         choice = q.select(
             f"File '{file_path}' already exists. What would you like to do?",
             choices=[
-                q.Choice(
-                    title="[A] Apply changes (non-destructive smart merge)", value="apply"
-                ),
+                q.Choice(title="[A] Apply changes (non-destructive smart merge)", value="apply"),
                 q.Choice(title="[D] View diff preview", value="diff"),
                 q.Choice(title="[B] Backup & overwrite", value="backup"),
                 q.Choice(title="[S] Skip file", value="skip"),
@@ -101,7 +103,7 @@ def prompt_deployment_targets(
     targets: Sequence[DeploymentTarget],
     *,
     non_interactive: bool = False,
-) -> List[DeploymentTarget]:
+) -> list[DeploymentTarget]:
     """
     Prompt user to confirm/select deployment targets when 2+ platforms are detected.
     Distinguishes abort (None -> keep all) from explicit empty selection ([] -> []).
@@ -142,7 +144,7 @@ def prompt_backing_services(
     services: Sequence[ServiceRequirement],
     *,
     non_interactive: bool = False,
-) -> List[ServiceRequirement]:
+) -> list[ServiceRequirement]:
     """
     Prompt user to confirm or exclude detected backing services when 2+ are present.
     Deduplicates choice values by service name cleanly.
@@ -151,7 +153,7 @@ def prompt_backing_services(
         return list(services)
 
     q = _get_questionary()
-    grouped: Dict[str, Tuple[str, List[int]]] = {}
+    grouped: dict[str, tuple[str, list[int]]] = {}
     for svc in services:
         key = svc.name.lower()
         if key not in grouped:
@@ -224,12 +226,13 @@ def prompt_install_hooks(*, non_interactive: bool = False) -> bool:
         return False
 
 
-def collect_e2e_signals(context: ProjectContext) -> Tuple[List[str], List[str]]:
+def collect_e2e_signals(context: ProjectContext) -> tuple[list[str], list[str]]:
     """Collect deduplicated unit and E2E test runner names across languages and monorepo packages."""
-    unit_runners: List[str] = []
-    e2e_runners: List[str] = []
+    unit_runners: list[str] = []
+    e2e_runners: list[str] = []
 
-    for source in (*context.languages, *context.monorepo_packages):
+    sources: list[LanguageContext | MonorepoPackage] = [*context.languages, *context.monorepo_packages]
+    for source in sources:
         if source.unit_test_runner and source.unit_test_runner not in unit_runners:
             unit_runners.append(source.unit_test_runner)
         if source.e2e_test_runner and source.e2e_test_runner not in e2e_runners:
@@ -245,11 +248,11 @@ def resolve_context_ambiguities(
     k8s_policy_explicit: bool,
     services_policy_explicit: bool,
     non_interactive: bool = False,
-    e2e_prompt: Optional[Callable[..., bool]] = None,
-    targets_prompt: Optional[Callable[..., List[DeploymentTarget]]] = None,
-    services_prompt: Optional[Callable[..., List[ServiceRequirement]]] = None,
-    k8s_prompt: Optional[Callable[..., bool]] = None,
-) -> Tuple[ProjectContext, bool]:
+    e2e_prompt: Callable[..., bool] | None = None,
+    targets_prompt: Callable[..., list[DeploymentTarget]] | None = None,
+    services_prompt: Callable[..., list[ServiceRequirement]] | None = None,
+    k8s_prompt: Callable[..., bool] | None = None,
+) -> tuple[ProjectContext, bool]:
     """
     Resolve codebase ambiguities interactively (or deterministically in non-interactive/non-TTY modes)
     on a deep-copied ProjectContext without stripping SEC-03 deployment_secrets protections.
@@ -263,25 +266,17 @@ def resolve_context_ambiguities(
 
     unit_runners, e2e_runners = collect_e2e_signals(resolved)
     if unit_runners and e2e_runners:
-        resolved.split_e2e_jobs = bool(
-            e2e_fn(unit_runners, e2e_runners, non_interactive=non_interactive)
-        )
+        resolved.split_e2e_jobs = bool(e2e_fn(unit_runners, e2e_runners, non_interactive=non_interactive))
 
     if len(resolved.deployment_targets) >= 2:
         # Preserve resolved.deployment_secrets untouched so SEC-03 isolation holds even for deselected targets.
-        resolved.deployment_targets = list(
-            targets_fn(resolved.deployment_targets, non_interactive=non_interactive)
-        )
+        resolved.deployment_targets = list(targets_fn(resolved.deployment_targets, non_interactive=non_interactive))
 
     if not services_policy_explicit and len(resolved.services) >= 2:
-        resolved.services = list(
-            services_fn(resolved.services, non_interactive=non_interactive)
-        )
+        resolved.services = list(services_fn(resolved.services, non_interactive=non_interactive))
 
     resolved_include_k8s = include_k8s
     if include_k8s and not k8s_policy_explicit and resolved.containers:
-        resolved_include_k8s = bool(
-            k8s_fn(default=include_k8s, non_interactive=non_interactive)
-        )
+        resolved_include_k8s = bool(k8s_fn(default=include_k8s, non_interactive=non_interactive))
 
     return resolved, resolved_include_k8s

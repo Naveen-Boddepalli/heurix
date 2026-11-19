@@ -5,17 +5,18 @@ Generators never read the filesystem directly; they only read ProjectContext.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any
+
 from pydantic import BaseModel, Field, model_validator
 
 
 class ServiceRequirement(BaseModel):
     name: str  # e.g. "postgres", "redis", "mongodb"
     image: str  # e.g. "postgres:16-alpine"
-    ports: List[int] = Field(default_factory=list)  # e.g. [5432]
-    env: Dict[str, str] = Field(default_factory=dict)
+    ports: list[int] = Field(default_factory=list)  # e.g. [5432]
+    env: dict[str, str] = Field(default_factory=dict)
     source_file: str = ""  # e.g. "docker-compose.yml" or "pyproject.toml"
-    package_path: Optional[str] = None  # None = root/global; e.g. "services/api"
+    package_path: str | None = None  # None = root/global; e.g. "services/api"
 
 
 class LanguageContext(BaseModel):
@@ -24,38 +25,38 @@ class LanguageContext(BaseModel):
     version_source: str  # ".python-version", "pyproject.toml", ".nvmrc"
     package_manager: str  # "uv", "poetry", "npm", "pnpm", "yarn", "bun", "cargo", "gomod", "cmake"
     install_cmd: str
-    build_cmd: Optional[str] = None
-    test_cmd: Optional[str] = None
-    lint_cmd: Optional[str] = None
-    unit_test_runner: Optional[str] = None
-    e2e_test_runner: Optional[str] = None
-    e2e_cmd: Optional[str] = None
+    build_cmd: str | None = None
+    test_cmd: str | None = None
+    lint_cmd: str | None = None
+    unit_test_runner: str | None = None
+    e2e_test_runner: str | None = None
+    e2e_cmd: str | None = None
     working_dir: str = "."
-    framework: Optional[str] = None
+    framework: str | None = None
     confidence: float = 1.0
-    matrix_versions: List[str] = Field(default_factory=list)
-    cache_dependency_path: Optional[str] = None
+    matrix_versions: list[str] = Field(default_factory=list)
+    cache_dependency_path: str | None = None
     # package.json declaring an exact `packageManager` (e.g. "pnpm@9.12.0"), if any
-    package_manager_spec_file: Optional[str] = None
-    is_workspace_root: Optional[bool] = None
+    package_manager_spec_file: str | None = None
+    is_workspace_root: bool | None = None
 
 
 class ContainerContext(BaseModel):
     dockerfile_path: str
-    exposed_ports: List[int] = Field(default_factory=list)
+    exposed_ports: list[int] = Field(default_factory=list)
     base_image: str = ""
     has_healthcheck: bool = False
-    build_target: Optional[str] = None
+    build_target: str | None = None
 
 
 class DeploymentTarget(BaseModel):
     platform: str  # "vercel", "firebase", etc.
     config_file: str  # "vercel.json", "firebase.json", etc.
-    project_id: Optional[str] = None
-    features: List[str] = Field(default_factory=list)  # e.g. ["hosting", "functions", "firestore"]
-    deploy_cmd: Optional[str] = None
-    preview_deploy_cmd: Optional[str] = None
-    required_secrets: List[str] = Field(default_factory=list)
+    project_id: str | None = None
+    features: list[str] = Field(default_factory=list)  # e.g. ["hosting", "functions", "firestore"]
+    deploy_cmd: str | None = None
+    preview_deploy_cmd: str | None = None
+    required_secrets: list[str] = Field(default_factory=list)
 
 
 class MonorepoPackage(BaseModel):
@@ -65,42 +66,42 @@ class MonorepoPackage(BaseModel):
     package_manager: str
     runtime_version: str = ""
     version_source: str = ""
-    install_cmd: Optional[str] = None
-    build_cmd: Optional[str] = None
-    test_cmd: Optional[str] = None
-    lint_cmd: Optional[str] = None
-    unit_test_runner: Optional[str] = None
-    e2e_test_runner: Optional[str] = None
-    e2e_cmd: Optional[str] = None
-    framework: Optional[str] = None
-    cache_dependency_path: Optional[str] = None
-    package_manager_spec_file: Optional[str] = None
-    matrix_versions: List[str] = Field(default_factory=list)
+    install_cmd: str | None = None
+    build_cmd: str | None = None
+    test_cmd: str | None = None
+    lint_cmd: str | None = None
+    unit_test_runner: str | None = None
+    e2e_test_runner: str | None = None
+    e2e_cmd: str | None = None
+    framework: str | None = None
+    cache_dependency_path: str | None = None
+    package_manager_spec_file: str | None = None
+    matrix_versions: list[str] = Field(default_factory=list)
 
 
 class ProjectContext(BaseModel):
     repo_name: str
     repo_root: str
     is_monorepo: bool = False
-    monorepo_packages: List[MonorepoPackage] = Field(default_factory=list)
-    languages: List[LanguageContext] = Field(default_factory=list)
-    services: List[ServiceRequirement] = Field(default_factory=list)
-    containers: List[ContainerContext] = Field(default_factory=list)
-    deployment_targets: List[DeploymentTarget] = Field(default_factory=list)
-    test_secrets: List[str] = Field(default_factory=list)
-    deployment_secrets: List[str] = Field(default_factory=list)
-    required_secrets: List[str] = Field(default_factory=list)
-    env_vars: Dict[str, str] = Field(default_factory=dict)
-    language_scores: Dict[str, int] = Field(default_factory=dict)
-    explain_log: List[str] = Field(default_factory=list)
+    monorepo_packages: list[MonorepoPackage] = Field(default_factory=list)
+    languages: list[LanguageContext] = Field(default_factory=list)
+    services: list[ServiceRequirement] = Field(default_factory=list)
+    containers: list[ContainerContext] = Field(default_factory=list)
+    deployment_targets: list[DeploymentTarget] = Field(default_factory=list)
+    test_secrets: list[str] = Field(default_factory=list)
+    deployment_secrets: list[str] = Field(default_factory=list)
+    required_secrets: list[str] = Field(default_factory=list)
+    env_vars: dict[str, str] = Field(default_factory=dict)
+    language_scores: dict[str, int] = Field(default_factory=dict)
+    explain_log: list[str] = Field(default_factory=list)
     # Problems the user should fix (unparseable manifests, invalid policy); shown by every command.
-    warnings: List[str] = Field(default_factory=list)
-    policy_error: Optional[str] = None
+    warnings: list[str] = Field(default_factory=list)
+    policy_error: str | None = None
     confidence: float = 1.0
     runner: str = "ubuntu-latest"
-    matrix_os: List[str] = Field(default_factory=list)
-    split_e2e_jobs: Optional[bool] = None
-    policy_config: Dict[str, Any] = Field(default_factory=dict)
+    matrix_os: list[str] = Field(default_factory=list)
+    split_e2e_jobs: bool | None = None
+    policy_config: dict[str, Any] = Field(default_factory=dict)
     # True when the root Cargo.toml declares [workspace]: members share ./target
     cargo_workspace: bool = False
 
@@ -111,7 +112,7 @@ class ProjectContext(BaseModel):
                 self.required_secrets.append(secret)
 
     @model_validator(mode="after")
-    def _sync_required_secrets(self) -> "ProjectContext":
+    def _sync_required_secrets(self) -> ProjectContext:
         self.sync_required_secrets()
         return self
 
@@ -126,17 +127,17 @@ class ProjectContext(BaseModel):
     def has_language(self, name: str) -> bool:
         return any(lang.language.lower() == name.lower() for lang in self.languages)
 
-    def get_language(self, name: str) -> Optional[LanguageContext]:
+    def get_language(self, name: str) -> LanguageContext | None:
         for lang in self.languages:
             if lang.language.lower() == name.lower():
                 return lang
         return None
 
-    def get_languages(self, name: str) -> List[LanguageContext]:
+    def get_languages(self, name: str) -> list[LanguageContext]:
         target = name.lower()
         return [lang for lang in self.languages if lang.language.lower() == target]
 
-    def get_primary_language(self) -> Optional[LanguageContext]:
+    def get_primary_language(self) -> LanguageContext | None:
         """
         Determine primary language dynamically using indexed language scores
         (source file volume + root manifest weighting) or recorded language
@@ -167,7 +168,7 @@ class ProjectContext(BaseModel):
     def has_deployment_target(self, platform: str) -> bool:
         return any(t.platform.lower() == platform.lower() for t in self.deployment_targets)
 
-    def get_deployment_target(self, platform: str) -> Optional[DeploymentTarget]:
+    def get_deployment_target(self, platform: str) -> DeploymentTarget | None:
         for t in self.deployment_targets:
             if t.platform.lower() == platform.lower():
                 return t

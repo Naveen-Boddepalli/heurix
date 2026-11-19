@@ -5,7 +5,8 @@ Non-Destructive Smart Merge and AST Round-Trip Preservation.
 from __future__ import annotations
 
 import io
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any
+
 from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedMap, CommentedSeq
 
@@ -18,7 +19,7 @@ class YamlSyntaxError(Exception):
     """Raised when existing or synthesized YAML content contains invalid syntax."""
 
 
-def _normalize_step_uses(step: Any) -> Optional[str]:
+def _normalize_step_uses(step: Any) -> str | None:
     """Return normalized action repository/path (without @ref) for a workflow step."""
     if not isinstance(step, (dict, CommentedMap)):
         return None
@@ -31,7 +32,7 @@ def _normalize_step_uses(step: Any) -> Optional[str]:
     return val.split("@", 1)[0].strip().lower()
 
 
-def _normalize_step_name(step: Any) -> Optional[str]:
+def _normalize_step_name(step: Any) -> str | None:
     """Return normalized lowercase name for a workflow step."""
     if not isinstance(step, (dict, CommentedMap)):
         return None
@@ -42,7 +43,7 @@ def _normalize_step_name(step: Any) -> Optional[str]:
     return val if val else None
 
 
-def _normalize_step_run(step: Any) -> Optional[str]:
+def _normalize_step_run(step: Any) -> str | None:
     """Return whitespace-normalized run command for a workflow step."""
     if not isinstance(step, (dict, CommentedMap)):
         return None
@@ -56,7 +57,7 @@ def _normalize_step_run(step: Any) -> Optional[str]:
 _HPA_METRIC_SUBKEYS = ("resource", "pods", "object", "external", "containerResource")
 
 
-def _extract_hpa_metric_key(item: Any) -> Optional[Tuple[str, str]]:
+def _extract_hpa_metric_key(item: Any) -> tuple[str, str] | None:
     """Extract (type, metric_name) identity for Kubernetes HPA v2 spec.metrics items."""
     if not isinstance(item, (dict, CommentedMap)) or "type" not in item:
         return None
@@ -74,7 +75,7 @@ def _extract_hpa_metric_key(item: Any) -> Optional[Tuple[str, str]]:
     return None
 
 
-def _get_entity_identifier(item: Any) -> Optional[Tuple[str, Any]]:
+def _get_entity_identifier(item: Any) -> tuple[str, Any] | None:
     """Extract the primary identity key/value pair from a YAML mapping sequence item."""
     if isinstance(item, (dict, CommentedMap)):
         hpa_key = _extract_hpa_metric_key(item)
@@ -86,9 +87,7 @@ def _get_entity_identifier(item: Any) -> Optional[Tuple[str, Any]]:
     return None
 
 
-def _sequence_items_match(
-    ex_item: Any, new_item: Any, ident_key: str, ident_val: Any
-) -> bool:
+def _sequence_items_match(ex_item: Any, new_item: Any, ident_key: str, ident_val: Any) -> bool:
     """Return True if an existing sequence mapping represents the same entity as new_item."""
     if ident_key == "__hpa_metric__":
         return _extract_hpa_metric_key(ex_item) == ident_val
@@ -125,9 +124,7 @@ def deep_merge_nodes(existing: Any, new: Any) -> Any:
                 if has_probe_handler and k in PROBE_HANDLER_KEYS:
                     continue
                 existing[k] = v
-            elif existing[k] is None and isinstance(
-                v, (dict, CommentedMap, list, CommentedSeq)
-            ):
+            elif existing[k] is None and isinstance(v, (dict, CommentedMap, list, CommentedSeq)):
                 existing[k] = v
             else:
                 deep_merge_nodes(existing[k], v)
@@ -156,7 +153,7 @@ def deep_merge_nodes(existing: Any, new: Any) -> Any:
     return existing
 
 
-def _get_doc_identity(doc: Any) -> Optional[Tuple[Optional[str], Optional[str]]]:
+def _get_doc_identity(doc: Any) -> tuple[str | None, str | None] | None:
     """Extract (kind, metadata.name) identity for Kubernetes multi-document correlation."""
     if not isinstance(doc, (dict, CommentedMap)):
         return None
@@ -187,7 +184,7 @@ class SmartMerger:
         # Match the template renderer's width so merged output never re-wraps long scalars.
         self.yaml.width = 4096
         # Human-readable notes about existing values the last merge replaced.
-        self.replaced: List[str] = []
+        self.replaced: list[str] = []
 
     def merge_yaml(self, existing_content: str, new_content: str) -> str:
         """
@@ -201,16 +198,12 @@ class SmartMerger:
         try:
             existing_docs = [d for d in self.yaml.load_all(existing_content) if d is not None]
         except Exception as e:
-            raise YamlSyntaxError(
-                f"Existing YAML has invalid syntax and cannot be safely merged: {e}"
-            ) from e
+            raise YamlSyntaxError(f"Existing YAML has invalid syntax and cannot be safely merged: {e}") from e
 
         try:
             new_docs = [d for d in self.yaml.load_all(new_content) if d is not None]
         except Exception as e:
-            raise YamlSyntaxError(
-                f"Synthesized YAML has invalid syntax and cannot be merged: {e}"
-            ) from e
+            raise YamlSyntaxError(f"Synthesized YAML has invalid syntax and cannot be merged: {e}") from e
 
         if not existing_docs or not new_docs:
             return new_content
@@ -239,17 +232,17 @@ class SmartMerger:
         self.yaml.dump(merged_doc, stream)
         return stream.getvalue()
 
-    def _merge_multidoc(self, existing_docs: List[Any], new_docs: List[Any]) -> List[Any]:
+    def _merge_multidoc(self, existing_docs: list[Any], new_docs: list[Any]) -> list[Any]:
         """
         Merge multi-document YAML streams by correlating documents on (kind, metadata.name).
         Existing unmatched documents are preserved; new unmatched documents are appended.
         """
-        merged_docs: List[Any] = list(existing_docs)
-        matched_existing_indices: Set[int] = set()
+        merged_docs: list[Any] = list(existing_docs)
+        matched_existing_indices: set[int] = set()
 
         for new_doc in new_docs:
             new_ident = _get_doc_identity(new_doc)
-            matched_idx: Optional[int] = None
+            matched_idx: int | None = None
 
             if new_ident is not None:
                 for idx, ex_doc in enumerate(merged_docs):
@@ -291,10 +284,10 @@ class SmartMerger:
 
     def _merge_github_workflow(
         self,
-        existing: CommentedMap,
-        new: CommentedMap,
+        existing: dict[Any, Any],
+        new: dict[Any, Any],
         raw_existing: str,
-    ) -> CommentedMap:
+    ) -> dict[Any, Any]:
         result = existing.copy()
 
         # Update metadata if needed, but preserve user triggers if customized
@@ -337,9 +330,7 @@ class SmartMerger:
         for job_id, job_val in new_jobs.items():
             if job_id in existing_jobs:
                 # Merge the managed job
-                merged_jobs[job_id] = self._merge_job(
-                    existing_jobs[job_id], job_val, raw_existing, job_id=str(job_id)
-                )
+                merged_jobs[job_id] = self._merge_job(existing_jobs[job_id], job_val, raw_existing, job_id=str(job_id))
             else:
                 merged_jobs[job_id] = job_val
 
@@ -352,9 +343,9 @@ class SmartMerger:
         return result
 
     @staticmethod
-    def _collect_comment_values(token: Any, require_newline_marker: bool = False) -> List[str]:
+    def _collect_comment_values(token: Any, require_newline_marker: bool = False) -> list[str]:
         """Extract string values from a ruamel.yaml comment token or token list."""
-        values: List[str] = []
+        values: list[str] = []
         items = token if isinstance(token, list) else [token]
         for t in items:
             val = getattr(t, "value", None)
@@ -369,7 +360,7 @@ class SmartMerger:
 
     def _has_internal_preserve_comment(self, seq: Any, idx: int, item: Any) -> bool:
         """Check whether preserve directive comments are attached directly inside a step mapping."""
-        comment_blobs: List[str] = []
+        comment_blobs: list[str] = []
         if hasattr(item, "ca") and item.ca:
             if item.ca.comment:
                 for token in item.ca.comment:
@@ -393,7 +384,7 @@ class SmartMerger:
 
     def _has_preserve_comment(self, seq: Any, idx: int, item: Any) -> bool:
         """Check ruamel.yaml comment attributes on sequence index and mapping keys."""
-        comment_blobs: List[str] = []
+        comment_blobs: list[str] = []
 
         # Sequence comments for first item (comments placed above first list item)
         if idx == 0 and hasattr(seq, "ca") and seq.ca and seq.ca.comment:
@@ -417,9 +408,7 @@ class SmartMerger:
                     if tokens:
                         for token in tokens:
                             if token:
-                                comment_blobs.extend(
-                                    self._collect_comment_values(token, require_newline_marker=True)
-                                )
+                                comment_blobs.extend(self._collect_comment_values(token, require_newline_marker=True))
 
         if any(m in "\n".join(comment_blobs) for m in PRESERVE_MARKERS):
             return True
@@ -427,24 +416,16 @@ class SmartMerger:
         # 3. Check mapping internal comments (pre-comments on keys, inline comments)
         return self._has_internal_preserve_comment(seq, idx, item)
 
-    def _match_steps(
-        self, existing_steps: List[Any], new_steps: List[Any]
-    ) -> Tuple[Dict[int, int], Dict[int, int]]:
+    def _match_steps(self, existing_steps: list[Any], new_steps: list[Any]) -> tuple[dict[int, int], dict[int, int]]:
         """
         Match existing workflow steps to synthesized new steps 1-to-1
         by compound identity, uses action base, step name, or run command.
         """
-        ex_sig = [
-            (_normalize_step_uses(s), _normalize_step_name(s), _normalize_step_run(s))
-            for s in existing_steps
-        ]
-        new_sig = [
-            (_normalize_step_uses(s), _normalize_step_name(s), _normalize_step_run(s))
-            for s in new_steps
-        ]
+        ex_sig = [(_normalize_step_uses(s), _normalize_step_name(s), _normalize_step_run(s)) for s in existing_steps]
+        new_sig = [(_normalize_step_uses(s), _normalize_step_name(s), _normalize_step_run(s)) for s in new_steps]
 
-        ex_to_new: Dict[int, int] = {}
-        new_to_ex: Dict[int, int] = {}
+        ex_to_new: dict[int, int] = {}
+        new_to_ex: dict[int, int] = {}
 
         def _run_pass(predicate: Any) -> None:
             for i, es in enumerate(ex_sig):
@@ -460,8 +441,10 @@ class SmartMerger:
 
         # Pass 1: exact compound identity (uses + name, or name + run)
         _run_pass(
-            lambda e, n: (e[0] is not None and e[0] == n[0] and e[1] is not None and e[1] == n[1])
-            or (e[1] is not None and e[1] == n[1] and e[2] is not None and e[2] == n[2])
+            lambda e, n: (
+                (e[0] is not None and e[0] == n[0] and e[1] is not None and e[1] == n[1])
+                or (e[1] is not None and e[1] == n[1] and e[2] is not None and e[2] == n[2])
+            )
         )
         # Pass 2: action repository match (handles @v3 -> @v4 and label changes)
         _run_pass(lambda e, n: e[0] is not None and e[0] == n[0])
@@ -505,16 +488,12 @@ class SmartMerger:
                 and not isinstance(old_val, (dict, list))
                 and self._plain(old_val) != self._plain(new_val)
             ):
-                self.replaced.append(
-                    f"jobs.{job_id}.{key}: '{old_val}' -> '{new_val}'"
-                )
+                self.replaced.append(f"jobs.{job_id}.{key}: '{old_val}' -> '{new_val}'")
             merged_job[key] = new_val
         elif key == "services":
             merged_job.pop(key, None)
 
-    def _merge_job(
-        self, existing_job: Any, new_job: Any, raw_existing: str = "", job_id: str = ""
-    ) -> Any:
+    def _merge_job(self, existing_job: Any, new_job: Any, raw_existing: str = "", job_id: str = "") -> Any:
         if not isinstance(existing_job, dict) or not isinstance(new_job, dict):
             return new_job
 
@@ -545,7 +524,9 @@ class SmartMerger:
                 merged_job["defaults"] = new_defaults
         else:
             ex_defaults = merged_job.get("defaults")
-            if isinstance(ex_defaults, (dict, CommentedMap)) and isinstance(ex_defaults.get("run"), (dict, CommentedMap)):
+            if isinstance(ex_defaults, (dict, CommentedMap)) and isinstance(
+                ex_defaults.get("run"), (dict, CommentedMap)
+            ):
                 ex_run = ex_defaults["run"]
                 if "working-directory" in ex_run:
                     merged_defaults = ex_defaults.copy()
@@ -586,21 +567,18 @@ class SmartMerger:
         existing_steps = list(existing_job.get("steps") or [])
         existing_seq = existing_job.get("steps")
 
-        ex_preserved = [
-            self._has_preserve_comment(existing_seq, idx, step)
-            for idx, step in enumerate(existing_steps)
-        ]
+        ex_preserved = [self._has_preserve_comment(existing_seq, idx, step) for idx, step in enumerate(existing_steps)]
 
         ex_to_new, new_to_ex = self._match_steps(existing_steps, new_steps)
 
         # Anchor unmatched existing steps (both @preserve and unmanaged) relative to the next matched step
-        anchored_before: Dict[int, List[int]] = {j: [] for j in range(len(new_steps))}
-        trailing_existing: List[int] = []
+        anchored_before: dict[int, list[int]] = {j: [] for j in range(len(new_steps))}
+        trailing_existing: list[int] = []
 
         for idx in range(len(existing_steps)):
             if idx in ex_to_new:
                 continue
-            next_new_idx: Optional[int] = None
+            next_new_idx: int | None = None
             for k in range(idx + 1, len(existing_steps)):
                 if k in ex_to_new:
                     next_new_idx = ex_to_new[k]
@@ -611,7 +589,7 @@ class SmartMerger:
                 trailing_existing.append(idx)
 
         final_steps = CommentedSeq()
-        preserve_comment_indices: List[int] = []
+        preserve_comment_indices: list[int] = []
 
         def _append_existing(ex_idx: int) -> None:
             step = existing_steps[ex_idx]
@@ -633,9 +611,7 @@ class SmartMerger:
                     new_run = _normalize_step_run(new_step)
                     if old_run and new_run and old_run != new_run:
                         label = str(new_step.get("name") or new_run)
-                        self.replaced.append(
-                            f"jobs.{job_id}.steps['{label}'].run: '{old_run}' -> '{new_run}'"
-                        )
+                        self.replaced.append(f"jobs.{job_id}.steps['{label}'].run: '{old_run}' -> '{new_run}'")
                 final_steps.append(new_step)
 
         for ex_idx in trailing_existing:
@@ -654,9 +630,7 @@ class SmartMerger:
             except Exception:
                 dash_col = 0
         for pos in preserve_comment_indices:
-            final_steps.yaml_set_comment_before_after_key(
-                pos, before="@heurix:preserve", indent=dash_col
-            )
+            final_steps.yaml_set_comment_before_after_key(pos, before="@heurix:preserve", indent=dash_col)
 
         merged_job["steps"] = final_steps
         return merged_job

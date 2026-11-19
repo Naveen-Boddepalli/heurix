@@ -7,14 +7,14 @@ from __future__ import annotations
 import os
 from collections import OrderedDict, defaultdict
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple
+
 import pathspec
 
 MAX_FILE_SIZE_BYTES = 1_048_576
 MAX_CACHE_ENTRIES = 512
 MAX_CACHE_BYTES = 32 * 1024 * 1024
 
-LANG_EXTENSIONS: Dict[str, Set[str]] = {
+LANG_EXTENSIONS: dict[str, set[str]] = {
     "python": {".py", ".pyi", ".pyx"},
     "node": {".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"},
     "rust": {".rs"},
@@ -22,7 +22,7 @@ LANG_EXTENSIONS: Dict[str, Set[str]] = {
     "cpp": {".cpp", ".cxx", ".cc", ".c", ".hpp", ".hxx", ".hh", ".h"},
 }
 
-ROOT_MANIFESTS: Dict[str, Set[str]] = {
+ROOT_MANIFESTS: dict[str, set[str]] = {
     "python": {
         "pyproject.toml",
         "setup.py",
@@ -69,7 +69,7 @@ DEFAULT_IGNORE_DIRS: frozenset[str] = frozenset(
     }
 )
 
-DEFAULT_IGNORE_SUFFIXES: Tuple[str, ...] = (".pyc", ".pyo", ".pyd")
+DEFAULT_IGNORE_SUFFIXES: tuple[str, ...] = (".pyc", ".pyo", ".pyd")
 DEFAULT_IGNORE_FILES: frozenset[str] = frozenset({".DS_Store"})
 
 # Standard directories and patterns to ignore across all repos (retained for compatibility)
@@ -113,14 +113,14 @@ DEFAULT_IGNORES = [
 
 def _compile_gitignore(
     gitignore_path: str | Path,
-) -> Optional[Tuple[pathspec.GitIgnoreSpec, bool, Set[str]]]:
+) -> tuple[pathspec.GitIgnoreSpec, bool, set[str]] | None:
     """
     Compile a .gitignore file into a GitIgnoreSpec alongside a flag indicating
     whether explicit ! negations are present and any default-ignored directory
     names referenced by ! negation lines.
     """
     try:
-        with open(gitignore_path, "r", encoding="utf-8-sig", errors="ignore") as f:
+        with open(gitignore_path, encoding="utf-8-sig", errors="ignore") as f:
             lines = [ln for ln in f if ln.strip() and not ln.lstrip().startswith("#")]
     except OSError:
         return None
@@ -133,7 +133,7 @@ def _compile_gitignore(
         return None
 
     has_neg = any(getattr(p, "include", None) is False for p in spec.patterns)
-    negated_dirs: Set[str] = set()
+    negated_dirs: set[str] = set()
     if has_neg:
         for pattern in spec.patterns:
             if getattr(pattern, "include", None) is False:
@@ -151,8 +151,8 @@ def _compile_gitignore(
 
 def _eval_gitignore_layers(
     rel_path: str,
-    rev_layers: List[Tuple[int, pathspec.GitIgnoreSpec, bool]],
-) -> Optional[bool]:
+    rev_layers: list[tuple[int, pathspec.GitIgnoreSpec, bool]],
+) -> bool | None:
     """
     Evaluate compiled GitIgnoreSpec layers from deepest directory to root.
     Returns True if explicitly ignored, False if explicitly re-included via !,
@@ -171,7 +171,7 @@ def _eval_gitignore_layers(
 
 def _is_ignored(
     rel_path: str,
-    rev_layers: List[Tuple[int, pathspec.GitIgnoreSpec, bool]],
+    rev_layers: list[tuple[int, pathspec.GitIgnoreSpec, bool]],
 ) -> bool:
     """Return True if rel_path is ignored by the deepest-to-root .gitignore stack."""
     return _eval_gitignore_layers(rel_path, rev_layers) is True
@@ -201,10 +201,10 @@ class RepoIndexer:
         self.max_file_size_bytes = max_file_size_bytes
         self.max_cache_entries = max_cache_entries
         self.max_cache_bytes = max_cache_bytes
-        self._files: List[str] = []
-        self._file_set: Set[str] = set()
+        self._files: list[str] = []
+        self._file_set: set[str] = set()
         self._content_cache: OrderedDict[str, str] = OrderedDict()
-        self._cache_sizes: Dict[str, int] = {}
+        self._cache_sizes: dict[str, int] = {}
         self._cache_bytes: int = 0
         self._index_files()
 
@@ -214,10 +214,10 @@ class RepoIndexer:
         root_prefix_len = len(root_str) if root_str.endswith(os.sep) else len(root_str) + 1
 
         # Stack entry: (layers, negated_default_dirs, in_default_dir, neg_default_files)
-        dir_stacks: Dict[
+        dir_stacks: dict[
             str,
-            Tuple[
-                List[Tuple[int, pathspec.GitIgnoreSpec, bool]],
+            tuple[
+                list[tuple[int, pathspec.GitIgnoreSpec, bool]],
                 frozenset[str],
                 bool,
                 bool,
@@ -234,7 +234,7 @@ class RepoIndexer:
                 compiled = _compile_gitignore(os.path.join(dirpath, ".gitignore"))
                 if compiled is not None:
                     spec, has_neg, layer_neg_dirs = compiled
-                    layers = layers + [(len(rel_dir_clean), spec, has_neg)]
+                    layers = [*layers, (len(rel_dir_clean), spec, has_neg)]
                     if layer_neg_dirs:
                         neg_dirs = neg_dirs | layer_neg_dirs
                     if has_neg and not neg_default_files:
@@ -242,8 +242,7 @@ class RepoIndexer:
                             if getattr(pat, "include", None) is False:
                                 pat_str = getattr(pat, "pattern", "")
                                 if isinstance(pat_str, str) and any(
-                                    tok in pat_str
-                                    for tok in (".DS_Store", ".pyc", ".pyo", ".pyd", "egg-info")
+                                    tok in pat_str for tok in (".DS_Store", ".pyc", ".pyo", ".pyd", "egg-info")
                                 ):
                                     neg_default_files = True
                                     break
@@ -251,16 +250,12 @@ class RepoIndexer:
             rev_layers = layers[::-1]
 
             if dirnames:
-                kept_dirs: List[str] = []
+                kept_dirs: list[str] = []
                 for d in dirnames:
                     if d in ALWAYS_IGNORE_DIRS:
                         continue
                     is_default_dir = d in DEFAULT_IGNORE_DIRS or d.endswith(".egg-info")
-                    if (
-                        is_default_dir
-                        and d not in neg_dirs
-                        and not (d.endswith(".egg-info") and neg_default_files)
-                    ):
+                    if is_default_dir and d not in neg_dirs and not (d.endswith(".egg-info") and neg_default_files):
                         continue
 
                     candidate = (rel_dir_clean + d + "/") if rel_dir_clean else (d + "/")
@@ -281,9 +276,7 @@ class RepoIndexer:
                 if f in ALWAYS_IGNORE_DIRS:
                     continue
                 is_default_file = (
-                    f in DEFAULT_IGNORE_FILES
-                    or f.endswith(DEFAULT_IGNORE_SUFFIXES)
-                    or f.endswith(".egg-info")
+                    f in DEFAULT_IGNORE_FILES or f.endswith(DEFAULT_IGNORE_SUFFIXES) or f.endswith(".egg-info")
                 )
                 if is_default_file and not neg_default_files:
                     continue
@@ -300,13 +293,13 @@ class RepoIndexer:
         self._file_set = set(self._files)
 
     @property
-    def files(self) -> List[str]:
+    def files(self) -> list[str]:
         return self._files
 
     def has_file(self, rel_path: str) -> bool:
         return _normalize_rel_path(rel_path) in self._file_set
 
-    def read_text(self, rel_path: str) -> Optional[str]:
+    def read_text(self, rel_path: str) -> str | None:
         normalized = _normalize_rel_path(rel_path)
         if normalized not in self._file_set:
             return None
@@ -338,20 +331,25 @@ class RepoIndexer:
 
         return content
 
-    def find_files(self, glob_pattern: str) -> List[str]:
+    def find_files(self, glob_pattern: str) -> list[str]:
         import fnmatch
-        return [f for f in self._files if fnmatch.fnmatch(f, glob_pattern) or fnmatch.fnmatch(os.path.basename(f), glob_pattern)]
 
-    def find_by_name(self, filename: str) -> List[str]:
+        return [
+            f
+            for f in self._files
+            if fnmatch.fnmatch(f, glob_pattern) or fnmatch.fnmatch(os.path.basename(f), glob_pattern)
+        ]
+
+    def find_by_name(self, filename: str) -> list[str]:
         return [f for f in self._files if os.path.basename(f) == filename]
 
-    def get_language_metrics(self) -> Dict[str, Dict[str, int | bool]]:
+    def get_language_metrics(self) -> dict[str, dict[str, int | bool]]:
         """
         Compute source file volume and root-level manifest metrics per ecosystem.
         Counts only non-ignored files indexed by RepoIndexer.
         """
-        ext_counts: Dict[str, int] = defaultdict(int)
-        root_files: Set[str] = set()
+        ext_counts: dict[str, int] = defaultdict(int)
+        root_files: set[str] = set()
 
         for rel_path in self._files:
             if "/" not in rel_path and "\\" not in rel_path:
@@ -360,7 +358,7 @@ class RepoIndexer:
             if ext:
                 ext_counts[ext.lower()] += 1
 
-        metrics: Dict[str, Dict[str, int | bool]] = {}
+        metrics: dict[str, dict[str, int | bool]] = {}
         for lang, exts in LANG_EXTENSIONS.items():
             file_count = sum(ext_counts[e] for e in exts)
             has_root = any(m in root_files for m in ROOT_MANIFESTS[lang])
@@ -376,7 +374,7 @@ class RepoIndexer:
 
         return metrics
 
-    def compute_language_scores(self) -> Dict[str, int]:
+    def compute_language_scores(self) -> dict[str, int]:
         """
         Compute weighted ecosystem scores combining source file counts and
         10-point root manifest bonuses.

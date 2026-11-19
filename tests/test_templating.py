@@ -45,10 +45,10 @@ def test_templating_choice_loader_and_sandbox_blocks_escapes(tmp_path: Path) -> 
     # Render bundled macros/actions.j2 under StrictUndefined with minimal and full step fields
     macro_wrapper = env.from_string(
         '{% from "macros/actions.j2" import render_step %}\n'
-        'steps:\n'
-        '{{ render_step(s1) }}'
-        '{{ render_step(s2, base_indent=6) }}'
-        '{{ render_step(s3) }}'
+        "steps:\n"
+        "{{ render_step(s1) }}"
+        "{{ render_step(s2, base_indent=6) }}"
+        "{{ render_step(s3) }}"
     )
     rendered = macro_wrapper.render(
         s1={
@@ -92,11 +92,7 @@ def test_templating_choice_loader_and_sandbox_blocks_escapes(tmp_path: Path) -> 
     local_tpl_dir = repo / ".heurix" / "templates" / "workflows"
     local_tpl_dir.mkdir(parents=True)
     (local_tpl_dir / "custom.yml.j2").write_text(
-        '{% from "macros/actions.j2" import render_step %}\n'
-        'jobs:\n'
-        '  test:\n'
-        '    steps:\n'
-        '{{ render_step(step) }}',
+        '{% from "macros/actions.j2" import render_step %}\njobs:\n  test:\n    steps:\n{{ render_step(step) }}',
         encoding="utf-8",
     )
     repo_env = create_template_environment(repo_root=repo)
@@ -247,25 +243,25 @@ def test_templating_yaml_filters_and_roundtrip_normalization(tmp_path: Path) -> 
     tpl_dir = repo / ".heurix" / "templates" / "workflows"
     tpl_dir.mkdir(parents=True)
     (tpl_dir / "sample.yml.j2").write_text(
-        '# Synthesized deterministically by Heurix (hx)\n'
-        '# Non-destructive updates: preserve blocks marked with # @heurix:preserve\n'
+        "# Synthesized deterministically by Heurix (hx)\n"
+        "# Non-destructive updates: preserve blocks marked with # @heurix:preserve\n"
         '{% from "macros/actions.j2" import render_step %}\n'
-        'name: CI\n'
-        'on:\n'
-        '  push:\n'
-        '    branches: [main]\n'
-        'jobs:\n'
-        '  test:\n'
-        '    runs-on: {{ runner | yaml_scalar }}\n'
-        '    strategy:\n'
-        '      fail-fast: false\n'
-        '      matrix:\n'
-        '        os: {{ matrix_os | yaml_inline_list }}\n'
-        '        python-version: {{ python_versions | yaml_inline_list }}\n'
-        '    steps:\n'
-        '{% for step in steps %}'
-        '{{ render_step(step, base_indent=6) }}'
-        '{% endfor %}',
+        "name: CI\n"
+        "on:\n"
+        "  push:\n"
+        "    branches: [main]\n"
+        "jobs:\n"
+        "  test:\n"
+        "    runs-on: {{ runner | yaml_scalar }}\n"
+        "    strategy:\n"
+        "      fail-fast: false\n"
+        "      matrix:\n"
+        "        os: {{ matrix_os | yaml_inline_list }}\n"
+        "        python-version: {{ python_versions | yaml_inline_list }}\n"
+        "    steps:\n"
+        "{% for step in steps %}"
+        "{{ render_step(step, base_indent=6) }}"
+        "{% endfor %}",
         encoding="utf-8",
     )
 
@@ -374,5 +370,3 @@ def test_templating_wheel_packaging_includes_j2_templates(tmp_path: Path) -> Non
         assert metadata_names, "Wheel METADATA missing"
         metadata_text = zf.read(metadata_names[0]).decode("utf-8")
         assert "jinja2>=3.1.6" in metadata_text.lower()
-
-

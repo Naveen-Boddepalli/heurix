@@ -127,15 +127,9 @@ def test_prompts_non_tty_and_eoferror_fallbacks(monkeypatch):
     assert prompts_mod.prompt_backing_services([services[0]]) == [services[0]]
 
     # 3. EOFError resilience when is_interactive_tty is True
-    monkeypatch.setattr(
-        prompts_mod.questionary, "select", lambda *a, **kw: _FakeAsk(exc=EOFError)
-    )
-    monkeypatch.setattr(
-        prompts_mod.questionary, "confirm", lambda *a, **kw: _FakeAsk(exc=EOFError)
-    )
-    monkeypatch.setattr(
-        prompts_mod.questionary, "checkbox", lambda *a, **kw: _FakeAsk(exc=EOFError)
-    )
+    monkeypatch.setattr(prompts_mod.questionary, "select", lambda *a, **kw: _FakeAsk(exc=EOFError))
+    monkeypatch.setattr(prompts_mod.questionary, "confirm", lambda *a, **kw: _FakeAsk(exc=EOFError))
+    monkeypatch.setattr(prompts_mod.questionary, "checkbox", lambda *a, **kw: _FakeAsk(exc=EOFError))
 
     assert prompts_mod.prompt_conflict_resolution("ci.yml") == "apply"
     assert prompts_mod.prompt_e2e_split(["vitest"], ["playwright"]) is True
@@ -162,9 +156,7 @@ def test_prompts_non_tty_and_eoferror_fallbacks(monkeypatch):
     # Duplicate 'postgres' values must be deduplicated cleanly in choices
     assert [c.value for c in captured_choices[-1]] == ["postgres", "redis"]
 
-    monkeypatch.setattr(
-        prompts_mod.questionary, "checkbox", lambda *a, **kw: _FakeAsk([])
-    )
+    monkeypatch.setattr(prompts_mod.questionary, "checkbox", lambda *a, **kw: _FakeAsk([]))
     assert prompts_mod.prompt_deployment_targets(targets) == []
     assert prompts_mod.prompt_backing_services(services) == []
 
@@ -368,9 +360,7 @@ def test_hooks_idempotent_preserve_chmod_and_security(tmp_path: Path, monkeypatc
     fake_bin.mkdir()
     fake_hx = fake_bin / "hx"
     fake_hx.write_text(
-        "#!/usr/bin/env sh\n"
-        "echo \"hx:$*\" >> \"$TRACE_FILE\"\n"
-        "exit \"${FAKE_HX_EXIT:-0}\"\n",
+        '#!/usr/bin/env sh\necho "hx:$*" >> "$TRACE_FILE"\nexit "${FAKE_HX_EXIT:-0}"\n',
         encoding="utf-8",
     )
     fake_hx.chmod(0o755)
@@ -418,9 +408,7 @@ def test_hooks_idempotent_preserve_chmod_and_security(tmp_path: Path, monkeypatc
     venv_bin.mkdir(parents=True)
     venv_hx = venv_bin / "hx"
     venv_hx.write_text(
-        "#!/usr/bin/env sh\n"
-        "echo \"venv-hx:$*\" >> \"$TRACE_FILE\"\n"
-        "exit 0\n",
+        '#!/usr/bin/env sh\necho "venv-hx:$*" >> "$TRACE_FILE"\nexit 0\n',
         encoding="utf-8",
     )
     venv_hx.chmod(0o755)
@@ -503,4 +491,3 @@ def test_hooks_idempotent_preserve_chmod_and_security(tmp_path: Path, monkeypatc
     assert perm_res.status == "error"
     assert perm_res.hook_path == (ro_hooks / "pre-commit").resolve()
     assert "Permission denied" in perm_res.message
-

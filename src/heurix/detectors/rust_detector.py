@@ -5,15 +5,12 @@ Rust Language and Cargo Ecosystem Detector.
 from __future__ import annotations
 
 import sys
-from typing import Optional
 
 if sys.version_info >= (3, 11):
     import tomllib
 else:
-    try:
-        import tomli as tomllib
-    except ImportError:
-        import tomllib  # type: ignore
+    import tomli as tomllib
+
 from heurix.core.context import LanguageContext, MonorepoPackage, ProjectContext
 from heurix.core.indexer import RepoIndexer
 from heurix.core.monorepo import discover_monorepo_topology, parse_cargo_workspace
@@ -48,8 +45,8 @@ class RustDetector(BaseDetector):
         *,
         add_language_ctx: bool = True,
         add_monorepo_pkg: bool = False,
-        is_workspace_root: Optional[bool] = None,
-        root_lockfile: Optional[str] = None,
+        is_workspace_root: bool | None = None,
+        root_lockfile: str | None = None,
     ) -> LanguageContext:
         scope_label = f" in {base_dir}" if base_dir != "." else ""
         rust_version = "stable"
@@ -79,7 +76,7 @@ class RustDetector(BaseDetector):
 
         context.add_explain(f"Detected Rust toolchain{scope_label}: {rust_version} (via {version_source})")
 
-        framework: Optional[str] = None
+        framework: str | None = None
         cargo_path = _join(base_dir, "Cargo.toml")
         cargo_content = indexer.read_text(cargo_path) or ""
         if "actix-web" in cargo_content:
@@ -93,7 +90,7 @@ class RustDetector(BaseDetector):
             context.add_explain(f"Detected Framework{scope_label}: {framework}")
 
         cargo_lock = _join(base_dir, "Cargo.lock")
-        cache_dependency_path: Optional[str] = None
+        cache_dependency_path: str | None = None
         if indexer.has_file(cargo_lock):
             cache_dependency_path = cargo_lock
         elif base_dir != "." and root_lockfile is not None:
@@ -239,4 +236,3 @@ class RustDetector(BaseDetector):
                 is_workspace_root=None,
                 root_lockfile=root_lockfile,
             )
-

@@ -392,9 +392,7 @@ def test_discover_explicit_pnpm_workspace_with_exclusions_and_deep_glob(tmp_path
     assert topo.is_monorepo is True
     assert topo.has_workspace_config is True
     assert "pnpm" in topo.workspace_kinds
-    assert topo.packages_by_lang == {
-        "node": ["apps/web", "examples/demo", "packages/ui/button"]
-    }
+    assert topo.packages_by_lang == {"node": ["apps/web", "examples/demo", "packages/ui/button"]}
     assert topo.all_packages == [
         ("apps/web", "node"),
         ("examples/demo", "node"),
@@ -528,9 +526,18 @@ def test_discover_false_positive_suppression_docs_site_and_cmake(tmp_path: Path)
     _write(tmp_path, ".github/actions/package.json", '{"name": "action"}')
     _write(tmp_path, "k8s/helm/requirements.txt", "pyyaml\n")
 
-    assert {"docs", "site", "examples", "fixtures", "tests", "scripts", "requirements", ".github", "k8s", "packaging"}.issubset(
-        NON_PACKAGE_DIRS
-    )
+    assert {
+        "docs",
+        "site",
+        "examples",
+        "fixtures",
+        "tests",
+        "scripts",
+        "requirements",
+        ".github",
+        "k8s",
+        "packaging",
+    }.issubset(NON_PACKAGE_DIRS)
     assert {"apps", "services", "packages", "crates", "libs", "modules"} == PREFERRED_CONTAINER_GROUPS
     assert set(ECOSYSTEM_MANIFESTS.keys()) == {"node", "python", "rust", "go", "cpp"}
 
@@ -598,4 +605,3 @@ def test_discover_is_monorepo_boundary_conditions_and_determinism(tmp_path: Path
     assert topo_ws.has_workspace_config is True
     assert topo_ws.is_monorepo is True
     assert topo_ws.all_packages == []
-

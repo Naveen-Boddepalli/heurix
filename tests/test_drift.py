@@ -5,6 +5,7 @@ Tests for Drift Detection.
 from __future__ import annotations
 
 from pathlib import Path
+
 from heurix.core.context import LanguageContext, ProjectContext, ServiceRequirement
 from heurix.core.drift import DriftDetector, inspect_workflow_ast
 
@@ -195,7 +196,9 @@ jobs:
             )
         ],
         services=[
-            ServiceRequirement(name="postgres", image="postgres:16-alpine", ports=[5432], source_file="docker-compose.yml"),
+            ServiceRequirement(
+                name="postgres", image="postgres:16-alpine", ports=[5432], source_file="docker-compose.yml"
+            ),
             ServiceRequirement(name="mongodb", image="mongo:6", ports=[27017], source_file="package.json"),
         ],
     )
@@ -783,6 +786,7 @@ jobs:
 
 def test_multijob_drift_monorepo_working_dir_and_packages(tmp_path: Path):
     from ruamel.yaml import YAML
+
     from heurix.core.context import MonorepoPackage
     from heurix.core.drift import WorkflowASTInfo
     from heurix.synthesizers.github_actions import GitHubActionsSynthesizer
@@ -1167,6 +1171,7 @@ jobs:
 
 def test_phase3_drift_policy(tmp_path: Path):
     from ruamel.yaml import YAML
+
     from heurix.core.context import MonorepoPackage
     from heurix.core.drift import WorkflowASTInfo
     from heurix.synthesizers.github_actions import GitHubActionsSynthesizer
@@ -1434,22 +1439,14 @@ def test_e2e_split_and_combined_zero_drift(tmp_path: Path):
     ci_file.write_text(split_files[".github/workflows/ci.yml"], encoding="utf-8")
     assert detector.check_drift(split_ctx, split_files) == []
     # Also zero drift when hx check runs with split_e2e_jobs=None
-    assert (
-        detector.check_drift(split_ctx.model_copy(update={"split_e2e_jobs": None}), split_files)
-        == []
-    )
+    assert detector.check_drift(split_ctx.model_copy(update={"split_e2e_jobs": None}), split_files) == []
 
     # 2. Combined mode with [[ci.steps.pre_test]] + matrix_os -> zero drift
     combined_ctx = split_ctx.model_copy(update={"split_e2e_jobs": False})
     combined_files = syn.synthesize(combined_ctx)
     ci_file.write_text(combined_files[".github/workflows/ci.yml"], encoding="utf-8")
     assert detector.check_drift(combined_ctx, combined_files) == []
-    assert (
-        detector.check_drift(
-            combined_ctx.model_copy(update={"split_e2e_jobs": None}), combined_files
-        )
-        == []
-    )
+    assert detector.check_drift(combined_ctx.model_copy(update={"split_e2e_jobs": None}), combined_files) == []
 
     # 3. Explicit [jobs.test-e2e] pre_steps / runner override and OS matrix drift enforcement
     explicit_e2e_ctx = ProjectContext(
@@ -1521,7 +1518,7 @@ def test_e2e_split_and_combined_zero_drift(tmp_path: Path):
 
 
 def test_drift_mongodb_service_missing_when_pymongo_in_codebase(tmp_path: Path):
-    from heurix.core.context import ProjectContext, ServiceRequirement, LanguageContext
+    from heurix.core.context import LanguageContext, ProjectContext, ServiceRequirement
     from heurix.core.drift import DriftDetector
 
     wf_dir = tmp_path / ".github" / "workflows"
@@ -1584,4 +1581,3 @@ jobs:
     findings = detector.check_drift(ctx, {".github/workflows/ci.yml": "dummy"})
     issues = [f.issue for f in findings]
     assert any("Service 'mongodb' is required by codebase dependencies" in i for i in issues)
-

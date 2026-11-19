@@ -353,29 +353,11 @@ def test_validator_batch_optional_manifest_classification():
     assert PreflightValidator.is_optional_manifest(".github/workflows/evil.k8s.yaml") is False
 
     validator = PreflightValidator()
-    valid_ci = (
-        "name: CI\n"
-        "on: [push]\n"
-        "jobs:\n"
-        "  test:\n"
-        "    runs-on: ubuntu-latest\n"
-        "    steps:\n"
-        "      - run: pytest\n"
-    )
+    valid_ci = "name: CI\non: [push]\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - run: pytest\n"
     valid_dependabot = (
-        "version: 2\n"
-        "updates:\n"
-        "  - package-ecosystem: pip\n"
-        "    directory: /\n"
-        "    schedule:\n"
-        "      interval: weekly\n"
+        "version: 2\nupdates:\n  - package-ecosystem: pip\n    directory: /\n    schedule:\n      interval: weekly\n"
     )
-    valid_k8s_svc = (
-        "apiVersion: v1\n"
-        "kind: Service\n"
-        "metadata:\n"
-        "  name: app-svc\n"
-    )
+    valid_k8s_svc = "apiVersion: v1\nkind: Service\nmetadata:\n  name: app-svc\n"
     invalid_k8s_deploy = "kind: Deployment\nmetadata:\n  name: broken-app\n"
     invalid_k8s_syntax = "apiVersion: apps/v1\nkind: [unclosed\n"
 
@@ -408,14 +390,8 @@ def test_validator_batch_optional_manifest_classification():
         "k8s/deployment.yaml": invalid_k8s_deploy,
         "./deploy/broken.k8s.yml": invalid_k8s_syntax,
     }
-    assert any(
-        "Kubernetes Manifest Schema Error" in msg
-        for msg in outcome.optional_warnings["k8s/deployment.yaml"]
-    )
-    assert any(
-        "YAML Syntax Error" in msg
-        for msg in outcome.optional_warnings["./deploy/broken.k8s.yml"]
-    )
+    assert any("Kubernetes Manifest Schema Error" in msg for msg in outcome.optional_warnings["k8s/deployment.yaml"])
+    assert any("YAML Syntax Error" in msg for msg in outcome.optional_warnings["./deploy/broken.k8s.yml"])
 
     # Empty & all-valid batches stay clean
     empty_outcome = validator.validate_batch({})
@@ -427,15 +403,7 @@ def test_validator_batch_optional_manifest_classification():
 
 def test_validator_batch_strict_and_critical_errors():
     validator = PreflightValidator()
-    valid_ci = (
-        "name: CI\n"
-        "on: [push]\n"
-        "jobs:\n"
-        "  test:\n"
-        "    runs-on: ubuntu-latest\n"
-        "    steps:\n"
-        "      - run: pytest\n"
-    )
+    valid_ci = "name: CI\non: [push]\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - run: pytest\n"
     invalid_k8s = "kind: Deployment\nmetadata:\n  name: broken-app\n"
     invalid_ci = "name: Broken CI\non: push\n"
     invalid_dependabot = "version: 2\nupdates: []\n"
@@ -481,4 +449,3 @@ def test_validator_batch_strict_and_critical_errors():
     is_valid, errors = validator.validate(".github/dependabot.yml", invalid_dependabot)
     assert is_valid is True
     assert errors == []
-

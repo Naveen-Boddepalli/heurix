@@ -48,7 +48,9 @@ def test_github_actions_synthesizer():
 
     assert "actions/checkout@v7" in content
     assert "astral-sh/setup-uv@v5" in content
-    assert "python-version: '3.12'" in content or 'python-version: "3.12"' in content or "python-version: 3.12" in content
+    assert (
+        "python-version: '3.12'" in content or 'python-version: "3.12"' in content or "python-version: 3.12" in content
+    )
     assert "uv sync --frozen" in content
     assert "uv run ruff check ." in content
     assert "uv run pytest" in content
@@ -156,7 +158,11 @@ def test_kubernetes_synthesizer_streamlit_and_configmap():
     assert "targetPort: 8501" in svc
 
     cm = res["k8s/configmap.yaml"]
-    assert "STREAMLIT_SERVER_HEADLESS: 'true'" in cm or 'STREAMLIT_SERVER_HEADLESS: "true"' in cm or "STREAMLIT_SERVER_HEADLESS: true" in cm
+    assert (
+        "STREAMLIT_SERVER_HEADLESS: 'true'" in cm
+        or 'STREAMLIT_SERVER_HEADLESS: "true"' in cm
+        or "STREAMLIT_SERVER_HEADLESS: true" in cm
+    )
     assert "APP_ENV: production" in cm
 
     ing = res["k8s/ingress.yaml"]
@@ -422,6 +428,7 @@ def test_configmap_redaction_omits_empty_configmap_when_all_vars_sensitive():
 
 def test_go_linter_action_integration():
     from ruamel.yaml import YAML
+
     from heurix.core.validator import PreflightValidator
 
     context = ProjectContext(
@@ -457,10 +464,7 @@ def test_go_linter_action_integration():
     context.languages[0].lint_cmd = None
     res_no_lint = GitHubActionsSynthesizer().synthesize(context)
     doc_no_lint = YAML(typ="safe").load(res_no_lint[".github/workflows/ci.yml"])
-    assert not any(
-        "golangci-lint-action" in str(s.get("uses", ""))
-        for s in doc_no_lint["jobs"]["test"]["steps"]
-    )
+    assert not any("golangci-lint-action" in str(s.get("uses", "")) for s in doc_no_lint["jobs"]["test"]["steps"])
 
 
 def test_cross_platform_cpp_runner_adaptation():
@@ -499,18 +503,14 @@ def test_cross_platform_cpp_runner_adaptation():
     )
 
     # macOS runner -> brew
-    mac_doc = YAML(typ="safe").load(
-        syn.synthesize(_cpp_context("macos-latest"))[".github/workflows/ci.yml"]
-    )
+    mac_doc = YAML(typ="safe").load(syn.synthesize(_cpp_context("macos-latest"))[".github/workflows/ci.yml"])
     assert mac_doc["jobs"]["test"]["runs-on"] == "macos-latest"
     mac_runs = [s.get("run", "") for s in mac_doc["jobs"]["test"]["steps"]]
     assert "brew install cmake ninja" in mac_runs
     assert not any("apt-get" in r for r in mac_runs)
 
     # Windows runner -> choco
-    win_doc = YAML(typ="safe").load(
-        syn.synthesize(_cpp_context("windows-latest"))[".github/workflows/ci.yml"]
-    )
+    win_doc = YAML(typ="safe").load(syn.synthesize(_cpp_context("windows-latest"))[".github/workflows/ci.yml"])
     assert win_doc["jobs"]["test"]["runs-on"] == "windows-latest"
     win_runs = [s.get("run", "") for s in win_doc["jobs"]["test"]["steps"]]
     assert "choco install cmake ninja" in win_runs
@@ -555,29 +555,46 @@ def test_branch_target_dynamic_conditionals():
 
     # Default branch -> main
     doc_default = YAML(typ="safe").load(syn.synthesize(_deploy_ctx({}))[".github/workflows/ci.yml"])
-    assert doc_default["jobs"]["deploy_vercel"]["if"] == "github.ref == 'refs/heads/main' && github.event_name == 'push'"
-    assert doc_default["jobs"]["deploy_firebase"]["if"] == "github.ref == 'refs/heads/main' && github.event_name == 'push'"
+    assert (
+        doc_default["jobs"]["deploy_vercel"]["if"] == "github.ref == 'refs/heads/main' && github.event_name == 'push'"
+    )
+    assert (
+        doc_default["jobs"]["deploy_firebase"]["if"] == "github.ref == 'refs/heads/main' && github.event_name == 'push'"
+    )
 
     # Configured master branch
     doc_master = YAML(typ="safe").load(
         syn.synthesize(_deploy_ctx({"ci": {"default_branch": "master"}}))[".github/workflows/ci.yml"]
     )
-    assert doc_master["jobs"]["deploy_vercel"]["if"] == "github.ref == 'refs/heads/master' && github.event_name == 'push'"
-    assert doc_master["jobs"]["deploy_firebase"]["if"] == "github.ref == 'refs/heads/master' && github.event_name == 'push'"
+    assert (
+        doc_master["jobs"]["deploy_vercel"]["if"] == "github.ref == 'refs/heads/master' && github.event_name == 'push'"
+    )
+    assert (
+        doc_master["jobs"]["deploy_firebase"]["if"]
+        == "github.ref == 'refs/heads/master' && github.event_name == 'push'"
+    )
 
     # Custom branch -> develop (both deployment if and workflow triggers)
     doc_develop = YAML(typ="safe").load(
         syn.synthesize(_deploy_ctx({"ci": {"default_branch": "develop"}}))[".github/workflows/ci.yml"]
     )
-    assert doc_develop["jobs"]["deploy_vercel"]["if"] == "github.ref == 'refs/heads/develop' && github.event_name == 'push'"
-    assert doc_develop["jobs"]["deploy_firebase"]["if"] == "github.ref == 'refs/heads/develop' && github.event_name == 'push'"
+    assert (
+        doc_develop["jobs"]["deploy_vercel"]["if"]
+        == "github.ref == 'refs/heads/develop' && github.event_name == 'push'"
+    )
+    assert (
+        doc_develop["jobs"]["deploy_firebase"]["if"]
+        == "github.ref == 'refs/heads/develop' && github.event_name == 'push'"
+    )
     assert "develop" in doc_develop["on"]["push"]["branches"]
     assert "develop" in doc_develop["on"]["pull_request"]["branches"]
 
 
 def test_action_pinning_and_optional_sha_pinning():
     import re
+
     from ruamel.yaml import YAML
+
     from heurix.core.validator import PreflightValidator
 
     checkout_sha = "b4ffde65f46336ab88eb53be808477a3936bae11"
@@ -623,7 +640,9 @@ def test_action_pinning_and_optional_sha_pinning():
 
 def test_multijob_polyglot_monorepo_splitting_and_paths():
     import re
+
     from ruamel.yaml import YAML
+
     from heurix.core.context import MonorepoPackage
     from heurix.core.validator import PreflightValidator
     from heurix.synthesizers.github_actions import sanitize_job_id
@@ -837,6 +856,7 @@ def test_multijob_polyglot_monorepo_splitting_and_paths():
 
 def test_multijob_scoped_services_secrets_and_deploy_needs():
     from ruamel.yaml import YAML
+
     from heurix.core.context import MonorepoPackage
     from heurix.core.validator import PreflightValidator
 
@@ -965,6 +985,7 @@ def test_multijob_scoped_services_secrets_and_deploy_needs():
 
 def test_matrix_synthesis_versions_and_os_across_jobs():
     from ruamel.yaml import YAML
+
     from heurix.core.context import MonorepoPackage
     from heurix.core.validator import PreflightValidator
 
@@ -1089,6 +1110,7 @@ def test_matrix_synthesis_versions_and_os_across_jobs():
 
 def test_matrix_synthesis_cpp_cross_os_and_single_pin_non_matrix():
     from ruamel.yaml import YAML
+
     from heurix.core.context import MonorepoPackage
     from heurix.core.validator import PreflightValidator
 
@@ -1189,6 +1211,7 @@ def test_matrix_synthesis_cpp_cross_os_and_single_pin_non_matrix():
 
 def test_dependabot_monorepo_polyglot_deduped():
     from ruamel.yaml import YAML
+
     from heurix.core.context import MonorepoPackage
     from heurix.core.validator import PreflightValidator
 
@@ -1306,9 +1329,11 @@ def test_dependabot_monorepo_polyglot_deduped():
 
 def test_ci_template_decoupling_and_local_override(tmp_path: Path):
     import re
+
     import pytest
     from jinja2 import PackageLoader
     from ruamel.yaml import YAML
+
     from heurix.core.context import MonorepoPackage
     from heurix.core.validator import PreflightValidator
     from heurix.synthesizers.github_actions import (
@@ -1457,7 +1482,9 @@ def test_ci_template_decoupling_and_local_override(tmp_path: Path):
 
 def test_policy_runners_linters_and_step_injections(tmp_path: Path):
     import re
+
     from ruamel.yaml import YAML
+
     from heurix.core.context import MonorepoPackage
     from heurix.core.validator import PreflightValidator
 
@@ -1647,13 +1674,13 @@ def test_policy_runners_linters_and_step_injections(tmp_path: Path):
         GitHubActionsSynthesizer().synthesize(cpp_linux_ctx)[".github/workflows/ci.yml"]
     )
     cpp_linux_runs = [s.get("run", "") for s in cpp_linux_doc["jobs"]["test"]["steps"]]
-    assert any("sudo apt-get update && sudo apt-get install -y cmake ninja-build build-essential" in r for r in cpp_linux_runs)
+    assert any(
+        "sudo apt-get update && sudo apt-get install -y cmake ninja-build build-essential" in r for r in cpp_linux_runs
+    )
     assert not any("clang-tidy" in r for r in cpp_linux_runs)
 
     # Global [linters].enabled = False suppresses Node linter too
-    global_off_ctx = context.model_copy(
-        update={"policy_config": {"linters": {"enabled": False}}}
-    )
+    global_off_ctx = context.model_copy(update={"policy_config": {"linters": {"enabled": False}}})
     global_off_doc = YAML(typ="safe").load(
         GitHubActionsSynthesizer().synthesize(global_off_ctx)[".github/workflows/ci.yml"]
     )
@@ -1739,10 +1766,7 @@ def test_policy_runners_linters_and_step_injections(tmp_path: Path):
     direct_single_yaml = GitHubActionsSynthesizer().synthesize(direct_single_ctx)[".github/workflows/ci.yml"]
     direct_single_doc = YAML(typ="safe").load(direct_single_yaml)
     assert direct_single_doc["jobs"]["test"]["runs-on"] == "ubuntu-24.04"
-    assert any(
-        s.get("uses") == "codecov/codecov-action@v4"
-        for s in direct_single_doc["jobs"]["test"]["steps"]
-    )
+    assert any(s.get("uses") == "codecov/codecov-action@v4" for s in direct_single_doc["jobs"]["test"]["steps"])
 
     # 7. End-to-end analyze_repository() + GitHubActionsSynthesizer parity
     from heurix.detectors import analyze_repository
@@ -1790,6 +1814,7 @@ def test_dependabot_template_decoupling(tmp_path: Path):
     import pytest
     from jinja2 import PackageLoader
     from ruamel.yaml import YAML
+
     from heurix.core.context import MonorepoPackage
     from heurix.core.validator import PreflightValidator
     from heurix.synthesizers.maintenance import ECOSYSTEM_MAP, MaintenanceSynthesizer, _normalize_dir
@@ -1867,15 +1892,14 @@ def test_dependabot_template_decoupling(tmp_path: Path):
     assert all(u["schedule"]["interval"] == "daily" for u in custom_doc["updates"])
 
     # SEC-01: Out-of-repo templates_dir is rejected
-    bad_ctx = context.model_copy(
-        update={"policy_config": {"engine": {"templates_dir": "../outside_dep"}}}
-    )
+    bad_ctx = context.model_copy(update={"policy_config": {"engine": {"templates_dir": "../outside_dep"}}})
     with pytest.raises(ValueError, match="Path traversal security violation"):
         MaintenanceSynthesizer().synthesize(bad_ctx)
 
 
 def test_e2e_parallel_job_synthesis_and_combined_mode():
     from ruamel.yaml import YAML
+
     from heurix.core.context import MonorepoPackage
     from heurix.core.validator import PreflightValidator
 
@@ -2022,10 +2046,7 @@ def test_e2e_parallel_job_synthesis_and_combined_mode():
         ],
     )
     same_doc = yaml.load(syn.synthesize(same_cmd_ctx)[".github/workflows/ci.yml"])
-    assert not any(
-        s.get("name") == "Run E2E tests (playwright)"
-        for s in same_doc["jobs"]["test"]["steps"]
-    )
+    assert not any(s.get("name") == "Run E2E tests (playwright)" for s in same_doc["jobs"]["test"]["steps"])
 
     # 3. Multi-E2E polyglot monorepo + cross-unit coexistence + pm-specific Playwright install cmds
     mono_ctx = ProjectContext(
@@ -2102,22 +2123,15 @@ def test_e2e_parallel_job_synthesis_and_combined_mode():
     ]
     # apps/admin uses cypress -> no Playwright install step
     assert mono_doc["jobs"]["test-e2e"]["defaults"]["run"]["working-directory"] == "apps/admin"
-    assert not any(
-        "playwright install" in s.get("run", "")
-        for s in mono_doc["jobs"]["test-e2e"]["steps"]
-    )
+    assert not any("playwright install" in s.get("run", "") for s in mono_doc["jobs"]["test-e2e"]["steps"])
     # apps/web uses pnpm -> pnpm exec playwright install --with-deps
     assert mono_doc["jobs"]["test-e2e-2"]["defaults"]["run"]["working-directory"] == "apps/web"
     assert any(
-        s.get("run") == "pnpm exec playwright install --with-deps"
-        for s in mono_doc["jobs"]["test-e2e-2"]["steps"]
+        s.get("run") == "pnpm exec playwright install --with-deps" for s in mono_doc["jobs"]["test-e2e-2"]["steps"]
     )
     # services/api uses uv -> uv run playwright install --with-deps
     assert mono_doc["jobs"]["test-e2e-3"]["defaults"]["run"]["working-directory"] == "services/api"
-    assert any(
-        s.get("run") == "uv run playwright install --with-deps"
-        for s in mono_doc["jobs"]["test-e2e-3"]["steps"]
-    )
+    assert any(s.get("run") == "uv run playwright install --with-deps" for s in mono_doc["jobs"]["test-e2e-3"]["steps"])
 
     # Cross-unit unit+E2E coexistence (Python pytest unit + Node bun playwright E2E)
     cross_ctx = ProjectContext(
@@ -2149,10 +2163,7 @@ def test_e2e_parallel_job_synthesis_and_combined_mode():
     )
     cross_doc = yaml.load(syn.synthesize(cross_ctx)[".github/workflows/ci.yml"])
     assert "test-e2e" in cross_doc["jobs"]
-    assert any(
-        s.get("run") == "bunx playwright install --with-deps"
-        for s in cross_doc["jobs"]["test-e2e"]["steps"]
-    )
+    assert any(s.get("run") == "bunx playwright install --with-deps" for s in cross_doc["jobs"]["test-e2e"]["steps"])
 
     # 4. Baseline parity when no e2e_test_runner exists
     plain_ctx = ProjectContext(
@@ -2171,9 +2182,7 @@ def test_e2e_parallel_job_synthesis_and_combined_mode():
         ],
     )
     plain_default = syn.synthesize(plain_ctx)[".github/workflows/ci.yml"]
-    plain_false = syn.synthesize(plain_ctx.model_copy(update={"split_e2e_jobs": False}))[
-        ".github/workflows/ci.yml"
-    ]
+    plain_false = syn.synthesize(plain_ctx.model_copy(update={"split_e2e_jobs": False}))[".github/workflows/ci.yml"]
     assert plain_default == plain_false
     assert "test-e2e" not in plain_default
 
@@ -2196,6 +2205,7 @@ def test_github_actions_permissions_block_and_action_versions_policy():
     )
 
     from ruamel.yaml import YAML
+
     yaml_parser = YAML(typ="safe")
 
     # 1. Default permissions: contents: read
@@ -2227,6 +2237,7 @@ def test_github_actions_permissions_block_and_action_versions_policy():
 
 def test_kubernetes_hardened_security_context_and_secret_wiring():
     from ruamel.yaml import YAML
+
     yaml_parser = YAML(typ="safe")
     k8s_syn = KubernetesSynthesizer()
     ctx = ProjectContext(
@@ -2280,12 +2291,11 @@ def test_kubernetes_hardened_security_context_and_secret_wiring():
     assert "API_KEY" in sec_doc["stringData"]
 
 
-
 def _postgres_ctx(**overrides):
-    base = dict(
-        repo_name="demo-app",
-        repo_root="/demo",
-        languages=[
+    base = {
+        "repo_name": "demo-app",
+        "repo_root": "/demo",
+        "languages": [
             LanguageContext(
                 language="python",
                 runtime_version="3.12",
@@ -2295,7 +2305,7 @@ def _postgres_ctx(**overrides):
                 test_cmd="uv run pytest",
             )
         ],
-        services=[
+        "services": [
             ServiceRequirement(
                 name="postgres",
                 image="postgres:16-alpine",
@@ -2304,8 +2314,8 @@ def _postgres_ctx(**overrides):
                 source_file="pyproject.toml",
             )
         ],
-        test_secrets=["DATABASE_URL"],
-    )
+        "test_secrets": ["DATABASE_URL"],
+    }
     base.update(overrides)
     return ProjectContext(**base)
 
@@ -2327,9 +2337,7 @@ def test_service_database_url_percent_encodes_credentials():
 def test_ci_env_policy_overrides_service_urls_and_is_validated():
     from heurix.core.policy import HeurixPolicy
 
-    ctx = _postgres_ctx(
-        policy_config={"ci": {"env": {"DATABASE_URL": "postgresql://custom@localhost:5432/app"}}}
-    )
+    ctx = _postgres_ctx(policy_config={"ci": {"env": {"DATABASE_URL": "postgresql://custom@localhost:5432/app"}}})
     env = _test_step_env(GitHubActionsSynthesizer().synthesize(ctx)[".github/workflows/ci.yml"])
     assert env["DATABASE_URL"] == "postgresql://custom@localhost:5432/app"
 

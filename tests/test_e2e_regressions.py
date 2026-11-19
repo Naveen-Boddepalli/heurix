@@ -86,6 +86,7 @@ def test_scan_and_check_reject_missing_or_non_directory_paths(tmp_path: Path):
     missing = tmp_path / "missing"
     a_file = tmp_path / "file.txt"
     a_file.write_text("hi", encoding="utf-8")
+
     def _flat(text: str) -> str:
         # Rich wraps long paths at the console width; compare whitespace-normalized output.
         return " ".join(text.split())

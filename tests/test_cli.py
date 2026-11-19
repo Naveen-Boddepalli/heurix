@@ -5,7 +5,9 @@ Tests for Heurix CLI Commands.
 from __future__ import annotations
 
 from pathlib import Path
+
 from typer.testing import CliRunner
+
 from heurix.cli import app
 
 runner = CliRunner()
@@ -84,7 +86,9 @@ python = "3.11"
     # Runner override applied
     assert "runs-on: ubuntu-22.04" in content
     # Python override applied
-    assert "python-version: '3.11'" in content or 'python-version: "3.11"' in content or "python-version: 3.11" in content
+    assert (
+        "python-version: '3.11'" in content or 'python-version: "3.11"' in content or "python-version: 3.11" in content
+    )
     # Dependabot skipped via include_dependabot = false
     assert not (tmp_path / ".github" / "dependabot.yml").exists()
     # K8s skipped via include_k8s = false
@@ -170,6 +174,7 @@ non_destructive = false
 
 def test_path_traversal_resolve_safe_path(tmp_path: Path):
     import pytest
+
     from heurix.cli import resolve_safe_path
 
     repo = tmp_path / "repo"
@@ -265,6 +270,7 @@ def test_cli_yaml_syntax_error_exits_cleanly(tmp_path: Path):
 def test_cli_monorepo_nested_gitignore_and_matrix_roundtrip(tmp_path: Path):
     import json
     import re
+
     from ruamel.yaml import YAML
 
     # Build polyglot monorepo fixture:
@@ -371,6 +377,7 @@ os = ["ubuntu-latest", "macos-latest"]
 
 def test_cli_monorepo_smart_merge_preserves_custom_steps(tmp_path: Path):
     import json
+
     from ruamel.yaml import YAML
 
     (tmp_path / "pnpm-workspace.yaml").write_text("packages:\n  - 'apps/*'\n", encoding="utf-8")
@@ -498,13 +505,9 @@ python = "3.12"
     assert "strategy" not in collapsed_doc["jobs"]["test-services-api"]
     assert collapsed_doc["jobs"]["test-apps-web"]["runs-on"] == "ubuntu-latest"
     assert collapsed_doc["jobs"]["test-services-api"]["runs-on"] == "ubuntu-latest"
+    assert any(s.get("name") == "Custom Web Security Audit" for s in collapsed_doc["jobs"]["test-apps-web"]["steps"])
     assert any(
-        s.get("name") == "Custom Web Security Audit"
-        for s in collapsed_doc["jobs"]["test-apps-web"]["steps"]
-    )
-    assert any(
-        s.get("name") == "Custom API Coverage Upload"
-        for s in collapsed_doc["jobs"]["test-services-api"]["steps"]
+        s.get("name") == "Custom API Coverage Upload" for s in collapsed_doc["jobs"]["test-services-api"]["steps"]
     )
 
     check_collapsed = runner.invoke(app, ["check", "--path", str(tmp_path)])
@@ -516,7 +519,9 @@ def test_cli_phase3_policy_and_template_override(tmp_path: Path):
     import json
     import re
     import sys
+
     from ruamel.yaml import YAML
+
     from heurix.core.policy import parse_heurix_policy
 
     if sys.version_info >= (3, 11):
@@ -576,7 +581,7 @@ dependencies = [
         encoding="utf-8",
     )
     (app_repo / "Dockerfile").write_text(
-        "FROM python:3.12-slim\nEXPOSE 8000\nCMD [\"uvicorn\", \"app:app\"]\n",
+        'FROM python:3.12-slim\nEXPOSE 8000\nCMD ["uvicorn", "app:app"]\n',
         encoding="utf-8",
     )
     (app_repo / "vercel.json").write_text('{"name": "fastapi-svc"}', encoding="utf-8")
@@ -796,6 +801,7 @@ include_k8s = true
 
 def test_cli_interactive_ambiguity_and_non_interactive_flags(tmp_path: Path, monkeypatch):
     import json
+
     from ruamel.yaml import YAML
 
     def _create_ambiguous_repo(repo_dir: Path) -> None:
@@ -863,10 +869,7 @@ def test_cli_interactive_ambiguity_and_non_interactive_flags(tmp_path: Path, mon
     assert "postgres" in ci_doc["jobs"]["test"]["services"]
     assert "redis" not in ci_doc["jobs"]["test"]["services"]
     assert "FIREBASE_SERVICE_ACCOUNT" not in ci_text
-    assert any(
-        s.get("name") == "Run E2E tests (playwright)"
-        for s in ci_doc["jobs"]["test"]["steps"]
-    )
+    assert any(s.get("name") == "Run E2E tests (playwright)" for s in ci_doc["jobs"]["test"]["steps"])
     assert not (interactive_repo / "k8s").exists()
 
     # 1b. Interactive choices consistent with codebase services pass hx check with zero drift
@@ -889,7 +892,9 @@ def test_cli_interactive_ambiguity_and_non_interactive_flags(tmp_path: Path, mon
     )
     monkeypatch.setattr(
         "heurix.cli.prompt_backing_services",
-        lambda *a, **kw: (_ for _ in ()).throw(AssertionError("services prompt should be skipped when policy excludes services")),
+        lambda *a, **kw: (_ for _ in ()).throw(
+            AssertionError("services prompt should be skipped when policy excludes services")
+        ),
     )
     monkeypatch.setattr(
         "heurix.cli.prompt_k8s_generation",
@@ -917,9 +922,7 @@ def test_cli_interactive_ambiguity_and_non_interactive_flags(tmp_path: Path, mon
     headless_res = runner.invoke(app, ["generate", "--path", str(headless_repo), "--non-interactive"])
     assert headless_res.exit_code == 0, headless_res.stdout
 
-    headless_doc = yaml.load(
-        (headless_repo / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
-    )
+    headless_doc = yaml.load((headless_repo / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8"))
     assert "test-e2e" in headless_doc["jobs"]
     assert "deploy_vercel" in headless_doc["jobs"]
     assert "deploy_firebase" in headless_doc["jobs"]
@@ -1006,19 +1009,9 @@ def test_cli_partial_validation_optional_k8s_and_strict(tmp_path: Path, monkeypa
         "      - uses: actions/checkout@v4\n"
     )
     valid_dependabot = (
-        "version: 2\n"
-        "updates:\n"
-        "  - package-ecosystem: pip\n"
-        "    directory: /\n"
-        "    schedule:\n"
-        "      interval: weekly\n"
+        "version: 2\nupdates:\n  - package-ecosystem: pip\n    directory: /\n    schedule:\n      interval: weekly\n"
     )
-    valid_k8s_svc = (
-        "apiVersion: v1\n"
-        "kind: Service\n"
-        "metadata:\n"
-        "  name: demo\n"
-    )
+    valid_k8s_svc = "apiVersion: v1\nkind: Service\nmetadata:\n  name: demo\n"
     broken_k8s_dep = "apiVersion: apps/v1\nkind: Deployment\n"  # missing required metadata
     broken_ci = "name: CI\njobs:\n  test:\n    runs-on: ubuntu-latest\n"  # missing required steps
 
@@ -1098,6 +1091,7 @@ def test_cli_partial_validation_optional_k8s_and_strict(tmp_path: Path, monkeypa
 def test_cli_init_pre_commit_hooks_lifecycle(tmp_path: Path, monkeypatch):
     import os
     import stat
+
     from heurix.core.hooks import HOOK_END_MARKER, HOOK_START_MARKER
 
     # 1. Fresh git repo with --hooks creates .heurix.toml + executable pre-commit hook
@@ -1251,5 +1245,3 @@ def test_cli_generate_empty_directory_refusal(tmp_path: Path):
     res_override = runner.invoke(app, ["generate", "--path", str(empty_dir), "--yes", "--allow-empty"])
     assert res_override.exit_code == 0
     assert "Refusing to generate empty workflows" not in res_override.stdout
-
-

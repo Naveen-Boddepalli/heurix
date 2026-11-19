@@ -4,12 +4,12 @@ Kubernetes Manifest Synthesizer.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Mapping, Optional, Tuple
+from typing import Any
 
 from heurix.core.context import LanguageContext, ProjectContext
 from heurix.core.policy import (
-    SENSITIVE_KEYWORDS,
     HeurixPolicy,
     K8sProbePolicy,
     is_deployment_secret_key,
@@ -30,13 +30,13 @@ class K8sProbeSpec:
     """Default probe specification for a Kubernetes framework or language profile."""
 
     type: str = "tcpSocket"
-    path: Optional[str] = None
-    port: Optional[int] = None
-    command: Optional[Tuple[str, ...]] = None
+    path: str | None = None
+    port: int | None = None
+    command: tuple[str, ...] | None = None
     initial_delay_seconds: int = 15
     period_seconds: int = 10
-    timeout_seconds: Optional[int] = None
-    failure_threshold: Optional[int] = None
+    timeout_seconds: int | None = None
+    failure_threshold: int | None = None
 
 
 @dataclass(frozen=True)
@@ -121,7 +121,7 @@ def _tcp_profile(
     )
 
 
-K8S_FRAMEWORK_PROFILES: Dict[str, K8sProfile] = {
+K8S_FRAMEWORK_PROFILES: dict[str, K8sProfile] = {
     "Streamlit": _http_profile(8501, "/_stcore/health"),
     "FastAPI": _http_profile(8000, "/health"),
     "Next.js": _http_profile(3000, "/"),
@@ -141,9 +141,7 @@ K8S_FRAMEWORK_PROFILES: Dict[str, K8sProfile] = {
     "Rocket": _tcp_profile(8000, cpu_request="50m", memory_request="64Mi", memory_limit="256Mi"),
 }
 
-_K8S_FRAMEWORK_INDEX: Dict[str, K8sProfile] = {
-    key.lower(): val for key, val in K8S_FRAMEWORK_PROFILES.items()
-}
+_K8S_FRAMEWORK_INDEX: dict[str, K8sProfile] = {key.lower(): val for key, val in K8S_FRAMEWORK_PROFILES.items()}
 
 _GO_RUST_BASELINE = _tcp_profile(
     8080,
@@ -162,14 +160,14 @@ _DEFAULT_BASELINE = _tcp_profile(
 )
 
 
-def _resolve_language_baseline(language: Optional[str]) -> K8sProfile:
+def _resolve_language_baseline(language: str | None) -> K8sProfile:
     """Resolve default Kubernetes resource/probe profile for a language runtime."""
     if language and language.strip().lower() in {"go", "rust"}:
         return _GO_RUST_BASELINE
     return _DEFAULT_BASELINE
 
 
-def _resolve_k8s_profile(primary: Optional[LanguageContext]) -> K8sProfile:
+def _resolve_k8s_profile(primary: LanguageContext | None) -> K8sProfile:
     """Select the framework profile if recognized, else fall back to language baseline."""
     if primary is not None:
         if primary.framework:
@@ -180,9 +178,9 @@ def _resolve_k8s_profile(primary: Optional[LanguageContext]) -> K8sProfile:
     return _DEFAULT_BASELINE
 
 
-def _build_default_probe(spec: K8sProbeSpec, port: int) -> Dict[str, Any]:
+def _build_default_probe(spec: K8sProbeSpec, port: int) -> dict[str, Any]:
     probe_port = spec.port if spec.port is not None else port
-    probe: Dict[str, Any] = {}
+    probe: dict[str, Any] = {}
     if spec.type == "httpGet":
         probe["httpGet"] = {"path": spec.path or "/", "port": probe_port}
     elif spec.type == "exec" and spec.command:
@@ -204,7 +202,7 @@ def _resolve_probe(
     resolved_port: int,
     context: ProjectContext,
     probe_name: str = "probe",
-) -> Optional[Dict[str, Any]]:
+) -> dict[str, Any] | None:
     """
     Resolve a Kubernetes probe dictionary from framework defaults and policy overrides.
 
@@ -214,6 +212,7 @@ def _resolve_probe(
     if policy_probe.enabled is False:
         return None
 
+    probe_type: str
     if policy_probe.type is not None:
         probe_type = policy_probe.type
     elif policy_probe.path is not None:
@@ -233,15 +232,9 @@ def _resolve_probe(
         if policy_probe.initial_delay_seconds is not None
         else profile_probe.initial_delay_seconds
     )
-    period = (
-        policy_probe.period_seconds
-        if policy_probe.period_seconds is not None
-        else profile_probe.period_seconds
-    )
+    period = policy_probe.period_seconds if policy_probe.period_seconds is not None else profile_probe.period_seconds
     timeout = (
-        policy_probe.timeout_seconds
-        if policy_probe.timeout_seconds is not None
-        else profile_probe.timeout_seconds
+        policy_probe.timeout_seconds if policy_probe.timeout_seconds is not None else profile_probe.timeout_seconds
     )
     failure_threshold = (
         policy_probe.failure_threshold
@@ -260,14 +253,14 @@ def _resolve_probe(
                 f"Warning: Ignoring invalid empty exec command for Kubernetes {probe_name}; falling back to profile default."
             )
             return _build_default_probe(profile_probe, resolved_port)
-        handler: Dict[str, Any] = {"exec": {"command": [str(part) for part in cmd]}}
+        handler: dict[str, Any] = {"exec": {"command": [str(part) for part in cmd]}}
     elif probe_type == "httpGet":
         probe_path = policy_probe.path or profile_probe.path or "/"
         handler = {"httpGet": {"path": probe_path, "port": probe_port}}
     else:
         handler = {"tcpSocket": {"port": probe_port}}
 
-    probe: Dict[str, Any] = dict(handler)
+    probe: dict[str, Any] = dict(handler)
     probe["initialDelaySeconds"] = initial_delay
     probe["periodSeconds"] = period
     if timeout is not None:
@@ -282,7 +275,7 @@ class KubernetesSynthesizer(BaseSynthesizer):
     def name(self) -> str:
         return "Kubernetes Manifests"
 
-    def synthesize(self, context: ProjectContext) -> Dict[str, str]:
+    def synthesize(self, context: ProjectContext) -> dict[str, str]:
         raw_cfg = context.policy_config if isinstance(context.policy_config, Mapping) else {}
         policy = HeurixPolicy.from_raw(raw_cfg)
         k8s_policy = policy.kubernetes
@@ -301,9 +294,7 @@ class KubernetesSynthesizer(BaseSynthesizer):
         app_name = context.repo_name.lower().replace("_", "-")
         primary = context.get_primary_language()
         profile = _resolve_k8s_profile(primary)
-        is_streamlit = bool(
-            primary and primary.framework and primary.framework.strip().lower() == "streamlit"
-        )
+        is_streamlit = bool(primary and primary.framework and primary.framework.strip().lower() == "streamlit")
 
         dockerfile_port = next(
             (c.exposed_ports[0] for c in context.containers if c.exposed_ports),
@@ -353,7 +344,7 @@ class KubernetesSynthesizer(BaseSynthesizer):
             if key not in deploy_only and not is_deployment_secret_key(key)
         }
 
-        merged_env: Dict[str, str] = {}
+        merged_env: dict[str, str] = {}
         for k, v in context.env_vars.items():
             merged_env[str(k)] = str(v)
         for k, v in policy.env.items():
@@ -365,7 +356,7 @@ class KubernetesSynthesizer(BaseSynthesizer):
             if k not in declared_secrets and not is_sensitive_env_key(k)
         }
 
-        env_from: List[Dict[str, Any]] = []
+        env_from: list[dict[str, Any]] = []
         if safe_env:
             env_from.append({"configMapRef": {"name": f"{app_name}-config"}})
         if declared_secrets:
@@ -391,7 +382,7 @@ class KubernetesSynthesizer(BaseSynthesizer):
             ),
             "latest",
         )
-        container_vm: Dict[str, Any] = {
+        container_vm: dict[str, Any] = {
             "name": app_name,
             "image": k8s_policy.image or f"{app_name}:{raw_tag}",
             "ports": [{"containerPort": port}],
@@ -404,17 +395,17 @@ class KubernetesSynthesizer(BaseSynthesizer):
             "envFrom": env_from,
         }
 
-        repo_root: Optional[str] = context.repo_root or None
-        templates_dir: Optional[str] = policy.engine.templates_dir
-        namespace: Optional[str] = k8s_policy.namespace
+        repo_root: str | None = context.repo_root or None
+        templates_dir: str | None = policy.engine.templates_dir
+        namespace: str | None = k8s_policy.namespace
 
-        deployment_vm: Dict[str, Any] = {
+        deployment_vm: dict[str, Any] = {
             "app_name": app_name,
             "namespace": namespace,
             "replicas": k8s_policy.replicas,
             "container": container_vm,
         }
-        service_vm: Dict[str, Any] = {
+        service_vm: dict[str, Any] = {
             "app_name": app_name,
             "service_name": f"{app_name}-service",
             "namespace": namespace,
@@ -427,7 +418,7 @@ class KubernetesSynthesizer(BaseSynthesizer):
                 }
             ],
         }
-        ingress_vm: Dict[str, Any] = {
+        ingress_vm: dict[str, Any] = {
             "app_name": app_name,
             "ingress_name": f"{app_name}-ingress",
             "namespace": namespace,
@@ -451,7 +442,7 @@ class KubernetesSynthesizer(BaseSynthesizer):
                 }
             ],
         }
-        kind_vm: Dict[str, Any] = {
+        kind_vm: dict[str, Any] = {
             "cluster_name": f"{app_name}-cluster",
             "nodes": [
                 {
@@ -475,7 +466,7 @@ class KubernetesSynthesizer(BaseSynthesizer):
             ],
         }
 
-        outputs: Dict[str, str] = {
+        outputs: dict[str, str] = {
             "k8s/deployment.yaml": render_yaml_template(
                 "k8s/deployment.yaml.j2",
                 deployment_vm,
@@ -503,7 +494,7 @@ class KubernetesSynthesizer(BaseSynthesizer):
         }
 
         if safe_env:
-            configmap_vm: Dict[str, Any] = {
+            configmap_vm: dict[str, Any] = {
                 "app_name": app_name,
                 "configmap_name": f"{app_name}-config",
                 "namespace": namespace,
@@ -517,7 +508,7 @@ class KubernetesSynthesizer(BaseSynthesizer):
             )
 
         if declared_secrets:
-            secret_vm: Dict[str, Any] = {
+            secret_vm: dict[str, Any] = {
                 "app_name": app_name,
                 "secret_name": f"{app_name}-secrets",
                 "namespace": namespace,
@@ -531,7 +522,7 @@ class KubernetesSynthesizer(BaseSynthesizer):
             )
 
         if k8s_policy.hpa.enabled:
-            hpa_vm: Dict[str, Any] = {
+            hpa_vm: dict[str, Any] = {
                 "app_name": app_name,
                 "hpa_name": f"{app_name}-hpa",
                 "namespace": namespace,

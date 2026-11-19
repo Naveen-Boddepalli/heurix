@@ -1,8 +1,13 @@
+import { useRef } from 'react';
 import { CLI_COMMANDS } from '../data/siteData';
+import { usePointerVars } from '../lib/usePointerVars';
 import { links } from '../lib/links';
 import { CodeBlock } from './CodeBlock';
 
 export function CliExamples() {
+  const gridRef = useRef<HTMLDivElement | null>(null);
+  usePointerVars(gridRef, '.cli-card');
+
   return (
     <section id="cli" className="section">
       <div className="container">
@@ -15,7 +20,7 @@ export function CliExamples() {
           </p>
         </div>
 
-        <div className="cli-grid">
+        <div className="cli-grid" ref={gridRef}>
           {CLI_COMMANDS.map((item, i) => (
             <article key={item.cmd} className="cli-card reveal" style={{ '--i': i % 2 } as React.CSSProperties}>
               <header style={{ display: 'grid', gap: '0.35rem' }}>

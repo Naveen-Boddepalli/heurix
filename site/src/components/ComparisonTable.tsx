@@ -87,8 +87,8 @@ export function ComparisonTable() {
               </tr>
             </thead>
             <tbody>
-              {ROWS.map((row) => (
-                <tr key={row.label}>
+              {ROWS.map((row, r) => (
+                <tr key={row.label} style={{ '--r': r } as React.CSSProperties}>
                   <th scope="row">{row.label}</th>
                   <td className="col-heurix">{row.hx}</td>
                   <td>{row.llm}</td>

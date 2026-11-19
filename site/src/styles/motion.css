@@ -608,3 +608,222 @@
   font-size: 0.8125rem;
   color: var(--text-secondary);
 }
+
+/* --------------------------------------------------------------------------
+   Spotlight cards (pointer position from usePointerVars as --x / --y)
+   -------------------------------------------------------------------------- */
+.heuristic-card,
+.cli-card {
+  position: relative;
+  isolation: isolate;
+  transition:
+    transform var(--motion-base) var(--ease-out),
+    border-color var(--motion-base) var(--ease-out),
+    box-shadow var(--motion-base) var(--ease-out);
+}
+
+.heuristic-card::before,
+.cli-card::before,
+.heuristic-card::after,
+.cli-card::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--motion-base) var(--ease-out);
+}
+
+/* Glowing border: a radial gradient masked down to a 1px ring */
+.heuristic-card::before,
+.cli-card::before {
+  padding: 1px;
+  background: radial-gradient(240px circle at var(--x, 50%) var(--y, 0%), var(--accent), transparent 70%);
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#000 0 0) content-box exclude,
+    linear-gradient(#000 0 0);
+}
+
+/* Soft inner light following the pointer */
+.heuristic-card::after,
+.cli-card::after {
+  z-index: -1;
+  background: radial-gradient(380px circle at var(--x, 50%) var(--y, 0%), color-mix(in oklab, var(--accent) 8%, transparent), transparent 65%);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .heuristic-card:hover,
+  .cli-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 14px 34px -18px color-mix(in oklab, var(--accent) 45%, rgb(0 0 0 / 0.5));
+  }
+
+  .heuristic-card:hover::before,
+  .cli-card:hover::before,
+  .heuristic-card:hover::after,
+  .cli-card:hover::after {
+    opacity: 1;
+  }
+
+  .heuristic-card:hover .signal-list li {
+    border-color: color-mix(in oklab, var(--accent) 45%, var(--border-subtle));
+    animation: chip-pop 0.4s var(--ease-spring) backwards;
+    animation-delay: calc(var(--j, 0) * 35ms);
+  }
+}
+
+.signal-list li {
+  transition: border-color var(--motion-base) var(--ease-out);
+}
+
+@keyframes chip-pop {
+  from {
+    scale: 0.85;
+    opacity: 0.4;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Copy button feedback
+   -------------------------------------------------------------------------- */
+.code-copy-btn {
+  transition:
+    color var(--motion-fast) var(--ease-out),
+    border-color var(--motion-fast) var(--ease-out),
+    background-color var(--motion-fast) var(--ease-out),
+    scale var(--motion-fast) var(--ease-out);
+}
+
+.code-copy-btn:active {
+  scale: 0.94;
+}
+
+.code-copy-btn.is-copied {
+  color: var(--success);
+  border-color: var(--success);
+  background-color: color-mix(in oklab, var(--success) 10%, var(--bg-surface));
+}
+
+.code-copy-btn.is-copied .copy-icon {
+  animation: icon-pop 0.45s var(--ease-spring);
+}
+
+.copy-icon {
+  flex: none;
+}
+
+@keyframes icon-pop {
+  from {
+    scale: 0.3;
+    rotate: -20deg;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Comparison table
+   -------------------------------------------------------------------------- */
+.compare-table tbody tr {
+  transition: background-color var(--motion-fast) var(--ease-out);
+}
+
+.compare-table tbody tr:hover {
+  background-color: color-mix(in oklab, var(--accent) 5%, transparent);
+}
+
+.compare-table tbody tr:hover .col-heurix {
+  background-color: color-mix(in oklab, var(--accent) 13%, transparent);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .js-reveal .table-scroll.is-visible tbody tr {
+    animation: row-in 0.5s var(--ease-out) backwards;
+    animation-delay: calc(var(--r, 0) * 70ms + 150ms);
+  }
+}
+
+@keyframes row-in {
+  from {
+    opacity: 0;
+    translate: -10px 0;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   CTA band: card with a slowly travelling gradient border
+   -------------------------------------------------------------------------- */
+@property --cta-angle {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+
+.cta-band {
+  position: relative;
+  isolation: isolate;
+  padding: clamp(1.25rem, 3vw, 2rem);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background-color: var(--bg-surface);
+}
+
+.cta-band::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  padding: 1px;
+  border-radius: inherit;
+  background: conic-gradient(
+    from var(--cta-angle),
+    transparent 0 62%,
+    var(--accent) 78%,
+    color-mix(in oklab, var(--accent) 40%, #a78bfa) 88%,
+    transparent 96%
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#000 0 0) content-box exclude,
+    linear-gradient(#000 0 0);
+  animation: cta-spin 7s linear infinite;
+  pointer-events: none;
+}
+
+@keyframes cta-spin {
+  to {
+    --cta-angle: 360deg;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cta-band::before {
+    display: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .heuristic-card::before,
+  .cli-card::before,
+  .heuristic-card::after,
+  .cli-card::after,
+  .cta-band::before {
+    display: none;
+  }
+}
+
+/* Cards are both revealed and hoverable: keep the stagger on the reveal only */
+@media (prefers-reduced-motion: no-preference) {
+  .js-reveal .heuristic-card.reveal,
+  .js-reveal .cli-card.reveal {
+    transition-property: opacity, translate, transform, border-color, box-shadow;
+    transition-duration: var(--motion-slow), var(--motion-slow), var(--motion-base), var(--motion-base), var(--motion-base);
+    transition-timing-function: var(--ease-out);
+    transition-delay: calc(var(--i, 0) * 80ms), calc(var(--i, 0) * 80ms), 0s, 0s, 0s;
+  }
+}

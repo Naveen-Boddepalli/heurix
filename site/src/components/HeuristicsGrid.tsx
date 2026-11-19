@@ -1,6 +1,11 @@
+import { useRef } from 'react';
 import { HEURISTIC_CARDS } from '../data/siteData';
+import { usePointerVars } from '../lib/usePointerVars';
 
 export function HeuristicsGrid() {
+  const gridRef = useRef<HTMLDivElement | null>(null);
+  usePointerVars(gridRef, '.heuristic-card');
+
   return (
     <section id="heuristics" className="section">
       <div className="container">
@@ -12,7 +17,7 @@ export function HeuristicsGrid() {
           </p>
         </div>
 
-        <div className="cards-grid">
+        <div className="cards-grid" ref={gridRef}>
           {HEURISTIC_CARDS.map((card, i) => (
             <article
               key={card.id}
@@ -25,8 +30,10 @@ export function HeuristicsGrid() {
               </header>
               <p style={{ fontSize: '0.9375rem' }}>{card.summary}</p>
               <ul className="signal-list" aria-label={`${card.title} trigger signals`}>
-                {card.signals.map((sig) => (
-                  <li key={sig}>{sig}</li>
+                {card.signals.map((sig, j) => (
+                  <li key={sig} style={{ '--j': j } as React.CSSProperties}>
+                    {sig}
+                  </li>
                 ))}
               </ul>
               <footer className="card-output-foot">{card.output}</footer>

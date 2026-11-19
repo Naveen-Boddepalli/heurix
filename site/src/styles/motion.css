@@ -827,3 +827,158 @@
     transition-delay: calc(var(--i, 0) * 80ms), calc(var(--i, 0) * 80ms), 0s, 0s, 0s;
   }
 }
+
+/* --------------------------------------------------------------------------
+   Playground feedback
+   -------------------------------------------------------------------------- */
+.line-changed {
+  border-radius: 2px;
+  animation: line-flash 1.8s var(--ease-out);
+}
+
+@keyframes line-flash {
+  0%,
+  15% {
+    background-color: color-mix(in oklab, var(--accent) 30%, transparent);
+    box-shadow: -0.5rem 0 0 color-mix(in oklab, var(--accent) 30%, transparent);
+  }
+  100% {
+    background-color: transparent;
+    box-shadow: -0.5rem 0 0 transparent;
+  }
+}
+
+.scan-count {
+  display: inline-block;
+  animation: scan-pulse 0.6s var(--ease-out);
+}
+
+@keyframes scan-pulse {
+  0% {
+    color: var(--accent);
+    scale: 1.06;
+  }
+  100% {
+    scale: 1;
+  }
+}
+
+.file-tree .file-row {
+  animation: file-in 0.35s var(--ease-out) backwards;
+  animation-delay: calc(var(--k, 0) * 35ms);
+}
+
+@keyframes file-in {
+  from {
+    opacity: 0;
+    translate: -8px 0;
+  }
+}
+
+.preset-btn {
+  transition:
+    color var(--motion-fast) var(--ease-out),
+    background-color var(--motion-fast) var(--ease-out),
+    border-color var(--motion-fast) var(--ease-out),
+    scale var(--motion-fast) var(--ease-out);
+}
+
+.preset-btn:active {
+  scale: 0.96;
+}
+
+[role='tabpanel']:not([hidden]) .diff-line-add,
+[role='tabpanel']:not([hidden]) .diff-line-del {
+  animation: diff-in 0.4s var(--ease-out) backwards;
+  animation-delay: calc(min(var(--n, 0), 40) * 12ms);
+}
+
+@keyframes diff-in {
+  from {
+    opacity: 0;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Docs: sliding current-page highlight, page swap, search hits
+   -------------------------------------------------------------------------- */
+.docs-nav-groups {
+  position: relative;
+}
+
+.docs-nav-indicator {
+  display: none;
+}
+
+.docs-nav-groups.has-indicator .docs-nav-indicator {
+  display: block;
+  position: absolute;
+  inset-inline: 0;
+  inset-block-start: 0;
+  block-size: var(--ind-h, 0);
+  translate: 0 var(--ind-y, 0);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background-color: var(--accent-soft);
+  transition:
+    translate var(--motion-base) var(--ease-spring),
+    block-size var(--motion-base) var(--ease-out);
+  pointer-events: none;
+}
+
+.docs-nav-groups.has-indicator .docs-nav-btn {
+  position: relative;
+}
+
+.docs-nav-groups.has-indicator .docs-nav-btn[aria-current='page'] {
+  background-color: transparent;
+  border-color: transparent;
+}
+
+.docs-nav-btn {
+  transition:
+    color var(--motion-fast) var(--ease-out),
+    background-color var(--motion-fast) var(--ease-out);
+}
+
+.doc-swap {
+  display: grid;
+  gap: 1rem;
+  min-inline-size: 0;
+  animation: doc-in 0.35s var(--ease-out);
+}
+
+@keyframes doc-in {
+  from {
+    opacity: 0;
+    translate: 0 8px;
+  }
+}
+
+.search-highlight {
+  animation: hit-pulse 0.9s var(--ease-out);
+}
+
+@keyframes hit-pulse {
+  0% {
+    box-shadow: 0 0 0 4px color-mix(in oklab, var(--accent) 45%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+
+@media (forced-colors: active) {
+  .docs-nav-indicator,
+  .tab-indicator {
+    display: none !important;
+  }
+
+  .tablist.has-indicator .tab-btn[aria-selected='true']::after {
+    display: block;
+  }
+
+  .docs-nav-groups.has-indicator .docs-nav-btn[aria-current='page'] {
+    border-color: Highlight;
+  }
+}

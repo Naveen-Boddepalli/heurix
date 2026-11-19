@@ -153,26 +153,21 @@
   }
 }
 
-/* Theme toggle: one circular reveal of the whole page, header included */
+/* Theme toggle: the whole page (header included) is rewritten line by line.
+   Clip paths are driven from src/lib/themeTransition.ts; the image pair's accent
+   background shows through the gap between old and new as a caret on each line. */
 .theme-vt .site-header {
   view-transition-name: none;
 }
 
-.theme-vt::view-transition-old(root) {
-  animation: none;
-}
-
+.theme-vt::view-transition-old(root),
 .theme-vt::view-transition-new(root) {
-  animation: theme-reveal 560ms var(--ease-in-out) both;
+  animation: none;
+  mix-blend-mode: normal;
 }
 
-@keyframes theme-reveal {
-  from {
-    clip-path: circle(0 at var(--vt-x, 50%) var(--vt-y, 0));
-  }
-  to {
-    clip-path: circle(var(--vt-r, 150vmax) at var(--vt-x, 50%) var(--vt-y, 0));
-  }
+.theme-vt::view-transition-image-pair(root) {
+  background-color: var(--accent);
 }
 
 /* --------------------------------------------------------------------------

@@ -21,13 +21,9 @@ from heurix.core.context import ProjectContext, ServiceRequirement
 from heurix.core.indexer import RepoIndexer
 from heurix.detectors.python_detector import _extract_pg_credentials
 
-COMPOSE_FILENAMES = frozenset(
-    {"docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml"}
-)
+COMPOSE_FILENAMES = frozenset({"docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml"})
 
-_POSTGRES_IMAGES = frozenset(
-    {"postgres", "postgresql", "postgis", "pgvector", "timescaledb", "timescaledb-ha"}
-)
+_POSTGRES_IMAGES = frozenset({"postgres", "postgresql", "postgis", "pgvector", "timescaledb", "timescaledb-ha"})
 _REDIS_IMAGES = frozenset({"redis", "redis-stack", "redis-stack-server", "valkey", "keydb"})
 _MONGO_IMAGES = frozenset({"mongo", "mongodb-community-server"})
 
@@ -108,8 +104,7 @@ def _dedupe_services(context: ProjectContext) -> None:
         key = (kind, svc.package_path)
         if key in seen:
             context.add_explain(
-                f"Dropped duplicate {kind} service '{svc.name}'; CI already runs "
-                f"'{seen[key].name}' on the same port"
+                f"Dropped duplicate {kind} service '{svc.name}'; CI already runs '{seen[key].name}' on the same port"
             )
             continue
         seen[key] = svc

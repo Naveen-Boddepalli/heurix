@@ -187,10 +187,7 @@ def test_packaging_wheel_homebrew_docker_and_workflows(tmp_path: Path) -> None:
     assert len(wheels) == 1, f"Expected single built wheel, found: {wheels}"
 
     template_root = REPO_ROOT / "src" / "heurix" / "templates"
-    disk_templates = sorted(
-        path.relative_to(REPO_ROOT / "src").as_posix()
-        for path in template_root.rglob("*.j2")
-    )
+    disk_templates = sorted(path.relative_to(REPO_ROOT / "src").as_posix() for path in template_root.rglob("*.j2"))
     assert len(disk_templates) == 10
     expected_templates = {
         "heurix/templates/workflows/ci.yml.j2",
@@ -300,8 +297,8 @@ def test_packaging_wheel_homebrew_docker_and_workflows(tmp_path: Path) -> None:
     install_text = install_path.read_text(encoding="utf-8")
     assert "PY_MAJOR" in install_text and "PY_MINOR" in install_text
     assert "-lt 10" in install_text
-    assert '${BIN_DIR}/hx' in install_text
-    assert '${BIN_DIR}/heurix' in install_text
+    assert "${BIN_DIR}/hx" in install_text
+    assert "${BIN_DIR}/heurix" in install_text
     bash_bin = shutil.which("bash")
     if bash_bin:
         bash_proc = subprocess.run(

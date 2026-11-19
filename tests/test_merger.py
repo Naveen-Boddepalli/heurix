@@ -378,9 +378,7 @@ updates:
     assert pip_entry["schedule"]["interval"] == "daily"
     assert pip_entry["open-pull-requests-limit"] == 10
 
-    frontend_npm = next(
-        u for u in updates if u["package-ecosystem"] == "npm" and u["directory"] == "/frontend"
-    )
+    frontend_npm = next(u for u in updates if u["package-ecosystem"] == "npm" and u["directory"] == "/frontend")
     assert frontend_npm["schedule"]["interval"] == "monthly"
     assert frontend_npm["open-pull-requests-limit"] == 5
 
@@ -452,7 +450,11 @@ jobs:
     assert "Configure AWS" in step_names
     assert "Custom Security Scan" in step_names
     assert step_names.index("Pre-checkout setup") < step_names.index("Checkout repository")
-    assert step_names.index("Set up Python 3.12") < step_names.index("Configure AWS") < step_names.index("Install dependencies")
+    assert (
+        step_names.index("Set up Python 3.12")
+        < step_names.index("Configure AWS")
+        < step_names.index("Install dependencies")
+    )
 
 
 def test_step_matching_preserved_step_not_overwritten_or_duplicated():

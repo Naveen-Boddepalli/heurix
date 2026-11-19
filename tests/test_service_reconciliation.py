@@ -46,11 +46,7 @@ def _host_ports(job: dict) -> list:
 
 def _assert_db_url_matches_service(job: dict) -> None:
     pg = next(s for s in job["services"].values() if "postgres" in s["image"])
-    url = next(
-        step["env"]["DATABASE_URL"]
-        for step in job["steps"]
-        if "DATABASE_URL" in (step.get("env") or {})
-    )
+    url = next(step["env"]["DATABASE_URL"] for step in job["steps"] if "DATABASE_URL" in (step.get("env") or {}))
     parsed = urlparse(url)
     assert parsed.username == pg["env"]["POSTGRES_USER"]
     assert parsed.password == pg["env"]["POSTGRES_PASSWORD"]

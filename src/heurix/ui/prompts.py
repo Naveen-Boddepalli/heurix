@@ -30,6 +30,7 @@ def _get_questionary():
         return globals()["questionary"]
     if _questionary is None:
         import questionary
+
         _questionary = questionary
     return _questionary
 
@@ -62,9 +63,7 @@ def prompt_conflict_resolution(file_path: str, non_interactive: bool = False) ->
         choice = q.select(
             f"File '{file_path}' already exists. What would you like to do?",
             choices=[
-                q.Choice(
-                    title="[A] Apply changes (non-destructive smart merge)", value="apply"
-                ),
+                q.Choice(title="[A] Apply changes (non-destructive smart merge)", value="apply"),
                 q.Choice(title="[D] View diff preview", value="diff"),
                 q.Choice(title="[B] Backup & overwrite", value="backup"),
                 q.Choice(title="[S] Skip file", value="skip"),
@@ -267,25 +266,17 @@ def resolve_context_ambiguities(
 
     unit_runners, e2e_runners = collect_e2e_signals(resolved)
     if unit_runners and e2e_runners:
-        resolved.split_e2e_jobs = bool(
-            e2e_fn(unit_runners, e2e_runners, non_interactive=non_interactive)
-        )
+        resolved.split_e2e_jobs = bool(e2e_fn(unit_runners, e2e_runners, non_interactive=non_interactive))
 
     if len(resolved.deployment_targets) >= 2:
         # Preserve resolved.deployment_secrets untouched so SEC-03 isolation holds even for deselected targets.
-        resolved.deployment_targets = list(
-            targets_fn(resolved.deployment_targets, non_interactive=non_interactive)
-        )
+        resolved.deployment_targets = list(targets_fn(resolved.deployment_targets, non_interactive=non_interactive))
 
     if not services_policy_explicit and len(resolved.services) >= 2:
-        resolved.services = list(
-            services_fn(resolved.services, non_interactive=non_interactive)
-        )
+        resolved.services = list(services_fn(resolved.services, non_interactive=non_interactive))
 
     resolved_include_k8s = include_k8s
     if include_k8s and not k8s_policy_explicit and resolved.containers:
-        resolved_include_k8s = bool(
-            k8s_fn(default=include_k8s, non_interactive=non_interactive)
-        )
+        resolved_include_k8s = bool(k8s_fn(default=include_k8s, non_interactive=non_interactive))
 
     return resolved, resolved_include_k8s

@@ -95,7 +95,9 @@ class DockerDetector(BaseDetector):
         yaml = YAML(typ="safe")
 
         # 1. Inspect Dockerfile
-        dockerfiles = indexer.find_by_name("Dockerfile") + [f for f in indexer.find_files("Dockerfile*") if "/" not in f]
+        dockerfiles = indexer.find_by_name("Dockerfile") + [
+            f for f in indexer.find_files("Dockerfile*") if "/" not in f
+        ]
         for df_name in set(dockerfiles):
             content = indexer.read_text(df_name)
             if not content:
@@ -142,7 +144,8 @@ class DockerDetector(BaseDetector):
 
         # 2. Inspect docker-compose.yml / compose.yml
         compose_files = [
-            f for f in ["docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml"]
+            f
+            for f in ["docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml"]
             if indexer.has_file(f)
         ]
 

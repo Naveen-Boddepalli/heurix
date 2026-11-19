@@ -163,15 +163,13 @@ def _detect_node_unit_runner(
             return runner
 
     has_vitest_cfg = any(
-        indexer.has_file(_join(base_dir, f"vitest.config.{ext}"))
-        for ext in ("ts", "js", "mts", "mjs", "cts", "cjs")
+        indexer.has_file(_join(base_dir, f"vitest.config.{ext}")) for ext in ("ts", "js", "mts", "mjs", "cts", "cjs")
     )
     if "vitest" in deps or has_vitest_cfg:
         return "vitest"
 
     has_jest_cfg = any(
-        indexer.has_file(_join(base_dir, f"jest.config.{ext}"))
-        for ext in ("ts", "js", "mts", "mjs", "cts", "cjs")
+        indexer.has_file(_join(base_dir, f"jest.config.{ext}")) for ext in ("ts", "js", "mts", "mjs", "cts", "cjs")
     )
     if "jest" in deps or "@jest/core" in deps or has_jest_cfg:
         return "jest"
@@ -193,8 +191,7 @@ def _detect_node_e2e_runner(
     script_values = [val.lower() for val in scripts.values() if isinstance(val, str)]
 
     has_playwright_cfg = any(
-        indexer.has_file(_join(base_dir, f"playwright.config.{ext}"))
-        for ext in ("ts", "js", "mts", "mjs")
+        indexer.has_file(_join(base_dir, f"playwright.config.{ext}")) for ext in ("ts", "js", "mts", "mjs")
     )
     has_playwright = (
         "@playwright/test" in deps
@@ -204,14 +201,9 @@ def _detect_node_e2e_runner(
     )
 
     has_cypress_cfg = indexer.has_file(_join(base_dir, "cypress.json")) or any(
-        indexer.has_file(_join(base_dir, f"cypress.config.{ext}"))
-        for ext in ("ts", "js", "mts", "mjs")
+        indexer.has_file(_join(base_dir, f"cypress.config.{ext}")) for ext in ("ts", "js", "mts", "mjs")
     )
-    has_cypress = (
-        "cypress" in deps
-        or has_cypress_cfg
-        or any("cypress" in val for val in script_values)
-    )
+    has_cypress = "cypress" in deps or has_cypress_cfg or any("cypress" in val for val in script_values)
 
     if has_playwright:
         e2e_runner = "playwright"
@@ -346,10 +338,16 @@ class NodeDetector(BaseDetector):
             install_cmd = root_install_cmd or (
                 "pnpm i --frozen-lockfile"
                 if root_pm == "pnpm"
-                else ("yarn install --frozen-lockfile" if root_pm == "yarn" else ("bun install --frozen-lockfile" if root_pm == "bun" else "npm ci"))
+                else (
+                    "yarn install --frozen-lockfile"
+                    if root_pm == "yarn"
+                    else ("bun install --frozen-lockfile" if root_pm == "bun" else "npm ci")
+                )
             )
             cache_dependency_path = root_lockfile
-            context.add_explain(f"Inherited workspace Package Manager{scope_label}: {package_manager} (via {root_lockfile})")
+            context.add_explain(
+                f"Inherited workspace Package Manager{scope_label}: {package_manager} (via {root_lockfile})"
+            )
         elif base_dir == "." and indexer.has_file("pnpm-workspace.yaml"):
             package_manager = "pnpm"
             install_cmd = "pnpm install"
@@ -421,9 +419,7 @@ class NodeDetector(BaseDetector):
         active_deps = {k: v for k, v in deps.items() if k not in NODE_MOCK_SERVICES}
         svc_source = "package.json dependencies" if base_dir == "." else f"{base_dir}/package.json dependencies"
 
-        has_orm_or_pg_mock = any(
-            k in deps for k in ["typeorm", "prisma", "@prisma/client", "pg-mem", *SQLITE_ADAPTERS]
-        )
+        has_orm_or_pg_mock = any(k in deps for k in ["typeorm", "prisma", "@prisma/client", "pg-mem", *SQLITE_ADAPTERS])
         if _has_real_postgres_adapter(indexer, active_deps, base_dir, exclude_dirs):
             if not any(s.name == "postgres" and s.package_path == pkg_scope for s in context.services):
                 pg_user, pg_password, pg_db = _extract_pg_credentials(context, indexer=indexer)
@@ -484,9 +480,7 @@ class NodeDetector(BaseDetector):
         if unit_test_runner:
             context.add_explain(f"Detected Unit Test Runner{scope_label}: {unit_test_runner}")
 
-        e2e_test_runner, e2e_cmd = _detect_node_e2e_runner(
-            indexer, base_dir, deps, scripts, package_manager
-        )
+        e2e_test_runner, e2e_cmd = _detect_node_e2e_runner(indexer, base_dir, deps, scripts, package_manager)
         if e2e_test_runner:
             context.add_explain(f"Detected E2E Test Runner{scope_label}: {e2e_test_runner} ({e2e_cmd})")
 
@@ -611,4 +605,3 @@ class NodeDetector(BaseDetector):
                     add_monorepo_pkg=True,
                     is_workspace_root=None,
                 )
-

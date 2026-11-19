@@ -242,8 +242,7 @@ class RepoIndexer:
                             if getattr(pat, "include", None) is False:
                                 pat_str = getattr(pat, "pattern", "")
                                 if isinstance(pat_str, str) and any(
-                                    tok in pat_str
-                                    for tok in (".DS_Store", ".pyc", ".pyo", ".pyd", "egg-info")
+                                    tok in pat_str for tok in (".DS_Store", ".pyc", ".pyo", ".pyd", "egg-info")
                                 ):
                                     neg_default_files = True
                                     break
@@ -256,11 +255,7 @@ class RepoIndexer:
                     if d in ALWAYS_IGNORE_DIRS:
                         continue
                     is_default_dir = d in DEFAULT_IGNORE_DIRS or d.endswith(".egg-info")
-                    if (
-                        is_default_dir
-                        and d not in neg_dirs
-                        and not (d.endswith(".egg-info") and neg_default_files)
-                    ):
+                    if is_default_dir and d not in neg_dirs and not (d.endswith(".egg-info") and neg_default_files):
                         continue
 
                     candidate = (rel_dir_clean + d + "/") if rel_dir_clean else (d + "/")
@@ -281,9 +276,7 @@ class RepoIndexer:
                 if f in ALWAYS_IGNORE_DIRS:
                     continue
                 is_default_file = (
-                    f in DEFAULT_IGNORE_FILES
-                    or f.endswith(DEFAULT_IGNORE_SUFFIXES)
-                    or f.endswith(".egg-info")
+                    f in DEFAULT_IGNORE_FILES or f.endswith(DEFAULT_IGNORE_SUFFIXES) or f.endswith(".egg-info")
                 )
                 if is_default_file and not neg_default_files:
                     continue
@@ -340,7 +333,12 @@ class RepoIndexer:
 
     def find_files(self, glob_pattern: str) -> list[str]:
         import fnmatch
-        return [f for f in self._files if fnmatch.fnmatch(f, glob_pattern) or fnmatch.fnmatch(os.path.basename(f), glob_pattern)]
+
+        return [
+            f
+            for f in self._files
+            if fnmatch.fnmatch(f, glob_pattern) or fnmatch.fnmatch(os.path.basename(f), glob_pattern)
+        ]
 
     def find_by_name(self, filename: str) -> list[str]:
         return [f for f in self._files if os.path.basename(f) == filename]

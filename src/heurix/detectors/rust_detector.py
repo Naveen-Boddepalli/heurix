@@ -236,4 +236,3 @@ class RustDetector(BaseDetector):
                 is_workspace_root=None,
                 root_lockfile=root_lockfile,
             )
-

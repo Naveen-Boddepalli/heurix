@@ -306,8 +306,7 @@ def _strip_go_line_comment(line: str) -> str:
 def _unquote_go_token(token: str) -> str:
     stripped = token.strip()
     if len(stripped) >= 2 and (
-        (stripped[0] == '"' and stripped[-1] == '"')
-        or (stripped[0] == "`" and stripped[-1] == "`")
+        (stripped[0] == '"' and stripped[-1] == '"') or (stripped[0] == "`" and stripped[-1] == "`")
     ):
         return stripped[1:-1]
     return stripped
@@ -382,53 +381,57 @@ def parse_go_work(content: str) -> list[str]:
     return result
 
 
-NON_PACKAGE_DIRS = frozenset({
-    "docs",
-    "doc",
-    "examples",
-    "example",
-    "fixtures",
-    "fixture",
-    "tests",
-    "test",
-    "__tests__",
-    "scripts",
-    "requirements",
-    ".github",
-    "k8s",
-    "packaging",
-    "site",
-})
+NON_PACKAGE_DIRS = frozenset(
+    {
+        "docs",
+        "doc",
+        "examples",
+        "example",
+        "fixtures",
+        "fixture",
+        "tests",
+        "test",
+        "__tests__",
+        "scripts",
+        "requirements",
+        ".github",
+        "k8s",
+        "packaging",
+        "site",
+    }
+)
 
-PREFERRED_CONTAINER_GROUPS = frozenset({
-    "apps",
-    "services",
-    "packages",
-    "crates",
-    "libs",
-    "modules",
-})
+PREFERRED_CONTAINER_GROUPS = frozenset(
+    {
+        "apps",
+        "services",
+        "packages",
+        "crates",
+        "libs",
+        "modules",
+    }
+)
 
 ECOSYSTEM_MANIFESTS: dict[str, frozenset[str]] = {
     "node": frozenset({"package.json"}),
-    "python": frozenset({
-        "pyproject.toml",
-        "uv.lock",
-        "poetry.lock",
-        "Pipfile",
-        "setup.py",
-        "setup.cfg",
-        "requirements.txt",
-    }),
+    "python": frozenset(
+        {
+            "pyproject.toml",
+            "uv.lock",
+            "poetry.lock",
+            "Pipfile",
+            "setup.py",
+            "setup.cfg",
+            "requirements.txt",
+        }
+    ),
     "rust": frozenset({"Cargo.toml"}),
     "go": frozenset({"go.mod"}),
     "cpp": frozenset({"CMakeLists.txt", "conanfile.txt", "conanfile.py", "vcpkg.json"}),
 }
 
 _MANIFEST_TO_LANG: dict[str, str] = {
-    manifest: lang
-    for lang, manifests in ECOSYSTEM_MANIFESTS.items()
-    for manifest in manifests
+    manifest: lang for lang, manifests in ECOSYSTEM_MANIFESTS.items() for manifest in manifests
 }
 
 _PYTHON_PREFERRED_GROUPS = frozenset({"apps", "services", "packages"})
@@ -468,9 +471,7 @@ def discover_monorepo_topology(indexer: RepoIndexer) -> MonorepoTopology:
             pkg_json_data = json.loads(pkg_raw)
         except Exception:
             pkg_json_data = {}
-        if isinstance(pkg_json_data, dict) and isinstance(
-            pkg_json_data.get("workspaces"), (list, dict)
-        ):
+        if isinstance(pkg_json_data, dict) and isinstance(pkg_json_data.get("workspaces"), (list, dict)):
             has_workspace_config = True
             workspace_kinds.append("npm")
             pkg_json_patterns = parse_package_json_workspaces(pkg_raw)
@@ -584,15 +585,9 @@ def discover_monorepo_topology(indexer: RepoIndexer) -> MonorepoTopology:
     packages_by_lang = dict(sorted(raw_by_lang.items()))
 
     has_root_manifest = any(
-        indexer.has_file(manifest)
-        for manifests in ECOSYSTEM_MANIFESTS.values()
-        for manifest in manifests
+        indexer.has_file(manifest) for manifests in ECOSYSTEM_MANIFESTS.values() for manifest in manifests
     )
-    is_monorepo = (
-        has_workspace_config
-        or len(all_packages) >= 2
-        or (len(all_packages) == 1 and has_root_manifest)
-    )
+    is_monorepo = has_workspace_config or len(all_packages) >= 2 or (len(all_packages) == 1 and has_root_manifest)
 
     return MonorepoTopology(
         is_monorepo=is_monorepo,
@@ -601,4 +596,3 @@ def discover_monorepo_topology(indexer: RepoIndexer) -> MonorepoTopology:
         packages_by_lang=packages_by_lang,
         all_packages=all_packages,
     )
-

@@ -99,4 +99,3 @@ def print_validation_warnings(warnings_by_file: Mapping[str, Sequence[str]]) -> 
             border_style="yellow",
         )
     )
-

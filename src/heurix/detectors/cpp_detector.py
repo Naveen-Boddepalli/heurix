@@ -172,4 +172,3 @@ class CppDetector(BaseDetector):
                     add_monorepo_pkg=True,
                     is_workspace_root=None,
                 )
-

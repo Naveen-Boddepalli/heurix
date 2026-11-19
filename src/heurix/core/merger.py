@@ -87,9 +87,7 @@ def _get_entity_identifier(item: Any) -> tuple[str, Any] | None:
     return None
 
 
-def _sequence_items_match(
-    ex_item: Any, new_item: Any, ident_key: str, ident_val: Any
-) -> bool:
+def _sequence_items_match(ex_item: Any, new_item: Any, ident_key: str, ident_val: Any) -> bool:
     """Return True if an existing sequence mapping represents the same entity as new_item."""
     if ident_key == "__hpa_metric__":
         return _extract_hpa_metric_key(ex_item) == ident_val
@@ -126,9 +124,7 @@ def deep_merge_nodes(existing: Any, new: Any) -> Any:
                 if has_probe_handler and k in PROBE_HANDLER_KEYS:
                     continue
                 existing[k] = v
-            elif existing[k] is None and isinstance(
-                v, (dict, CommentedMap, list, CommentedSeq)
-            ):
+            elif existing[k] is None and isinstance(v, (dict, CommentedMap, list, CommentedSeq)):
                 existing[k] = v
             else:
                 deep_merge_nodes(existing[k], v)
@@ -202,16 +198,12 @@ class SmartMerger:
         try:
             existing_docs = [d for d in self.yaml.load_all(existing_content) if d is not None]
         except Exception as e:
-            raise YamlSyntaxError(
-                f"Existing YAML has invalid syntax and cannot be safely merged: {e}"
-            ) from e
+            raise YamlSyntaxError(f"Existing YAML has invalid syntax and cannot be safely merged: {e}") from e
 
         try:
             new_docs = [d for d in self.yaml.load_all(new_content) if d is not None]
         except Exception as e:
-            raise YamlSyntaxError(
-                f"Synthesized YAML has invalid syntax and cannot be merged: {e}"
-            ) from e
+            raise YamlSyntaxError(f"Synthesized YAML has invalid syntax and cannot be merged: {e}") from e
 
         if not existing_docs or not new_docs:
             return new_content
@@ -338,9 +330,7 @@ class SmartMerger:
         for job_id, job_val in new_jobs.items():
             if job_id in existing_jobs:
                 # Merge the managed job
-                merged_jobs[job_id] = self._merge_job(
-                    existing_jobs[job_id], job_val, raw_existing, job_id=str(job_id)
-                )
+                merged_jobs[job_id] = self._merge_job(existing_jobs[job_id], job_val, raw_existing, job_id=str(job_id))
             else:
                 merged_jobs[job_id] = job_val
 
@@ -418,9 +408,7 @@ class SmartMerger:
                     if tokens:
                         for token in tokens:
                             if token:
-                                comment_blobs.extend(
-                                    self._collect_comment_values(token, require_newline_marker=True)
-                                )
+                                comment_blobs.extend(self._collect_comment_values(token, require_newline_marker=True))
 
         if any(m in "\n".join(comment_blobs) for m in PRESERVE_MARKERS):
             return True
@@ -428,21 +416,13 @@ class SmartMerger:
         # 3. Check mapping internal comments (pre-comments on keys, inline comments)
         return self._has_internal_preserve_comment(seq, idx, item)
 
-    def _match_steps(
-        self, existing_steps: list[Any], new_steps: list[Any]
-    ) -> tuple[dict[int, int], dict[int, int]]:
+    def _match_steps(self, existing_steps: list[Any], new_steps: list[Any]) -> tuple[dict[int, int], dict[int, int]]:
         """
         Match existing workflow steps to synthesized new steps 1-to-1
         by compound identity, uses action base, step name, or run command.
         """
-        ex_sig = [
-            (_normalize_step_uses(s), _normalize_step_name(s), _normalize_step_run(s))
-            for s in existing_steps
-        ]
-        new_sig = [
-            (_normalize_step_uses(s), _normalize_step_name(s), _normalize_step_run(s))
-            for s in new_steps
-        ]
+        ex_sig = [(_normalize_step_uses(s), _normalize_step_name(s), _normalize_step_run(s)) for s in existing_steps]
+        new_sig = [(_normalize_step_uses(s), _normalize_step_name(s), _normalize_step_run(s)) for s in new_steps]
 
         ex_to_new: dict[int, int] = {}
         new_to_ex: dict[int, int] = {}
@@ -461,8 +441,10 @@ class SmartMerger:
 
         # Pass 1: exact compound identity (uses + name, or name + run)
         _run_pass(
-            lambda e, n: (e[0] is not None and e[0] == n[0] and e[1] is not None and e[1] == n[1])
-            or (e[1] is not None and e[1] == n[1] and e[2] is not None and e[2] == n[2])
+            lambda e, n: (
+                (e[0] is not None and e[0] == n[0] and e[1] is not None and e[1] == n[1])
+                or (e[1] is not None and e[1] == n[1] and e[2] is not None and e[2] == n[2])
+            )
         )
         # Pass 2: action repository match (handles @v3 -> @v4 and label changes)
         _run_pass(lambda e, n: e[0] is not None and e[0] == n[0])
@@ -506,16 +488,12 @@ class SmartMerger:
                 and not isinstance(old_val, (dict, list))
                 and self._plain(old_val) != self._plain(new_val)
             ):
-                self.replaced.append(
-                    f"jobs.{job_id}.{key}: '{old_val}' -> '{new_val}'"
-                )
+                self.replaced.append(f"jobs.{job_id}.{key}: '{old_val}' -> '{new_val}'")
             merged_job[key] = new_val
         elif key == "services":
             merged_job.pop(key, None)
 
-    def _merge_job(
-        self, existing_job: Any, new_job: Any, raw_existing: str = "", job_id: str = ""
-    ) -> Any:
+    def _merge_job(self, existing_job: Any, new_job: Any, raw_existing: str = "", job_id: str = "") -> Any:
         if not isinstance(existing_job, dict) or not isinstance(new_job, dict):
             return new_job
 
@@ -546,7 +524,9 @@ class SmartMerger:
                 merged_job["defaults"] = new_defaults
         else:
             ex_defaults = merged_job.get("defaults")
-            if isinstance(ex_defaults, (dict, CommentedMap)) and isinstance(ex_defaults.get("run"), (dict, CommentedMap)):
+            if isinstance(ex_defaults, (dict, CommentedMap)) and isinstance(
+                ex_defaults.get("run"), (dict, CommentedMap)
+            ):
                 ex_run = ex_defaults["run"]
                 if "working-directory" in ex_run:
                     merged_defaults = ex_defaults.copy()
@@ -587,10 +567,7 @@ class SmartMerger:
         existing_steps = list(existing_job.get("steps") or [])
         existing_seq = existing_job.get("steps")
 
-        ex_preserved = [
-            self._has_preserve_comment(existing_seq, idx, step)
-            for idx, step in enumerate(existing_steps)
-        ]
+        ex_preserved = [self._has_preserve_comment(existing_seq, idx, step) for idx, step in enumerate(existing_steps)]
 
         ex_to_new, new_to_ex = self._match_steps(existing_steps, new_steps)
 
@@ -634,9 +611,7 @@ class SmartMerger:
                     new_run = _normalize_step_run(new_step)
                     if old_run and new_run and old_run != new_run:
                         label = str(new_step.get("name") or new_run)
-                        self.replaced.append(
-                            f"jobs.{job_id}.steps['{label}'].run: '{old_run}' -> '{new_run}'"
-                        )
+                        self.replaced.append(f"jobs.{job_id}.steps['{label}'].run: '{old_run}' -> '{new_run}'")
                 final_steps.append(new_step)
 
         for ex_idx in trailing_existing:
@@ -655,9 +630,7 @@ class SmartMerger:
             except Exception:
                 dash_col = 0
         for pos in preserve_comment_indices:
-            final_steps.yaml_set_comment_before_after_key(
-                pos, before="@heurix:preserve", indent=dash_col
-            )
+            final_steps.yaml_set_comment_before_after_key(pos, before="@heurix:preserve", indent=dash_col)
 
         merged_job["steps"] = final_steps
         return merged_job

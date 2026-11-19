@@ -141,9 +141,7 @@ K8S_FRAMEWORK_PROFILES: dict[str, K8sProfile] = {
     "Rocket": _tcp_profile(8000, cpu_request="50m", memory_request="64Mi", memory_limit="256Mi"),
 }
 
-_K8S_FRAMEWORK_INDEX: dict[str, K8sProfile] = {
-    key.lower(): val for key, val in K8S_FRAMEWORK_PROFILES.items()
-}
+_K8S_FRAMEWORK_INDEX: dict[str, K8sProfile] = {key.lower(): val for key, val in K8S_FRAMEWORK_PROFILES.items()}
 
 _GO_RUST_BASELINE = _tcp_profile(
     8080,
@@ -234,15 +232,9 @@ def _resolve_probe(
         if policy_probe.initial_delay_seconds is not None
         else profile_probe.initial_delay_seconds
     )
-    period = (
-        policy_probe.period_seconds
-        if policy_probe.period_seconds is not None
-        else profile_probe.period_seconds
-    )
+    period = policy_probe.period_seconds if policy_probe.period_seconds is not None else profile_probe.period_seconds
     timeout = (
-        policy_probe.timeout_seconds
-        if policy_probe.timeout_seconds is not None
-        else profile_probe.timeout_seconds
+        policy_probe.timeout_seconds if policy_probe.timeout_seconds is not None else profile_probe.timeout_seconds
     )
     failure_threshold = (
         policy_probe.failure_threshold
@@ -302,9 +294,7 @@ class KubernetesSynthesizer(BaseSynthesizer):
         app_name = context.repo_name.lower().replace("_", "-")
         primary = context.get_primary_language()
         profile = _resolve_k8s_profile(primary)
-        is_streamlit = bool(
-            primary and primary.framework and primary.framework.strip().lower() == "streamlit"
-        )
+        is_streamlit = bool(primary and primary.framework and primary.framework.strip().lower() == "streamlit")
 
         dockerfile_port = next(
             (c.exposed_ports[0] for c in context.containers if c.exposed_ports),

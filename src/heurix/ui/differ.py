@@ -29,17 +29,11 @@ def resolve_diff_style(style: str = "unified") -> str:
     """
     normalized = (style or "unified").strip().lower()
     if normalized not in _SUPPORTED_DIFF_STYLES:
-        raise ValueError(
-            f"Unsupported diff style '{style}'. Expected 'unified', 'side-by-side', or 'auto'."
-        )
+        raise ValueError(f"Unsupported diff style '{style}'. Expected 'unified', 'side-by-side', or 'auto'.")
 
     if normalized == "auto":
         explicit_width = getattr(console, "_width", None)
-        cols = (
-            explicit_width
-            if explicit_width is not None
-            else shutil.get_terminal_size(fallback=(80, 24)).columns
-        )
+        cols = explicit_width if explicit_width is not None else shutil.get_terminal_size(fallback=(80, 24)).columns
         return "side-by-side" if cols >= _SIDE_BY_SIDE_MIN_WIDTH else "unified"
 
     return normalized

@@ -117,6 +117,4 @@ class CloudDetector(BaseDetector):
                 required_secrets=firebase_secrets,
             )
             context.deployment_targets.append(target)
-            context.add_explain(
-                f"Detected Firebase target (project: '{project_id}', features: {features})"
-            )
+            context.add_explain(f"Detected Firebase target (project: '{project_id}', features: {features})")

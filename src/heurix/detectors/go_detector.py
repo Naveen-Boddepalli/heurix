@@ -215,4 +215,3 @@ class GoDetector(BaseDetector):
                     add_monorepo_pkg=True,
                     is_workspace_root=None,
                 )
-

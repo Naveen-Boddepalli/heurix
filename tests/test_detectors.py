@@ -130,6 +130,7 @@ def test_cpp_detector_makefile_no_cpp(tmp_path: Path):
     (tmp_path / "Makefile").write_text("test:\n\tpytest\n", encoding="utf-8")
     indexer = RepoIndexer(tmp_path)
     from heurix.detectors.cpp_detector import CppDetector
+
     detector = CppDetector()
     # Must NOT detect C++ when only a generic Makefile is present without C/C++ files
     assert not detector.detect(indexer)
@@ -147,6 +148,7 @@ def test_cpp_detector_cmake_standard(tmp_path: Path):
     )
     indexer = RepoIndexer(tmp_path)
     from heurix.detectors.cpp_detector import CppDetector
+
     detector = CppDetector()
     assert detector.detect(indexer)
 
@@ -265,6 +267,7 @@ def test_cpp_detector_clang_tidy_guarded(tmp_path: Path):
     (tmp_path / "CMakeLists.txt").write_text("project(demo)\n", encoding="utf-8")
     indexer = RepoIndexer(tmp_path)
     from heurix.detectors.cpp_detector import CppDetector
+
     detector = CppDetector()
     context = ProjectContext(repo_name="demo", repo_root=str(tmp_path))
     detector.analyze(indexer, context)
@@ -293,6 +296,7 @@ def test_cloud_detector_vercel(tmp_path: Path):
     (api_dir / "hello.ts").write_text("export default function handler() {}", encoding="utf-8")
 
     from heurix.detectors.cloud_detector import CloudDetector
+
     detector = CloudDetector()
     indexer = RepoIndexer(tmp_path)
     assert detector.detect(indexer)
@@ -337,6 +341,7 @@ def test_cloud_detector_firebase(tmp_path: Path):
     )
 
     from heurix.detectors.cloud_detector import CloudDetector
+
     detector = CloudDetector()
     indexer = RepoIndexer(tmp_path)
     assert detector.detect(indexer)
@@ -720,7 +725,9 @@ def test_workspace_topology_pnpm_and_npm_subpackages(tmp_path: Path):
     # 4. Active non-coordinator root package.json + heuristic sub-package -> root has is_workspace_root=False
     active_root = tmp_path / "active_root"
     (active_root / "tools" / "cli").mkdir(parents=True)
-    (active_root / "package.json").write_text('{"name": "root-app", "scripts": {"test": "node test.js"}}', encoding="utf-8")
+    (active_root / "package.json").write_text(
+        '{"name": "root-app", "scripts": {"test": "node test.js"}}', encoding="utf-8"
+    )
     (active_root / "tools" / "cli" / "package.json").write_text('{"name": "cli"}', encoding="utf-8")
 
     active_ctx = ProjectContext(repo_name="active_root", repo_root=str(active_root))
@@ -1164,7 +1171,9 @@ def test_polyglot_monorepo_nested_gitignore_end_to_end(tmp_path: Path):
     )
     # Must be hidden by apps/web/.gitignore and never indexed or picked up as a package
     (mono / "apps" / "web" / "local_build" / "package.json").write_text('{"name": "ignored"}', encoding="utf-8")
-    (mono / "apps" / "web" / "local_build" / "pyproject.toml").write_text('[project]\nname = "ignored"\n', encoding="utf-8")
+    (mono / "apps" / "web" / "local_build" / "pyproject.toml").write_text(
+        '[project]\nname = "ignored"\n', encoding="utf-8"
+    )
 
     (mono / "services" / "api" / "uv.lock").write_text("", encoding="utf-8")
     (mono / "services" / "api" / "pyproject.toml").write_text(
@@ -1367,9 +1376,7 @@ def test_e2e_and_unit_runner_detection(tmp_path: Path):
     }""",
         encoding="utf-8",
     )
-    (mono / "apps" / "web" / "cypress.config.ts").write_text(
-        "export default { e2e: {} };\n", encoding="utf-8"
-    )
+    (mono / "apps" / "web" / "cypress.config.ts").write_text("export default { e2e: {} };\n", encoding="utf-8")
     mono_ctx = analyze_repository(mono)
     web_pkg = next(p for p in mono_ctx.monorepo_packages if p.path == "apps/web")
     assert web_pkg.test_cmd == "pnpm test"
@@ -1390,9 +1397,7 @@ dependencies = ["fastapi", "pytest"]
         encoding="utf-8",
     )
     (py_repo / "requirements-dev.txt").write_text("pytest-playwright>=0.5.0\n", encoding="utf-8")
-    (py_repo / "tests" / "e2e" / "test_flow.py").write_text(
-        "def test_smoke(): pass\n", encoding="utf-8"
-    )
+    (py_repo / "tests" / "e2e" / "test_flow.py").write_text("def test_smoke(): pass\n", encoding="utf-8")
     py_ctx = analyze_repository(py_repo)
     py_lang = py_ctx.get_language("python")
     assert py_lang is not None
@@ -1533,6 +1538,7 @@ def test_python_detector_custom_postgres_credentials_from_env_example(tmp_path: 
     )
     # Env detector runs first in normal scan
     from heurix.detectors.env_detector import EnvDetector
+
     indexer = RepoIndexer(pg_dir)
     context = ProjectContext(repo_name="pg-app", repo_root=str(pg_dir))
     env_det = EnvDetector()
@@ -1562,5 +1568,3 @@ def test_node_detector_exact_nvmrc_and_node_version(tmp_path: Path):
     node = context.get_language("node")
     assert node is not None
     assert node.runtime_version == "20.11.0"
-
-

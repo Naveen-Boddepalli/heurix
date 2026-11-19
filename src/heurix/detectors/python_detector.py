@@ -29,9 +29,8 @@ _MOCK_DEP_PATTERN = re.compile(
 _CLASSIFIER_PYTHON_RE = re.compile(r"Programming Language :: Python :: (3\.\d+)")
 _TOX_PY_FACTOR_RE = re.compile(r"^(?:py)?(3)\.?(\d+)$", re.IGNORECASE)
 
-def _extract_pg_credentials(
-    context: ProjectContext, indexer: RepoIndexer | None = None
-) -> tuple[str, str, str]:
+
+def _extract_pg_credentials(context: ProjectContext, indexer: RepoIndexer | None = None) -> tuple[str, str, str]:
     """Extract postgres user, password, db from context.env_vars, .env templates, or parsed DATABASE_URL."""
     user = context.env_vars.get("POSTGRES_USER")
     password = context.env_vars.get("POSTGRES_PASSWORD")
@@ -73,6 +72,7 @@ def _extract_pg_credentials(
                 db = m.group(5).split("?")[0]
 
     return user or "test_user", password or "test_password", db or "test_db"
+
 
 _ROOT_INDICATORS = (
     "pyproject.toml",
@@ -421,7 +421,9 @@ class PythonDetector(BaseDetector):
             context.add_explain(f"Detected Package Manager: pip (via {req_txt})")
         elif base_dir != "." and root_lockfile is not None:
             package_manager, install_cmd, cache_dependency_path = root_lockfile
-            context.add_explain(f"Inherited workspace Package Manager{scope_label}: {package_manager} (via {cache_dependency_path})")
+            context.add_explain(
+                f"Inherited workspace Package Manager{scope_label}: {package_manager} (via {cache_dependency_path})"
+            )
         elif indexer.has_file(pyproject_path):
             package_manager = "pip"
             install_cmd = "pip install -e ."
@@ -484,7 +486,12 @@ class PythonDetector(BaseDetector):
         # projects (app.py next to tests/) import cleanly; bare `pytest` does not.
         test_cmd = "python -m pytest"
         unit_test_runner: str | None = None
-        if "pytest" in deps_lower or indexer.has_file(_join(base_dir, "pytest.ini")) or has_tests_dir or "[tool.pytest" in deps_text:
+        if (
+            "pytest" in deps_lower
+            or indexer.has_file(_join(base_dir, "pytest.ini"))
+            or has_tests_dir
+            or "[tool.pytest" in deps_text
+        ):
             test_cmd = "python -m pytest"
             unit_test_runner = "pytest"
             context.add_explain(f"Detected Test Runner{scope_label}: pytest")
@@ -536,9 +543,7 @@ class PythonDetector(BaseDetector):
         deps_clean, found_mocks = _strip_python_mock_deps(deps_lower)
         service_source = "python dependencies" if base_dir == "." else f"{base_dir}/python dependencies"
 
-        has_real_postgres = any(
-            db in deps_clean for db in ["psycopg", "asyncpg", "postgresql", "pgvector"]
-        )
+        has_real_postgres = any(db in deps_clean for db in ["psycopg", "asyncpg", "postgresql", "pgvector"])
         if has_real_postgres:
             if not any(s.name == "postgres" and s.package_path == pkg_path for s in context.services):
                 pg_user, pg_password, pg_db = _extract_pg_credentials(context, indexer=indexer)
@@ -556,8 +561,12 @@ class PythonDetector(BaseDetector):
                         package_path=pkg_path,
                     )
                 )
-                context.add_explain(f"Inferred Backing Service{scope_label}: PostgreSQL 16 (via python postgres client)")
-        elif any(m in {"testing.postgresql", "testing-postgresql", "testing_postgresql", "pgmock"} for m in found_mocks):
+                context.add_explain(
+                    f"Inferred Backing Service{scope_label}: PostgreSQL 16 (via python postgres client)"
+                )
+        elif any(
+            m in {"testing.postgresql", "testing-postgresql", "testing_postgresql", "pgmock"} for m in found_mocks
+        ):
             context.add_explain(f"Filtered mock postgres dependency from backing services{scope_label}")
 
         has_real_redis = any(r in deps_clean for r in ["redis", "aioredis", "celery"])
@@ -577,9 +586,7 @@ class PythonDetector(BaseDetector):
         elif any(m in {"fakeredis", "mockredispy"} for m in found_mocks):
             context.add_explain(f"Filtered mock redis dependency from backing services{scope_label}")
 
-        has_real_mongo = any(
-            m in deps_clean for m in ["pymongo", "motor", "mongoengine", "beanie"]
-        )
+        has_real_mongo = any(m in deps_clean for m in ["pymongo", "motor", "mongoengine", "beanie"])
         if has_real_mongo:
             if not any(s.name == "mongodb" and s.package_path == pkg_path for s in context.services):
                 context.services.append(
@@ -700,4 +707,3 @@ class PythonDetector(BaseDetector):
                     root_version=root_version,
                     root_lockfile=root_lockfile,
                 )
-

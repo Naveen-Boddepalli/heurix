@@ -36,6 +36,7 @@ def _is_e2e_job_id(job_id: str) -> bool:
         or bool(_E2E_JOB_SUFFIX_RE.search(job_id))
     )
 
+
 # action_name -> (language, version_with_keys, requires_pinned_version)
 SETUP_ACTION_SPECS: dict[str, tuple[str, tuple[str, ...], bool]] = {
     "actions/setup-python": ("python", ("python-version",), True),
@@ -136,9 +137,7 @@ class WorkflowASTInfo:
     job_runtime_versions: dict[str, dict[str, set[str]]] = field(default_factory=dict)
     job_package_managers: dict[str, set[str]] = field(default_factory=dict)
     job_runs_on: dict[str, set[str]] = field(default_factory=dict)
-    job_steps: dict[str, list[tuple[str | None, str | None, str | None]]] = field(
-        default_factory=dict
-    )
+    job_steps: dict[str, list[tuple[str | None, str | None, str | None]]] = field(default_factory=dict)
 
 
 def _normalize_working_dir(raw_wd: Any) -> str:
@@ -266,9 +265,7 @@ def _split_shell_segments(line: str) -> list[str]:
             if seg:
                 segments.append(seg)
             buf = []
-            if (ch == "&" and i + 1 < n and line[i + 1] == "&") or (
-                ch == "|" and i + 1 < n and line[i + 1] == "|"
-            ):
+            if (ch == "&" and i + 1 < n and line[i + 1] == "&") or (ch == "|" and i + 1 < n and line[i + 1] == "|"):
                 i += 2
             else:
                 i += 1
@@ -304,11 +301,7 @@ def _extract_command_prefixes(run_cmd: str) -> set[str]:
                     continue
                 if cmd_name:
                     prefixes.add(cmd_name)
-                    if (
-                        cmd_name.startswith("python")
-                        and idx + 2 < len(tokens)
-                        and tokens[idx + 1] == "-m"
-                    ):
+                    if cmd_name.startswith("python") and idx + 2 < len(tokens) and tokens[idx + 1] == "-m":
                         prefixes.add(tokens[idx + 2].lower())
                 break
     return prefixes
@@ -579,9 +572,7 @@ class DriftDetector:
             matching_jobs = [jid for jid, jwd in ast_info.job_working_dirs.items() if jwd == wd]
         else:
             matching_jobs = [
-                jid
-                for jid in ast_info.job_runtime_versions
-                if ast_info.job_working_dirs.get(jid, ".") == "."
+                jid for jid in ast_info.job_runtime_versions if ast_info.job_working_dirs.get(jid, ".") == "."
             ]
 
         use_aggregate = not matching_jobs
@@ -600,8 +591,7 @@ class DriftDetector:
         # Runtime & matrix version checks
         if lang_key in ast_info.runtime_versions:
             dedup_matrix = [
-                v for v in dict.fromkeys(_normalize_version(m) for m in matrix_versions)
-                if v and v != "latest"
+                v for v in dict.fromkeys(_normalize_version(m) for m in matrix_versions) if v and v != "latest"
             ]
             if len(dedup_matrix) > 1:
                 expected_versions = dedup_matrix
@@ -690,20 +680,12 @@ class DriftDetector:
         policy = HeurixPolicy.from_raw(context.policy_config)
 
         excluded_services = {
-            normalize_service_name(item)
-            for item in policy.services.exclude
-            if isinstance(item, str) and item.strip()
+            normalize_service_name(item) for item in policy.services.exclude if isinstance(item, str) and item.strip()
         }
-        active_services = [
-            svc
-            for svc in context.services
-            if normalize_service_name(svc.name) not in excluded_services
-        ]
+        active_services = [svc for svc in context.services if normalize_service_name(svc.name) not in excluded_services]
 
         runner_overrides: dict[str, str] = {
-            str(jid): str(r).strip()
-            for jid, r in policy.ci.runners.items()
-            if str(jid).strip() and str(r).strip()
+            str(jid): str(r).strip() for jid, r in policy.ci.runners.items() if str(jid).strip() and str(r).strip()
         }
         for jid, job_pol in policy.jobs.items():
             if job_pol.runner and job_pol.runner.strip():
@@ -798,13 +780,10 @@ class DriftDetector:
 
             # 2. Check OS matrix targets when multi-OS matrix is configured and unoverridden test/E2E jobs exist
             dedup_os = [
-                o
-                for o in dict.fromkeys(_normalize_version(item) for item in getattr(context, "matrix_os", []))
-                if o
+                o for o in dict.fromkeys(_normalize_version(item) for item in getattr(context, "matrix_os", [])) if o
             ]
             test_job_ids = [
-                jid for jid in ast_info.job_runs_on
-                if jid == "test" or jid.startswith("test-") or _is_e2e_job_id(jid)
+                jid for jid in ast_info.job_runs_on if jid == "test" or jid.startswith("test-") or _is_e2e_job_id(jid)
             ]
             unoverridden_test_jobs = [jid for jid in test_job_ids if jid not in runner_overrides]
             if len(dedup_os) > 1:
@@ -812,8 +791,7 @@ class DriftDetector:
                     if unoverridden_test_jobs:
                         for os_name in dedup_os:
                             if not all(
-                                os_name in ast_info.job_runs_on.get(jid, set())
-                                for jid in unoverridden_test_jobs
+                                os_name in ast_info.job_runs_on.get(jid, set()) for jid in unoverridden_test_jobs
                             ):
                                 findings.append(
                                     DriftFinding(
@@ -823,10 +801,7 @@ class DriftDetector:
                                         recommendation="Run 'hx generate' to update workflow OS build matrix.",
                                     )
                                 )
-                elif (
-                    not ast_info.job_runs_on
-                    or any(jid not in runner_overrides for jid in ast_info.job_runs_on)
-                ):
+                elif not ast_info.job_runs_on or any(jid not in runner_overrides for jid in ast_info.job_runs_on):
                     for os_name in dedup_os:
                         if os_name not in ast_info.runs_on_oses:
                             findings.append(
@@ -858,9 +833,7 @@ class DriftDetector:
             # 2c. Check policy-injected workflow steps (pre_test, post_test, pre_steps, post_steps)
             for job_id, actual_steps in ast_info.job_steps.items():
                 job_policy = policy.jobs.get(job_id)
-                is_unit_test_job = job_id == "test" or (
-                    job_id.startswith("test-") and not _is_e2e_job_id(job_id)
-                )
+                is_unit_test_job = job_id == "test" or (job_id.startswith("test-") and not _is_e2e_job_id(job_id))
                 if is_unit_test_job:
                     expected_steps: list[StepPolicy] = [
                         *policy.ci.steps.pre_test,

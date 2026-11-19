@@ -319,9 +319,7 @@ class K8sHpaPolicy(_PolicyBase):
     @model_validator(mode="after")
     def _validate_replica_bounds(self) -> K8sHpaPolicy:
         if self.max_replicas < self.min_replicas:
-            raise ValueError(
-                f"max_replicas ({self.max_replicas}) must be >= min_replicas ({self.min_replicas})"
-            )
+            raise ValueError(f"max_replicas ({self.max_replicas}) must be >= min_replicas ({self.min_replicas})")
         return self
 
 
@@ -335,9 +333,7 @@ class KubernetesPolicy(_PolicyBase):
     @classmethod
     def _validate_image_tag(cls, val: str | None) -> str | None:
         if val is not None and not is_valid_image_tag(val):
-            raise ValueError(
-                "image_tag must match [A-Za-z0-9_][A-Za-z0-9_.-]{0,127} (OCI tag syntax)"
-            )
+            raise ValueError("image_tag must match [A-Za-z0-9_][A-Za-z0-9_.-]{0,127} (OCI tag syntax)")
         return val
 
     port: Annotated[int, BeforeValidator(_reject_bool_for_int), Field(ge=1, le=65535)] | None = None
@@ -453,9 +449,7 @@ def parse_heurix_policy(raw_cfg: Mapping[str, Any] | None) -> tuple[HeurixPolicy
     if raw_cfg is None:
         return HeurixPolicy(), []
     if not isinstance(raw_cfg, Mapping):
-        return HeurixPolicy(), [
-            "Warning: Invalid .heurix.toml root: expected a table; using defaults."
-        ]
+        return HeurixPolicy(), ["Warning: Invalid .heurix.toml root: expected a table; using defaults."]
 
     warnings: list[str] = []
     for key in raw_cfg:
@@ -470,9 +464,7 @@ def parse_heurix_policy(raw_cfg: Mapping[str, Any] | None) -> tuple[HeurixPolicy
         and not isinstance(candidate["k8s"], Mapping)
         and isinstance(candidate["kubernetes"], Mapping)
     ):
-        warnings.append(
-            "Warning: Invalid .heurix.toml field 'k8s': Input should be a valid dictionary; ignoring."
-        )
+        warnings.append("Warning: Invalid .heurix.toml field 'k8s': Input should be a valid dictionary; ignoring.")
         candidate.pop("k8s", None)
 
     max_iterations = max(32, _count_nodes(candidate) + 8)
@@ -504,9 +496,7 @@ def parse_heurix_policy(raw_cfg: Mapping[str, Any] | None) -> tuple[HeurixPolicy
                 if pruned:
                     field_path = ".".join(str(part) for part in display_loc)
                     msg = str(err.get("msg", "invalid value"))
-                    warnings.append(
-                        f"Warning: Invalid .heurix.toml field '{field_path}': {msg}; using default."
-                    )
+                    warnings.append(f"Warning: Invalid .heurix.toml field '{field_path}': {msg}; using default.")
                     changed = True
 
             if not changed:
@@ -633,9 +623,7 @@ def apply_language_version_policy(context: ProjectContext, raw_key: str, raw_val
             lang_ctx.runtime_version = version_str
             lang_ctx.version_source = ".heurix.toml"
             lang_ctx.matrix_versions = []
-            context.add_explain(
-                f"Overrode {lang_name} version: {old_ver} -> {version_str} (via .heurix.toml)"
-            )
+            context.add_explain(f"Overrode {lang_name} version: {old_ver} -> {version_str} (via .heurix.toml)")
         for pkg in matching_pkgs:
             pkg.runtime_version = version_str
             pkg.version_source = ".heurix.toml"
@@ -678,17 +666,13 @@ def apply_policy_to_context(
 
     # 3. Apply [services].exclude with normalized alias mapping
     excluded_services = {
-        normalize_service_name(item)
-        for item in policy.services.exclude
-        if isinstance(item, str) and item.strip()
+        normalize_service_name(item) for item in policy.services.exclude if isinstance(item, str) and item.strip()
     }
     if excluded_services and context.services:
         kept_services = []
         for svc in context.services:
             if normalize_service_name(svc.name) in excluded_services:
-                context.add_explain(
-                    f"Excluded service '{svc.name}' via .heurix.toml [services].exclude"
-                )
+                context.add_explain(f"Excluded service '{svc.name}' via .heurix.toml [services].exclude")
             else:
                 kept_services.append(svc)
         context.services = kept_services
@@ -703,9 +687,7 @@ def apply_policy_to_context(
     for pkg in context.monorepo_packages:
         if pkg.lint_cmd and not policy.linters.is_enabled_for(pkg.language):
             pkg.lint_cmd = None
-            context.add_explain(
-                f"Disabled linter for {pkg.language} package '{pkg.path}' via .heurix.toml [linters]"
-            )
+            context.add_explain(f"Disabled linter for {pkg.language} package '{pkg.path}' via .heurix.toml [linters]")
 
     # 5. Apply [env] overrides while enforcing SEC-02 sensitive keyword redaction
     for raw_key, val in policy.env.items():

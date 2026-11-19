@@ -106,12 +106,14 @@ class MaintenanceSynthesizer(BaseSynthesizer):
         docker_entries.sort(key=lambda item: (0 if item[1] == "/" else 1, item[1]))
 
         for eco, directory, limit in (*pkg_entries, *docker_entries):
-            updates.append({
-                "package-ecosystem": eco,
-                "directory": directory,
-                "schedule": {"interval": "weekly"},
-                "open-pull-requests-limit": limit,
-            })
+            updates.append(
+                {
+                    "package-ecosystem": eco,
+                    "directory": directory,
+                    "schedule": {"interval": "weekly"},
+                    "open-pull-requests-limit": limit,
+                }
+            )
 
         rendered = render_yaml_template(
             "dependabot/dependabot.yml.j2",

@@ -27,6 +27,7 @@ def __getattr__(name: str):
         return _get_jsonschema()
     raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 
+
 # Lightweight structural schema for GitHub Actions workflow
 GITHUB_WORKFLOW_SCHEMA = {
     "type": "object",
@@ -138,9 +139,7 @@ class PreflightValidator:
         for idx, doc in enumerate(docs, start=1):
             doc_suffix = f" (document {idx})" if multi else ""
             if not isinstance(doc, dict):
-                errors.append(
-                    f"YAML Content in '{rel_path}'{doc_suffix} is not a valid dictionary/mapping."
-                )
+                errors.append(f"YAML Content in '{rel_path}'{doc_suffix} is not a valid dictionary/mapping.")
                 continue
 
             if schema_entry is not None:

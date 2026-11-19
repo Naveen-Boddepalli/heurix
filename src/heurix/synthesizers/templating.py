@@ -96,9 +96,7 @@ class SafeFileSystemLoader(FileSystemLoader):
         self.repo_root_resolved = Path(repo_root).resolve()
         super().__init__(str(searchpath), encoding=encoding, followlinks=False)
 
-    def get_source(
-        self, environment: Any, template: str
-    ) -> tuple[str, str, Callable[[], bool]]:
+    def get_source(self, environment: Any, template: str) -> tuple[str, str, Callable[[], bool]]:
         pieces = split_template_path(template)
         for searchpath in self.searchpath:
             candidate = Path(searchpath).joinpath(*pieces)
@@ -136,7 +134,12 @@ def create_template_environment(
         candidate = root_resolved / rel_dir
         candidate_resolved = candidate.resolve()
 
-        if explicit_dir is not None or candidate.exists() or candidate.is_symlink() or not candidate_resolved.is_relative_to(root_resolved):
+        if (
+            explicit_dir is not None
+            or candidate.exists()
+            or candidate.is_symlink()
+            or not candidate_resolved.is_relative_to(root_resolved)
+        ):
             if not candidate_resolved.is_relative_to(root_resolved):
                 raise ValueError(
                     f"Path traversal security violation: templates_dir '{rel_dir}' resolves outside repository root '{repo_root}'"

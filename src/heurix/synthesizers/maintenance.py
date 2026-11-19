@@ -5,13 +5,14 @@ Maintenance and Hygiene Workflow Synthesizer (Dependabot).
 from __future__ import annotations
 
 import posixpath
-from typing import Any, Dict, List, Set, Tuple
+from typing import Any
+
 from heurix.core.context import ProjectContext
 from heurix.core.policy import HeurixPolicy
 from heurix.synthesizers.base import BaseSynthesizer
 from heurix.synthesizers.templating import render_yaml_template
 
-ECOSYSTEM_MAP: Dict[str, str] = {
+ECOSYSTEM_MAP: dict[str, str] = {
     "python": "pip",
     "node": "npm",
     "rust": "cargo",
@@ -35,11 +36,11 @@ class MaintenanceSynthesizer(BaseSynthesizer):
     def name(self) -> str:
         return "Dependabot & Maintenance"
 
-    def synthesize(self, context: ProjectContext) -> Dict[str, str]:
+    def synthesize(self, context: ProjectContext) -> dict[str, str]:
         policy = HeurixPolicy.from_raw(context.policy_config)
 
-        seen_pairs: Set[Tuple[str, str]] = {("github-actions", "/")}
-        updates: List[Dict[str, Any]] = [
+        seen_pairs: set[tuple[str, str]] = {("github-actions", "/")}
+        updates: list[dict[str, Any]] = [
             {
                 "package-ecosystem": "github-actions",
                 "directory": "/",
@@ -48,8 +49,8 @@ class MaintenanceSynthesizer(BaseSynthesizer):
             }
         ]
 
-        pkg_entries: List[Tuple[str, str, int]] = []
-        subpkg_langs: Set[str] = set()
+        pkg_entries: list[tuple[str, str, int]] = []
+        subpkg_langs: set[str] = set()
 
         sorted_packages = sorted(
             context.monorepo_packages,
@@ -89,7 +90,7 @@ class MaintenanceSynthesizer(BaseSynthesizer):
 
         pkg_entries.sort(key=lambda item: (0 if item[1] == "/" else 1, item[1], item[0]))
 
-        docker_entries: List[Tuple[str, str, int]] = []
+        docker_entries: list[tuple[str, str, int]] = []
         for container in context.containers:
             raw_df = (container.dockerfile_path or "").strip().replace("\\", "/")
             while raw_df.startswith("./"):

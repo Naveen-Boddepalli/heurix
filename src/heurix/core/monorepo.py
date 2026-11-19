@@ -4,21 +4,18 @@ Monorepo workspace topology parser and 1-2 level polyglot subtree discovery.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from functools import lru_cache
 import json
 import posixpath
 import re
 import sys
-from typing import Dict, List, Optional, Sequence, Set, Tuple
+from collections.abc import Sequence
+from dataclasses import dataclass, field
+from functools import lru_cache
 
 if sys.version_info >= (3, 11):
     import tomllib
 else:
-    try:
-        import tomli as tomllib
-    except ImportError:
-        import tomllib  # type: ignore
+    import tomli as tomllib
 
 from ruamel.yaml import YAML
 
@@ -65,7 +62,7 @@ def normalize_workspace_pattern(raw: str) -> str:
         return ""
 
     norm = posixpath.normpath("/".join(raw_parts))
-    if norm == ".." or norm.startswith("../") or norm.startswith("/"):
+    if norm == ".." or norm.startswith(("../", "/")):
         return ""
 
     return f"!{norm}" if negated else norm
@@ -76,8 +73,8 @@ def _compile_glob_segment(segment: str) -> str:
     if segment == "*":
         return r"(?!\.)[^/]+"
 
-    parts: List[str] = []
-    if segment.startswith("*") or segment.startswith("?"):
+    parts: list[str] = []
+    if segment.startswith(("*", "?")):
         parts.append(r"(?!\.)")
 
     prev_star = False
@@ -118,7 +115,7 @@ def compile_workspace_glob(pattern: str) -> re.Pattern[str]:
         return re.compile(r"^\.$")
 
     # Collapse consecutive '**' segments to prevent redundant backtracking
-    segments: List[str] = []
+    segments: list[str] = []
     for seg in norm.split("/"):
         if seg == "**" and segments and segments[-1] == "**":
             continue
@@ -127,7 +124,7 @@ def compile_workspace_glob(pattern: str) -> re.Pattern[str]:
     if segments == ["**"]:
         return re.compile(r"^.+$")
 
-    regex_parts: List[str] = ["^"]
+    regex_parts: list[str] = ["^"]
     last_idx = len(segments) - 1
     for idx, seg in enumerate(segments):
         if seg == "**":
@@ -194,8 +191,8 @@ def match_workspace_globs(
     return not _is_excluded(cand, exclude_patterns)
 
 
-def _normalize_pattern_sequence(items: Sequence[object]) -> List[str]:
-    result: List[str] = []
+def _normalize_pattern_sequence(items: Sequence[object]) -> list[str]:
+    result: list[str] = []
     for item in items:
         if not isinstance(item, str):
             continue
@@ -205,7 +202,7 @@ def _normalize_pattern_sequence(items: Sequence[object]) -> List[str]:
     return result
 
 
-def parse_pnpm_workspace(content: str) -> List[str]:
+def parse_pnpm_workspace(content: str) -> list[str]:
     """Parse `packages:` globs from pnpm-workspace.yaml using safe YAML loading."""
     if not content or not content.strip():
         return []
@@ -223,7 +220,7 @@ def parse_pnpm_workspace(content: str) -> List[str]:
     return _normalize_pattern_sequence(packages)
 
 
-def parse_package_json_workspaces(content: str) -> List[str]:
+def parse_package_json_workspaces(content: str) -> list[str]:
     """
     Parse `workspaces` from package.json supporting both npm/Yarn list format
     and Yarn Classic `{"packages": [...]}` object format.
@@ -248,7 +245,7 @@ def parse_package_json_workspaces(content: str) -> List[str]:
     return []
 
 
-def parse_cargo_workspace(content: str) -> Tuple[List[str], List[str], bool]:
+def parse_cargo_workspace(content: str) -> tuple[list[str], list[str], bool]:
     """
     Parse Cargo.toml `[workspace]` table.
 
@@ -316,7 +313,7 @@ def _unquote_go_token(token: str) -> str:
     return stripped
 
 
-def parse_go_work(content: str) -> List[str]:
+def parse_go_work(content: str) -> list[str]:
     """
     Parse `use` directives (single-line, inline, and multi-line blocks) from go.work,
     stripping `//` comments and quotes, normalizing POSIX paths, and rejecting `..`
@@ -325,7 +322,7 @@ def parse_go_work(content: str) -> List[str]:
     if not content or not content.strip():
         return []
 
-    raw_paths: List[str] = []
+    raw_paths: list[str] = []
     in_use_block = False
 
     for raw_line in content.splitlines():
@@ -375,7 +372,7 @@ def parse_go_work(content: str) -> List[str]:
             if unquoted:
                 raw_paths.append(unquoted)
 
-    result: List[str] = []
+    result: list[str] = []
     for raw_path in raw_paths:
         norm = normalize_workspace_pattern(raw_path)
         if not norm or norm.startswith("!"):
@@ -412,7 +409,7 @@ PREFERRED_CONTAINER_GROUPS = frozenset({
     "modules",
 })
 
-ECOSYSTEM_MANIFESTS: Dict[str, frozenset[str]] = {
+ECOSYSTEM_MANIFESTS: dict[str, frozenset[str]] = {
     "node": frozenset({"package.json"}),
     "python": frozenset({
         "pyproject.toml",
@@ -428,7 +425,7 @@ ECOSYSTEM_MANIFESTS: Dict[str, frozenset[str]] = {
     "cpp": frozenset({"CMakeLists.txt", "conanfile.txt", "conanfile.py", "vcpkg.json"}),
 }
 
-_MANIFEST_TO_LANG: Dict[str, str] = {
+_MANIFEST_TO_LANG: dict[str, str] = {
     manifest: lang
     for lang, manifests in ECOSYSTEM_MANIFESTS.items()
     for manifest in manifests
@@ -441,9 +438,9 @@ _PYTHON_PREFERRED_GROUPS = frozenset({"apps", "services", "packages"})
 class MonorepoTopology:
     is_monorepo: bool
     has_workspace_config: bool
-    workspace_kinds: List[str] = field(default_factory=list)
-    packages_by_lang: Dict[str, List[str]] = field(default_factory=dict)
-    all_packages: List[Tuple[str, str]] = field(default_factory=list)
+    workspace_kinds: list[str] = field(default_factory=list)
+    packages_by_lang: dict[str, list[str]] = field(default_factory=dict)
+    all_packages: list[tuple[str, str]] = field(default_factory=list)
 
 
 def discover_monorepo_topology(indexer: RepoIndexer) -> MonorepoTopology:
@@ -453,18 +450,18 @@ def discover_monorepo_topology(indexer: RepoIndexer) -> MonorepoTopology:
     heuristic discovery and false-positive directory filtering.
     """
     has_workspace_config = False
-    workspace_kinds: List[str] = []
-    discovered: Set[Tuple[str, str]] = set()
-    explicit_langs: Set[str] = set()
+    workspace_kinds: list[str] = []
+    discovered: set[tuple[str, str]] = set()
+    explicit_langs: set[str] = set()
 
     # 1. Explicit Node workspace configs
-    pnpm_patterns: List[str] = []
+    pnpm_patterns: list[str] = []
     if indexer.has_file("pnpm-workspace.yaml"):
         has_workspace_config = True
         workspace_kinds.append("pnpm")
         pnpm_patterns = parse_pnpm_workspace(indexer.read_text("pnpm-workspace.yaml") or "")
 
-    pkg_json_patterns: List[str] = []
+    pkg_json_patterns: list[str] = []
     if indexer.has_file("package.json"):
         pkg_raw = indexer.read_text("package.json") or ""
         try:
@@ -497,8 +494,8 @@ def discover_monorepo_topology(indexer: RepoIndexer) -> MonorepoTopology:
                 discovered.add((cand_dir, "node"))
 
     # 2. Explicit Rust Cargo [workspace]
-    cargo_members: List[str] = []
-    cargo_excludes: List[str] = []
+    cargo_members: list[str] = []
+    cargo_excludes: list[str] = []
     if indexer.has_file("Cargo.toml"):
         cargo_raw = indexer.read_text("Cargo.toml") or ""
         try:
@@ -533,7 +530,7 @@ def discover_monorepo_topology(indexer: RepoIndexer) -> MonorepoTopology:
                     discovered.add((go_dir, "go"))
 
     # 4. Precompute directories containing at least one .py file for requirements.txt guard
-    dirs_with_py: Set[str] = set()
+    dirs_with_py: set[str] = set()
     for rel_path in indexer.files:
         if rel_path.endswith(".py") and "/" in rel_path:
             parts = rel_path.split("/")
@@ -543,7 +540,7 @@ def discover_monorepo_topology(indexer: RepoIndexer) -> MonorepoTopology:
                 dirs_with_py.add(f"{parts[0]}/{parts[1]}")
 
     # 5. Heuristic 1-2 level polyglot subtree discovery
-    candidates: Dict[Tuple[str, str], Set[str]] = {}
+    candidates: dict[tuple[str, str], set[str]] = {}
     for rel_path in indexer.files:
         parts = rel_path.split("/")
         if len(parts) not in (2, 3):
@@ -581,10 +578,10 @@ def discover_monorepo_topology(indexer: RepoIndexer) -> MonorepoTopology:
         discovered.add((pkg_dir, lang))
 
     all_packages = sorted(discovered)
-    raw_by_lang: Dict[str, List[str]] = {}
+    raw_by_lang: dict[str, list[str]] = {}
     for pkg_dir, lang in all_packages:
         raw_by_lang.setdefault(lang, []).append(pkg_dir)
-    packages_by_lang = {lang: paths for lang, paths in sorted(raw_by_lang.items())}
+    packages_by_lang = dict(sorted(raw_by_lang.items()))
 
     has_root_manifest = any(
         indexer.has_file(manifest)

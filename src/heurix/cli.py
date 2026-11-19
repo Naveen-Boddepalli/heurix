@@ -4,10 +4,9 @@ Heurix CLI (hx): Deterministic Codebase Scanner & YAML Synthesizer.
 
 from __future__ import annotations
 
-import os
 import shutil
 from pathlib import Path
-from typing import Optional
+
 import typer
 from rich.console import Console
 from rich.markup import escape
@@ -74,7 +73,7 @@ def _resolve_or_exit(repo_path: Path, rel_path: str | Path) -> Path:
                 border_style="red",
             )
         )
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from e
 
 
 def _resolve_repo_dir_or_exit(path: str) -> Path:
@@ -110,7 +109,7 @@ def _synthesize_or_exit(
                 border_style="red",
             )
         )
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from e
 
 
 def _print_context_warnings(context: ProjectContext) -> None:
@@ -151,7 +150,7 @@ def _run_generate(
                 border_style="red",
             )
         )
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from e
 
     print_banner()
 
@@ -263,7 +262,7 @@ def _run_generate(
                         border_style="red",
                     )
                 )
-                raise typer.Exit(code=1)
+                raise typer.Exit(code=1) from e
 
             if non_destructive and merger.replaced:
                 console.print(
@@ -327,7 +326,7 @@ def _run_generate(
 @app.callback(invoke_without_command=True)
 def main(
     ctx: typer.Context,
-    version: Optional[bool] = typer.Option(
+    version: bool | None = typer.Option(
         None, "--version", "-v", callback=version_callback, is_eager=True, help="Show version."
     ),
 ):
@@ -478,7 +477,7 @@ def scan(
 @app.command()
 def init(
     path: str = typer.Option(".", "--path", "-p", help="Root directory of repository."),
-    hooks: Optional[bool] = typer.Option(
+    hooks: bool | None = typer.Option(
         None,
         "--hooks/--no-hooks",
         help="Install an idempotent Git pre-commit hook running 'hx check'.",
@@ -636,7 +635,7 @@ include_k8s = __INCLUDE_K8S__  # also controls whether `hx check` verifies k8s/ 
                     border_style="red",
                 )
             )
-            raise typer.Exit(code=1)
+            raise typer.Exit(code=1) from e
 
         if hook_result.status == "created":
             console.print(

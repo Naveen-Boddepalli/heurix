@@ -5,7 +5,8 @@ Non-Destructive Smart Merge and AST Round-Trip Preservation.
 from __future__ import annotations
 
 import io
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any
+
 from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedMap, CommentedSeq
 
@@ -18,7 +19,7 @@ class YamlSyntaxError(Exception):
     """Raised when existing or synthesized YAML content contains invalid syntax."""
 
 
-def _normalize_step_uses(step: Any) -> Optional[str]:
+def _normalize_step_uses(step: Any) -> str | None:
     """Return normalized action repository/path (without @ref) for a workflow step."""
     if not isinstance(step, (dict, CommentedMap)):
         return None
@@ -31,7 +32,7 @@ def _normalize_step_uses(step: Any) -> Optional[str]:
     return val.split("@", 1)[0].strip().lower()
 
 
-def _normalize_step_name(step: Any) -> Optional[str]:
+def _normalize_step_name(step: Any) -> str | None:
     """Return normalized lowercase name for a workflow step."""
     if not isinstance(step, (dict, CommentedMap)):
         return None
@@ -42,7 +43,7 @@ def _normalize_step_name(step: Any) -> Optional[str]:
     return val if val else None
 
 
-def _normalize_step_run(step: Any) -> Optional[str]:
+def _normalize_step_run(step: Any) -> str | None:
     """Return whitespace-normalized run command for a workflow step."""
     if not isinstance(step, (dict, CommentedMap)):
         return None
@@ -56,7 +57,7 @@ def _normalize_step_run(step: Any) -> Optional[str]:
 _HPA_METRIC_SUBKEYS = ("resource", "pods", "object", "external", "containerResource")
 
 
-def _extract_hpa_metric_key(item: Any) -> Optional[Tuple[str, str]]:
+def _extract_hpa_metric_key(item: Any) -> tuple[str, str] | None:
     """Extract (type, metric_name) identity for Kubernetes HPA v2 spec.metrics items."""
     if not isinstance(item, (dict, CommentedMap)) or "type" not in item:
         return None
@@ -74,7 +75,7 @@ def _extract_hpa_metric_key(item: Any) -> Optional[Tuple[str, str]]:
     return None
 
 
-def _get_entity_identifier(item: Any) -> Optional[Tuple[str, Any]]:
+def _get_entity_identifier(item: Any) -> tuple[str, Any] | None:
     """Extract the primary identity key/value pair from a YAML mapping sequence item."""
     if isinstance(item, (dict, CommentedMap)):
         hpa_key = _extract_hpa_metric_key(item)
@@ -156,7 +157,7 @@ def deep_merge_nodes(existing: Any, new: Any) -> Any:
     return existing
 
 
-def _get_doc_identity(doc: Any) -> Optional[Tuple[Optional[str], Optional[str]]]:
+def _get_doc_identity(doc: Any) -> tuple[str | None, str | None] | None:
     """Extract (kind, metadata.name) identity for Kubernetes multi-document correlation."""
     if not isinstance(doc, (dict, CommentedMap)):
         return None
@@ -187,7 +188,7 @@ class SmartMerger:
         # Match the template renderer's width so merged output never re-wraps long scalars.
         self.yaml.width = 4096
         # Human-readable notes about existing values the last merge replaced.
-        self.replaced: List[str] = []
+        self.replaced: list[str] = []
 
     def merge_yaml(self, existing_content: str, new_content: str) -> str:
         """
@@ -239,17 +240,17 @@ class SmartMerger:
         self.yaml.dump(merged_doc, stream)
         return stream.getvalue()
 
-    def _merge_multidoc(self, existing_docs: List[Any], new_docs: List[Any]) -> List[Any]:
+    def _merge_multidoc(self, existing_docs: list[Any], new_docs: list[Any]) -> list[Any]:
         """
         Merge multi-document YAML streams by correlating documents on (kind, metadata.name).
         Existing unmatched documents are preserved; new unmatched documents are appended.
         """
-        merged_docs: List[Any] = list(existing_docs)
-        matched_existing_indices: Set[int] = set()
+        merged_docs: list[Any] = list(existing_docs)
+        matched_existing_indices: set[int] = set()
 
         for new_doc in new_docs:
             new_ident = _get_doc_identity(new_doc)
-            matched_idx: Optional[int] = None
+            matched_idx: int | None = None
 
             if new_ident is not None:
                 for idx, ex_doc in enumerate(merged_docs):
@@ -291,10 +292,10 @@ class SmartMerger:
 
     def _merge_github_workflow(
         self,
-        existing: CommentedMap,
-        new: CommentedMap,
+        existing: dict[Any, Any],
+        new: dict[Any, Any],
         raw_existing: str,
-    ) -> CommentedMap:
+    ) -> dict[Any, Any]:
         result = existing.copy()
 
         # Update metadata if needed, but preserve user triggers if customized
@@ -352,9 +353,9 @@ class SmartMerger:
         return result
 
     @staticmethod
-    def _collect_comment_values(token: Any, require_newline_marker: bool = False) -> List[str]:
+    def _collect_comment_values(token: Any, require_newline_marker: bool = False) -> list[str]:
         """Extract string values from a ruamel.yaml comment token or token list."""
-        values: List[str] = []
+        values: list[str] = []
         items = token if isinstance(token, list) else [token]
         for t in items:
             val = getattr(t, "value", None)
@@ -369,7 +370,7 @@ class SmartMerger:
 
     def _has_internal_preserve_comment(self, seq: Any, idx: int, item: Any) -> bool:
         """Check whether preserve directive comments are attached directly inside a step mapping."""
-        comment_blobs: List[str] = []
+        comment_blobs: list[str] = []
         if hasattr(item, "ca") and item.ca:
             if item.ca.comment:
                 for token in item.ca.comment:
@@ -393,7 +394,7 @@ class SmartMerger:
 
     def _has_preserve_comment(self, seq: Any, idx: int, item: Any) -> bool:
         """Check ruamel.yaml comment attributes on sequence index and mapping keys."""
-        comment_blobs: List[str] = []
+        comment_blobs: list[str] = []
 
         # Sequence comments for first item (comments placed above first list item)
         if idx == 0 and hasattr(seq, "ca") and seq.ca and seq.ca.comment:
@@ -428,8 +429,8 @@ class SmartMerger:
         return self._has_internal_preserve_comment(seq, idx, item)
 
     def _match_steps(
-        self, existing_steps: List[Any], new_steps: List[Any]
-    ) -> Tuple[Dict[int, int], Dict[int, int]]:
+        self, existing_steps: list[Any], new_steps: list[Any]
+    ) -> tuple[dict[int, int], dict[int, int]]:
         """
         Match existing workflow steps to synthesized new steps 1-to-1
         by compound identity, uses action base, step name, or run command.
@@ -443,8 +444,8 @@ class SmartMerger:
             for s in new_steps
         ]
 
-        ex_to_new: Dict[int, int] = {}
-        new_to_ex: Dict[int, int] = {}
+        ex_to_new: dict[int, int] = {}
+        new_to_ex: dict[int, int] = {}
 
         def _run_pass(predicate: Any) -> None:
             for i, es in enumerate(ex_sig):
@@ -594,13 +595,13 @@ class SmartMerger:
         ex_to_new, new_to_ex = self._match_steps(existing_steps, new_steps)
 
         # Anchor unmatched existing steps (both @preserve and unmanaged) relative to the next matched step
-        anchored_before: Dict[int, List[int]] = {j: [] for j in range(len(new_steps))}
-        trailing_existing: List[int] = []
+        anchored_before: dict[int, list[int]] = {j: [] for j in range(len(new_steps))}
+        trailing_existing: list[int] = []
 
         for idx in range(len(existing_steps)):
             if idx in ex_to_new:
                 continue
-            next_new_idx: Optional[int] = None
+            next_new_idx: int | None = None
             for k in range(idx + 1, len(existing_steps)):
                 if k in ex_to_new:
                     next_new_idx = ex_to_new[k]
@@ -611,7 +612,7 @@ class SmartMerger:
                 trailing_existing.append(idx)
 
         final_steps = CommentedSeq()
-        preserve_comment_indices: List[int] = []
+        preserve_comment_indices: list[int] = []
 
         def _append_existing(ex_idx: int) -> None:
             step = existing_steps[ex_idx]

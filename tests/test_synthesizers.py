@@ -422,6 +422,7 @@ def test_configmap_redaction_omits_empty_configmap_when_all_vars_sensitive():
 
 def test_go_linter_action_integration():
     from ruamel.yaml import YAML
+
     from heurix.core.validator import PreflightValidator
 
     context = ProjectContext(
@@ -577,7 +578,9 @@ def test_branch_target_dynamic_conditionals():
 
 def test_action_pinning_and_optional_sha_pinning():
     import re
+
     from ruamel.yaml import YAML
+
     from heurix.core.validator import PreflightValidator
 
     checkout_sha = "b4ffde65f46336ab88eb53be808477a3936bae11"
@@ -623,7 +626,9 @@ def test_action_pinning_and_optional_sha_pinning():
 
 def test_multijob_polyglot_monorepo_splitting_and_paths():
     import re
+
     from ruamel.yaml import YAML
+
     from heurix.core.context import MonorepoPackage
     from heurix.core.validator import PreflightValidator
     from heurix.synthesizers.github_actions import sanitize_job_id
@@ -837,6 +842,7 @@ def test_multijob_polyglot_monorepo_splitting_and_paths():
 
 def test_multijob_scoped_services_secrets_and_deploy_needs():
     from ruamel.yaml import YAML
+
     from heurix.core.context import MonorepoPackage
     from heurix.core.validator import PreflightValidator
 
@@ -965,6 +971,7 @@ def test_multijob_scoped_services_secrets_and_deploy_needs():
 
 def test_matrix_synthesis_versions_and_os_across_jobs():
     from ruamel.yaml import YAML
+
     from heurix.core.context import MonorepoPackage
     from heurix.core.validator import PreflightValidator
 
@@ -1089,6 +1096,7 @@ def test_matrix_synthesis_versions_and_os_across_jobs():
 
 def test_matrix_synthesis_cpp_cross_os_and_single_pin_non_matrix():
     from ruamel.yaml import YAML
+
     from heurix.core.context import MonorepoPackage
     from heurix.core.validator import PreflightValidator
 
@@ -1189,6 +1197,7 @@ def test_matrix_synthesis_cpp_cross_os_and_single_pin_non_matrix():
 
 def test_dependabot_monorepo_polyglot_deduped():
     from ruamel.yaml import YAML
+
     from heurix.core.context import MonorepoPackage
     from heurix.core.validator import PreflightValidator
 
@@ -1306,9 +1315,11 @@ def test_dependabot_monorepo_polyglot_deduped():
 
 def test_ci_template_decoupling_and_local_override(tmp_path: Path):
     import re
+
     import pytest
     from jinja2 import PackageLoader
     from ruamel.yaml import YAML
+
     from heurix.core.context import MonorepoPackage
     from heurix.core.validator import PreflightValidator
     from heurix.synthesizers.github_actions import (
@@ -1457,7 +1468,9 @@ def test_ci_template_decoupling_and_local_override(tmp_path: Path):
 
 def test_policy_runners_linters_and_step_injections(tmp_path: Path):
     import re
+
     from ruamel.yaml import YAML
+
     from heurix.core.context import MonorepoPackage
     from heurix.core.validator import PreflightValidator
 
@@ -1790,6 +1803,7 @@ def test_dependabot_template_decoupling(tmp_path: Path):
     import pytest
     from jinja2 import PackageLoader
     from ruamel.yaml import YAML
+
     from heurix.core.context import MonorepoPackage
     from heurix.core.validator import PreflightValidator
     from heurix.synthesizers.maintenance import ECOSYSTEM_MAP, MaintenanceSynthesizer, _normalize_dir
@@ -1876,6 +1890,7 @@ def test_dependabot_template_decoupling(tmp_path: Path):
 
 def test_e2e_parallel_job_synthesis_and_combined_mode():
     from ruamel.yaml import YAML
+
     from heurix.core.context import MonorepoPackage
     from heurix.core.validator import PreflightValidator
 
@@ -2282,10 +2297,10 @@ def test_kubernetes_hardened_security_context_and_secret_wiring():
 
 
 def _postgres_ctx(**overrides):
-    base = dict(
-        repo_name="demo-app",
-        repo_root="/demo",
-        languages=[
+    base = {
+        "repo_name": "demo-app",
+        "repo_root": "/demo",
+        "languages": [
             LanguageContext(
                 language="python",
                 runtime_version="3.12",
@@ -2295,7 +2310,7 @@ def _postgres_ctx(**overrides):
                 test_cmd="uv run pytest",
             )
         ],
-        services=[
+        "services": [
             ServiceRequirement(
                 name="postgres",
                 image="postgres:16-alpine",
@@ -2304,8 +2319,8 @@ def _postgres_ctx(**overrides):
                 source_file="pyproject.toml",
             )
         ],
-        test_secrets=["DATABASE_URL"],
-    )
+        "test_secrets": ["DATABASE_URL"],
+    }
     base.update(overrides)
     return ProjectContext(**base)
 

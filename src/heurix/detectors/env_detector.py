@@ -4,8 +4,6 @@ Environment Variables and Secrets Discovery Detector.
 
 from __future__ import annotations
 
-import re
-from typing import Set
 from heurix.core.context import ProjectContext
 from heurix.core.indexer import RepoIndexer
 from heurix.detectors.base import BaseDetector
@@ -63,7 +61,7 @@ class EnvDetector(BaseDetector):
             ] if indexer.has_file(f)
         ]
 
-        found_secrets: Set[str] = set()
+        found_secrets: set[str] = set()
 
         for ef in env_files:
             content = indexer.read_text(ef) or ""

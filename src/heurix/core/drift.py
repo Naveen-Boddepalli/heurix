@@ -6,15 +6,16 @@ using structural ruamel.yaml AST traversal.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-import re
-from typing import Any, Dict, List, NamedTuple, Optional, Set, Tuple
+from typing import Any, NamedTuple
+
 from ruamel.yaml import YAML
+
 from heurix.core.context import ProjectContext
 from heurix.core.policy import HeurixPolicy, StepPolicy, normalize_service_name
-
 
 _MATRIX_REF_RE = re.compile(r"\bmatrix\.([A-Za-z0-9_-]+)\b")
 _ENV_REF_RE = re.compile(r"\benv\.([A-Za-z0-9_-]+)\b")
@@ -36,7 +37,7 @@ def _is_e2e_job_id(job_id: str) -> bool:
     )
 
 # action_name -> (language, version_with_keys, requires_pinned_version)
-SETUP_ACTION_SPECS: Dict[str, Tuple[str, Tuple[str, ...], bool]] = {
+SETUP_ACTION_SPECS: dict[str, tuple[str, tuple[str, ...], bool]] = {
     "actions/setup-python": ("python", ("python-version",), True),
     "astral-sh/setup-uv": ("python", ("python-version",), False),
     "actions/setup-node": ("node", ("node-version",), True),
@@ -45,14 +46,14 @@ SETUP_ACTION_SPECS: Dict[str, Tuple[str, Tuple[str, ...], bool]] = {
     "actions-rs/toolchain": ("rust", ("toolchain",), False),
 }
 
-PACKAGE_MANAGER_ACTIONS: Dict[str, str] = {
+PACKAGE_MANAGER_ACTIONS: dict[str, str] = {
     "astral-sh/setup-uv": "uv",
     "pnpm/action-setup": "pnpm",
     "snok/install-poetry": "poetry",
     "oven-sh/setup-bun": "bun",
 }
 
-PACKAGE_MANAGER_CHECKS: Dict[str, Tuple[str, str, str]] = {
+PACKAGE_MANAGER_CHECKS: dict[str, tuple[str, str, str]] = {
     "uv": (
         "astral-sh/setup-uv",
         "uv package manager detected in codebase (uv.lock), but workflow does not use astral-sh/setup-uv.",
@@ -76,7 +77,7 @@ PACKAGE_MANAGER_CHECKS: Dict[str, Tuple[str, str, str]] = {
 }
 
 
-def _service_host_port(port: Any) -> Optional[str]:
+def _service_host_port(port: Any) -> str | None:
     """
     Return the host port a service `ports:` entry binds, or None if Docker picks one.
 
@@ -91,9 +92,9 @@ def _service_host_port(port: Any) -> Optional[str]:
     return host or None
 
 
-def find_service_port_collisions(doc: Any) -> List[Tuple[str, str, List[str]]]:
+def find_service_port_collisions(doc: Any) -> list[tuple[str, str, list[str]]]:
     """List (job_id, host_port, service_names) where 2+ services bind the same host port."""
-    collisions: List[Tuple[str, str, List[str]]] = []
+    collisions: list[tuple[str, str, list[str]]] = []
     jobs = doc.get("jobs") if isinstance(doc, Mapping) else None
     if not isinstance(jobs, Mapping):
         return collisions
@@ -101,7 +102,7 @@ def find_service_port_collisions(doc: Any) -> List[Tuple[str, str, List[str]]]:
         svcs = job.get("services") if isinstance(job, Mapping) else None
         if not isinstance(svcs, Mapping):
             continue
-        by_port: Dict[str, List[str]] = {}
+        by_port: dict[str, list[str]] = {}
         for svc_name, svc in svcs.items():
             ports = svc.get("ports") if isinstance(svc, Mapping) else None
             for port in ports if isinstance(ports, list) else []:
@@ -123,19 +124,19 @@ class DriftFinding(NamedTuple):
 
 @dataclass
 class WorkflowASTInfo:
-    discovered_services: Set[str]
-    runtime_versions: Dict[str, Set[str]]
-    setup_actions: Set[str]
-    package_managers: Set[str]
-    run_commands: List[str]
-    unpinned_jobs: Dict[str, Set[str]]
-    working_dirs: Set[str] = field(default_factory=set)
-    runs_on_oses: Set[str] = field(default_factory=set)
-    job_working_dirs: Dict[str, str] = field(default_factory=dict)
-    job_runtime_versions: Dict[str, Dict[str, Set[str]]] = field(default_factory=dict)
-    job_package_managers: Dict[str, Set[str]] = field(default_factory=dict)
-    job_runs_on: Dict[str, Set[str]] = field(default_factory=dict)
-    job_steps: Dict[str, List[Tuple[Optional[str], Optional[str], Optional[str]]]] = field(
+    discovered_services: set[str]
+    runtime_versions: dict[str, set[str]]
+    setup_actions: set[str]
+    package_managers: set[str]
+    run_commands: list[str]
+    unpinned_jobs: dict[str, set[str]]
+    working_dirs: set[str] = field(default_factory=set)
+    runs_on_oses: set[str] = field(default_factory=set)
+    job_working_dirs: dict[str, str] = field(default_factory=dict)
+    job_runtime_versions: dict[str, dict[str, set[str]]] = field(default_factory=dict)
+    job_package_managers: dict[str, set[str]] = field(default_factory=dict)
+    job_runs_on: dict[str, set[str]] = field(default_factory=dict)
+    job_steps: dict[str, list[tuple[str | None, str | None, str | None]]] = field(
         default_factory=dict
     )
 
@@ -163,9 +164,9 @@ def _normalize_version(val: Any) -> str:
     return s.strip("'\" \t\r\n")
 
 
-def _collect_version_values(node: Any) -> Set[str]:
+def _collect_version_values(node: Any) -> set[str]:
     """Extract normalized version strings from a scalar, newline-separated string, or sequence."""
-    results: Set[str] = set()
+    results: set[str] = set()
     if node is None or isinstance(node, bool):
         return results
     if isinstance(node, Sequence) and not isinstance(node, (str, bytes)):
@@ -190,13 +191,13 @@ def _resolve_version_expr(
     raw_val: Any,
     matrix: Mapping[str, Any],
     env_map: Mapping[str, Any],
-) -> Set[str]:
+) -> set[str]:
     """Resolve direct values or GitHub Actions matrix/env expressions from AST nodes."""
     if raw_val is None or isinstance(raw_val, bool):
         return set()
 
     if isinstance(raw_val, str) and "${{" in raw_val:
-        resolved: Set[str] = set()
+        resolved: set[str] = set()
 
         for matrix_key in _MATRIX_REF_RE.findall(raw_val):
             if matrix_key in matrix:
@@ -221,10 +222,10 @@ def _resolve_version_expr(
     return _collect_version_values(raw_val)
 
 
-def _split_shell_segments(line: str) -> List[str]:
+def _split_shell_segments(line: str) -> list[str]:
     """Split a single shell line on unquoted separators while stripping unquoted comments."""
-    segments: List[str] = []
-    buf: List[str] = []
+    segments: list[str] = []
+    buf: list[str] = []
     quote: str | None = None
     escaped = False
     i = 0
@@ -282,9 +283,9 @@ def _split_shell_segments(line: str) -> List[str]:
     return segments
 
 
-def _extract_command_prefixes(run_cmd: str) -> Set[str]:
+def _extract_command_prefixes(run_cmd: str) -> set[str]:
     """Extract executable command prefixes from a workflow step `run` script."""
-    prefixes: Set[str] = set()
+    prefixes: set[str] = set()
     for raw_line in run_cmd.splitlines():
         stripped = raw_line.strip()
         if not stripped or stripped.startswith("#"):
@@ -322,24 +323,24 @@ def inspect_workflow_ast(doc: Any) -> WorkflowASTInfo:
     package managers, step run commands, unpinned setup jobs, working directories,
     runner OS targets, and per-job AST attributes across all jobs.
     """
-    discovered_services: Set[str] = set()
-    runtime_versions: Dict[str, Set[str]] = {
+    discovered_services: set[str] = set()
+    runtime_versions: dict[str, set[str]] = {
         "python": set(),
         "node": set(),
         "go": set(),
         "rust": set(),
     }
-    setup_actions: Set[str] = set()
-    package_managers: Set[str] = set()
-    run_commands: List[str] = []
-    unpinned_jobs: Dict[str, Set[str]] = {}
-    working_dirs: Set[str] = set()
-    runs_on_oses: Set[str] = set()
-    job_working_dirs: Dict[str, str] = {}
-    job_runtime_versions: Dict[str, Dict[str, Set[str]]] = {}
-    job_package_managers: Dict[str, Set[str]] = {}
-    job_runs_on: Dict[str, Set[str]] = {}
-    job_steps: Dict[str, List[Tuple[Optional[str], Optional[str], Optional[str]]]] = {}
+    setup_actions: set[str] = set()
+    package_managers: set[str] = set()
+    run_commands: list[str] = []
+    unpinned_jobs: dict[str, set[str]] = {}
+    working_dirs: set[str] = set()
+    runs_on_oses: set[str] = set()
+    job_working_dirs: dict[str, str] = {}
+    job_runtime_versions: dict[str, dict[str, set[str]]] = {}
+    job_package_managers: dict[str, set[str]] = {}
+    job_runs_on: dict[str, set[str]] = {}
+    job_steps: dict[str, list[tuple[str | None, str | None, str | None]]] = {}
 
     if not isinstance(doc, Mapping):
         return WorkflowASTInfo(
@@ -358,7 +359,8 @@ def inspect_workflow_ast(doc: Any) -> WorkflowASTInfo:
             job_steps=job_steps,
         )
 
-    workflow_env = doc.get("env") if isinstance(doc.get("env"), Mapping) else {}
+    raw_workflow_env = doc.get("env")
+    workflow_env: Mapping[str, Any] = raw_workflow_env if isinstance(raw_workflow_env, Mapping) else {}
     jobs = doc.get("jobs")
     if not isinstance(jobs, Mapping):
         return WorkflowASTInfo(
@@ -385,7 +387,7 @@ def inspect_workflow_ast(doc: Any) -> WorkflowASTInfo:
         # 1. Backing services declared across any workflow job
         svcs = job.get("services")
         if isinstance(svcs, Mapping):
-            for svc_name in svcs.keys():
+            for svc_name in svcs:
                 if svc_name is not None:
                     discovered_services.add(str(svc_name).strip().lower())
 
@@ -395,7 +397,7 @@ def inspect_workflow_ast(doc: Any) -> WorkflowASTInfo:
         if isinstance(strat, Mapping) and isinstance(strat.get("matrix"), Mapping):
             matrix = strat["matrix"]
 
-        job_env: Dict[str, Any] = dict(workflow_env)
+        job_env: dict[str, Any] = dict(workflow_env)
         if isinstance(job.get("env"), Mapping):
             job_env.update(job["env"])
 
@@ -415,13 +417,13 @@ def inspect_workflow_ast(doc: Any) -> WorkflowASTInfo:
             runs_on_oses.update(resolved_runs_on)
             job_runs_on[job_name] = resolved_runs_on
 
-        job_rt: Dict[str, Set[str]] = {
+        job_rt: dict[str, set[str]] = {
             "python": set(),
             "node": set(),
             "go": set(),
             "rust": set(),
         }
-        job_pms: Set[str] = set()
+        job_pms: set[str] = set()
         job_runtime_versions[job_name] = job_rt
         job_package_managers[job_name] = job_pms
 
@@ -430,9 +432,9 @@ def inspect_workflow_ast(doc: Any) -> WorkflowASTInfo:
         if not isinstance(steps, Sequence) or isinstance(steps, (str, bytes)):
             continue
 
-        job_step_sigs: List[Tuple[Optional[str], Optional[str], Optional[str]]] = []
+        job_step_sigs: list[tuple[str | None, str | None, str | None]] = []
         job_steps[job_name] = job_step_sigs
-        step_wds: Set[str] = set()
+        step_wds: set[str] = set()
         for step in steps:
             if not isinstance(step, Mapping):
                 continue
@@ -450,7 +452,7 @@ def inspect_workflow_ast(doc: Any) -> WorkflowASTInfo:
                 setup_actions.add(action)
 
             name_raw = step.get("name")
-            lower_name: Optional[str] = None
+            lower_name: str | None = None
             if name_raw is not None:
                 norm_name = str(name_raw).strip().lower()
                 if norm_name:
@@ -477,7 +479,7 @@ def inspect_workflow_ast(doc: Any) -> WorkflowASTInfo:
 
             # Run commands & CLI command prefixes
             run_raw = step.get("run")
-            norm_run_val: Optional[str] = None
+            norm_run_val: str | None = None
             if isinstance(run_raw, str) and run_raw.strip():
                 run_commands.append(run_raw)
                 norm_run = " ".join(run_raw.split())
@@ -493,7 +495,7 @@ def inspect_workflow_ast(doc: Any) -> WorkflowASTInfo:
             # Runtime versions from setup actions
             if action in SETUP_ACTION_SPECS:
                 lang, version_keys, requires_pinned = SETUP_ACTION_SPECS[action]
-                extracted: Set[str] = set()
+                extracted: set[str] = set()
                 has_version_file = False
 
                 for vkey in version_keys:
@@ -544,7 +546,7 @@ class DriftDetector:
 
     def _check_unit_drift(
         self,
-        findings: List[DriftFinding],
+        findings: list[DriftFinding],
         rel_path: str,
         ast_info: WorkflowASTInfo,
         *,
@@ -584,8 +586,8 @@ class DriftDetector:
 
         use_aggregate = not matching_jobs
         if not use_aggregate:
-            found_versions: Set[str] = set()
-            found_pms: Set[str] = set()
+            found_versions: set[str] = set()
+            found_pms: set[str] = set()
             for jid in matching_jobs:
                 found_versions.update(ast_info.job_runtime_versions.get(jid, {}).get(lang_key, set()))
                 found_pms.update(ast_info.job_package_managers.get(jid, set()))
@@ -669,7 +671,7 @@ class DriftDetector:
     @staticmethod
     def _step_policy_present(
         step_pol: StepPolicy,
-        actual_steps: Sequence[Tuple[Optional[str], Optional[str], Optional[str]]],
+        actual_steps: Sequence[tuple[str | None, str | None, str | None]],
     ) -> bool:
         """Return True if an expected StepPolicy matches any normalized AST step signature."""
         if step_pol.uses and step_pol.uses.strip():
@@ -683,8 +685,8 @@ class DriftDetector:
             return any(act_run == exp_run for _, _, act_run in actual_steps)
         return True
 
-    def check_drift(self, context: ProjectContext, synthesized_files: dict[str, str]) -> List[DriftFinding]:
-        findings: List[DriftFinding] = []
+    def check_drift(self, context: ProjectContext, synthesized_files: dict[str, str]) -> list[DriftFinding]:
+        findings: list[DriftFinding] = []
         policy = HeurixPolicy.from_raw(context.policy_config)
 
         excluded_services = {
@@ -698,7 +700,7 @@ class DriftDetector:
             if normalize_service_name(svc.name) not in excluded_services
         ]
 
-        runner_overrides: Dict[str, str] = {
+        runner_overrides: dict[str, str] = {
             str(jid): str(r).strip()
             for jid, r in policy.ci.runners.items()
             if str(jid).strip() and str(r).strip()
@@ -707,7 +709,7 @@ class DriftDetector:
             if job_pol.runner and job_pol.runner.strip():
                 runner_overrides[str(jid)] = job_pol.runner.strip()
 
-        for rel_path, expected_content in synthesized_files.items():
+        for rel_path, _expected_content in synthesized_files.items():
             file_path = self.root / rel_path
 
             if not file_path.exists():
@@ -860,7 +862,7 @@ class DriftDetector:
                     job_id.startswith("test-") and not _is_e2e_job_id(job_id)
                 )
                 if is_unit_test_job:
-                    expected_steps: List[StepPolicy] = [
+                    expected_steps: list[StepPolicy] = [
                         *policy.ci.steps.pre_test,
                         *policy.ci.steps.post_test,
                         *(job_policy.pre_steps if job_policy else ()),
@@ -891,8 +893,8 @@ class DriftDetector:
                         )
 
             # 3. Check monorepo packages and active non-coordinator LanguageContext entries
-            covered_keys: Set[Tuple[str, str]] = set()
-            subpkg_langs: Set[str] = set()
+            covered_keys: set[tuple[str, str]] = set()
+            subpkg_langs: set[str] = set()
             for pkg in getattr(context, "monorepo_packages", []):
                 pkg_wd = _normalize_working_dir(pkg.path) or "."
                 lang_key = pkg.language.lower()

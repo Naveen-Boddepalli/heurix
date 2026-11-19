@@ -5,6 +5,7 @@ Tests for language, framework, and infrastructure detectors.
 from __future__ import annotations
 
 from pathlib import Path
+
 from heurix.core.context import ProjectContext
 from heurix.core.indexer import RepoIndexer
 from heurix.detectors.docker_detector import DockerDetector

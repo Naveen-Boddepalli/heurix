@@ -4,8 +4,8 @@ Tests for RepoIndexer.
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
+
 from heurix.core.indexer import RepoIndexer
 
 
@@ -279,6 +279,7 @@ def test_max_file_size_guard_skips_oversized_and_allows_empty(tmp_path: Path, mo
 
 def test_lru_cache_eviction_by_count_and_bytes(tmp_path: Path):
     from collections import OrderedDict
+
     from heurix.core.indexer import MAX_CACHE_BYTES, MAX_CACHE_ENTRIES
 
     assert MAX_CACHE_ENTRIES == 512

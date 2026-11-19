@@ -5,9 +5,9 @@ Safe, idempotent Git pre-commit hook management with SEC-01 containment.
 from __future__ import annotations
 
 import os
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Optional
 
 HOOK_START_MARKER = "# >>> heurix:pre-commit"
 HOOK_END_MARKER = "# <<< heurix:pre-commit"
@@ -30,7 +30,7 @@ class HookInstallResult:
     """Outcome of installing or updating a repository's pre-commit hook."""
 
     installed: bool
-    hook_path: Optional[Path]
+    hook_path: Path | None
     status: str
     message: str
 
@@ -83,7 +83,7 @@ def upsert_managed_hook_block(
 
 def install_pre_commit_hook(
     repo_path: Path,
-    path_resolver: Optional[Callable[[Path, str | Path], Path]] = None,
+    path_resolver: Callable[[Path, str | Path], Path] | None = None,
 ) -> HookInstallResult:
     """
     Safely install or update `.git/hooks/pre-commit` inside `repo_path`.

@@ -5,7 +5,8 @@ Cloud Deployment Targets Detector (Vercel, Firebase, etc.).
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, List
+from typing import Any
+
 from heurix.core.context import DeploymentTarget, ProjectContext
 from heurix.core.indexer import RepoIndexer
 from heurix.detectors.base import BaseDetector
@@ -35,7 +36,7 @@ class CloudDetector(BaseDetector):
 
         # 1. Detect Vercel
         if indexer.has_file("vercel.json") or indexer.has_file(".vercel"):
-            vercel_config: Dict[str, Any] = {}
+            vercel_config: dict[str, Any] = {}
             if indexer.has_file("vercel.json"):
                 raw = indexer.read_text("vercel.json") or ""
                 try:
@@ -45,7 +46,7 @@ class CloudDetector(BaseDetector):
 
             project_name = vercel_config.get("name") or context.repo_name
             framework = vercel_config.get("framework")
-            features = ["hosting"]
+            features: list[str] = ["hosting"]
             if vercel_config.get("functions") or any(f.startswith("api/") for f in indexer.files):
                 features.append("serverless")
 
@@ -70,7 +71,7 @@ class CloudDetector(BaseDetector):
 
         # 2. Detect Firebase
         if indexer.has_file("firebase.json") or indexer.has_file(".firebaserc"):
-            firebase_config: Dict[str, Any] = {}
+            firebase_config: dict[str, Any] = {}
             if indexer.has_file("firebase.json"):
                 raw = indexer.read_text("firebase.json") or ""
                 try:
@@ -89,7 +90,7 @@ class CloudDetector(BaseDetector):
 
             project_id = project_id or context.repo_name
 
-            features: List[str] = []
+            features = []
             for feat in ["hosting", "functions", "firestore", "storage", "emulators", "remoteconfig"]:
                 if feat in firebase_config:
                     features.append(feat)

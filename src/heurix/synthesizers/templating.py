@@ -5,8 +5,9 @@ Sandboxed Jinja2 template rendering engine and containment-guarded loaders for H
 from __future__ import annotations
 
 import io
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
-from typing import Any, Callable, List, Mapping, Optional, Sequence, Tuple
+from typing import Any
 
 from jinja2 import ChoiceLoader, FileSystemLoader, PackageLoader, StrictUndefined
 from jinja2.loaders import split_template_path
@@ -97,7 +98,7 @@ class SafeFileSystemLoader(FileSystemLoader):
 
     def get_source(
         self, environment: Any, template: str
-    ) -> Tuple[str, str, Callable[[], bool]]:
+    ) -> tuple[str, str, Callable[[], bool]]:
         pieces = split_template_path(template)
         for searchpath in self.searchpath:
             candidate = Path(searchpath).joinpath(*pieces)
@@ -116,8 +117,8 @@ class SafeFileSystemLoader(FileSystemLoader):
 
 
 def create_template_environment(
-    repo_root: Optional[str | Path] = None,
-    templates_dir: Optional[str] = None,
+    repo_root: str | Path | None = None,
+    templates_dir: str | None = None,
 ) -> ImmutableSandboxedEnvironment:
     """
     Create a hardened ImmutableSandboxedEnvironment with ChoiceLoader.
@@ -126,7 +127,7 @@ def create_template_environment(
     first via SafeFileSystemLoader after verifying containment within repo_root, falling back
     to bundled PackageLoader("heurix", "templates").
     """
-    loaders: List[Any] = []
+    loaders: list[Any] = []
     explicit_dir = templates_dir.strip() if isinstance(templates_dir, str) and templates_dir.strip() else None
 
     if repo_root is not None and str(repo_root).strip():
@@ -135,12 +136,7 @@ def create_template_environment(
         candidate = root_resolved / rel_dir
         candidate_resolved = candidate.resolve()
 
-        if explicit_dir is not None:
-            if not candidate_resolved.is_relative_to(root_resolved):
-                raise ValueError(
-                    f"Path traversal security violation: templates_dir '{rel_dir}' resolves outside repository root '{repo_root}'"
-                )
-        elif candidate.exists() or candidate.is_symlink() or not candidate_resolved.is_relative_to(root_resolved):
+        if explicit_dir is not None or candidate.exists() or candidate.is_symlink() or not candidate_resolved.is_relative_to(root_resolved):
             if not candidate_resolved.is_relative_to(root_resolved):
                 raise ValueError(
                     f"Path traversal security violation: templates_dir '{rel_dir}' resolves outside repository root '{repo_root}'"
@@ -172,8 +168,8 @@ def render_yaml_template(
     template_name: str,
     context_data: Mapping[str, Any],
     *,
-    repo_root: Optional[str | Path] = None,
-    templates_dir: Optional[str] = None,
+    repo_root: str | Path | None = None,
+    templates_dir: str | None = None,
     normalize: bool = True,
 ) -> str:
     """

@@ -5,7 +5,8 @@ C / C++ Ecosystem Detector.
 from __future__ import annotations
 
 import re
-from typing import Optional, Sequence
+from collections.abc import Sequence
+
 from heurix.core.context import LanguageContext, MonorepoPackage, ProjectContext
 from heurix.core.indexer import RepoIndexer
 from heurix.core.monorepo import NON_PACKAGE_DIRS, discover_monorepo_topology
@@ -57,7 +58,7 @@ class CppDetector(BaseDetector):
         *,
         add_language_ctx: bool = True,
         add_monorepo_pkg: bool = False,
-        is_workspace_root: Optional[bool] = None,
+        is_workspace_root: bool | None = None,
     ) -> LanguageContext:
         scope_label = f" in {base_dir}" if base_dir != "." else ""
         package_manager = "cmake"
@@ -95,7 +96,7 @@ class CppDetector(BaseDetector):
                 runtime_version = f"c++{std_match.group(1)}"
                 version_source = "CMakeLists.txt"
 
-        lint_cmd: Optional[str] = None
+        lint_cmd: str | None = None
         if indexer.has_file(_join(base_dir, ".clang-tidy")):
             lint_cmd = "clang-tidy -p build"
             context.add_explain(f"Detected Linter{scope_label}: clang-tidy (via {_join(base_dir, '.clang-tidy')})")

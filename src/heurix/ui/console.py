@@ -5,11 +5,13 @@ Rich Terminal Console and Explainability Tree Renderer.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 from rich.tree import Tree
+
 from heurix.core.context import ProjectContext
 
 console = Console()

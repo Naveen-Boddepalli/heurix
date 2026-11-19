@@ -66,7 +66,7 @@ def _render_unified_diff(file_path: str, old_content: str, new_content: str) -> 
 
     diff_text = Text()
     for line in diff:
-        if line.startswith("+++") or line.startswith("---"):
+        if line.startswith(("+++", "---")):
             diff_text.append(line, style="bold cyan")
         elif line.startswith("@@"):
             diff_text.append(line, style="bold magenta")
@@ -135,7 +135,7 @@ def _render_side_by_side(file_path: str, old_content: str, new_content: str) -> 
 
         for tag, i1, i2, j1, j2 in group:
             if tag == "equal":
-                for oi, ni in zip(range(i1, i2), range(j1, j2)):
+                for oi, ni in zip(range(i1, i2), range(j1, j2), strict=True):
                     _add_row(
                         str(oi + 1),
                         f"  {old_lines[oi]}",

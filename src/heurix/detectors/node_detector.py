@@ -6,7 +6,9 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from collections.abc import Sequence
+from typing import Any
+
 from heurix.core.context import LanguageContext, MonorepoPackage, ProjectContext, ServiceRequirement
 from heurix.core.indexer import RepoIndexer
 from heurix.core.monorepo import discover_monorepo_topology
@@ -43,7 +45,7 @@ def _join(base_dir: str, fname: str) -> str:
     return fname if base_dir == "." else f"{base_dir}/{fname}"
 
 
-def _extract_engines_node_matrix(engine_spec: Any) -> List[str]:
+def _extract_engines_node_matrix(engine_spec: Any) -> list[str]:
     """
     Extract discrete Node.js major versions from `engines.node` when explicit `||`
     branches exist (e.g. `"18 || 20 || 22"` -> `["18.x", "20.x", "22.x"]`).
@@ -52,7 +54,7 @@ def _extract_engines_node_matrix(engine_spec: Any) -> List[str]:
     if not isinstance(engine_spec, str) or "||" not in engine_spec:
         return []
 
-    versions: List[str] = []
+    versions: list[str] = []
     for branch in engine_spec.split("||"):
         match = _ENGINE_MAJOR_RE.search(branch)
         if match:
@@ -71,7 +73,7 @@ def _matches_scope(rel_path: str, base_dir: str, exclude_dirs: Sequence[str] = (
 
 def _has_real_postgres_adapter(
     indexer: RepoIndexer,
-    active_deps: Dict[str, Any],
+    active_deps: dict[str, Any],
     base_dir: str = ".",
     exclude_dirs: Sequence[str] = (),
 ) -> bool:
@@ -103,8 +105,8 @@ def _has_real_postgres_adapter(
 
 
 def _package_manager_spec_file(
-    indexer: RepoIndexer, base_dir: str, pkg_data: Dict[str, Any], package_manager: str
-) -> Optional[str]:
+    indexer: RepoIndexer, base_dir: str, pkg_data: dict[str, Any], package_manager: str
+) -> str | None:
     """Return the package.json (local, then repo root) whose `packageManager` pins `package_manager`."""
     prefix = f"{package_manager}@"
     local_spec = pkg_data.get("packageManager")
@@ -121,7 +123,7 @@ def _package_manager_spec_file(
     return None
 
 
-def _detect_node_lockfile(indexer: RepoIndexer, base_dir: str) -> Optional[Tuple[str, str, str]]:
+def _detect_node_lockfile(indexer: RepoIndexer, base_dir: str) -> tuple[str, str, str] | None:
     """Detect package manager, install command, and lockfile path inside `base_dir`."""
     pnpm_lock = _join(base_dir, "pnpm-lock.yaml")
     if indexer.has_file(pnpm_lock):
@@ -149,9 +151,9 @@ def _detect_node_lockfile(indexer: RepoIndexer, base_dir: str) -> Optional[Tuple
 def _detect_node_unit_runner(
     indexer: RepoIndexer,
     base_dir: str,
-    deps: Dict[str, Any],
-    scripts: Dict[str, Any],
-) -> Optional[str]:
+    deps: dict[str, Any],
+    scripts: dict[str, Any],
+) -> str | None:
     """Detect unit test runner ('vitest', 'jest', or 'mocha') from scripts, deps, and config files."""
     raw_test = scripts.get("test")
     test_lower = raw_test.lower() if isinstance(raw_test, str) else ""
@@ -183,10 +185,10 @@ def _detect_node_unit_runner(
 def _detect_node_e2e_runner(
     indexer: RepoIndexer,
     base_dir: str,
-    deps: Dict[str, Any],
-    scripts: Dict[str, Any],
+    deps: dict[str, Any],
+    scripts: dict[str, Any],
     package_manager: str,
-) -> Tuple[Optional[str], Optional[str]]:
+) -> tuple[str | None, str | None]:
     """Detect E2E test runner ('playwright' or 'cypress') and resolved command without prompting."""
     script_values = [val.lower() for val in scripts.values() if isinstance(val, str)]
 
@@ -222,7 +224,7 @@ def _detect_node_e2e_runner(
     else:
         return None, None
 
-    e2e_cmd: Optional[str] = None
+    e2e_cmd: str | None = None
     for key in priority_keys:
         val = scripts.get(key)
         if isinstance(val, str) and val.strip():
@@ -257,14 +259,14 @@ class NodeDetector(BaseDetector):
         base_dir: str,
         root_pm: str = "npm",
         root_version: str = "20.x",
-        root_lockfile: Optional[str] = None,
+        root_lockfile: str | None = None,
         *,
         root_version_source: str = "default",
-        root_install_cmd: Optional[str] = None,
+        root_install_cmd: str | None = None,
         exclude_dirs: Sequence[str] = (),
         add_language_ctx: bool = True,
-        add_monorepo_pkg: Optional[bool] = None,
-        is_workspace_root: Optional[bool] = None,
+        add_monorepo_pkg: bool | None = None,
+        is_workspace_root: bool | None = None,
     ) -> LanguageContext:
         pkg_scope = None if base_dir == "." else base_dir
         scope_label = f" in {base_dir}" if base_dir != "." else ""
@@ -297,7 +299,7 @@ class NodeDetector(BaseDetector):
                 version_source = ".node-version"
 
         # 2. Parse package.json
-        pkg_data: Dict[str, Any] = {}
+        pkg_data: dict[str, Any] = {}
         pkg_json_path = _join(base_dir, "package.json")
         if indexer.has_file(pkg_json_path):
             try:
@@ -335,7 +337,7 @@ class NodeDetector(BaseDetector):
 
         # 3. Determine Package Manager, install command, and cache_dependency_path
         local_lock = _detect_node_lockfile(indexer, base_dir)
-        cache_dependency_path: Optional[str] = None
+        cache_dependency_path: str | None = None
         if local_lock is not None:
             package_manager, install_cmd, cache_dependency_path = local_lock
             context.add_explain(f"Detected Package Manager: {package_manager} (via {cache_dependency_path})")
@@ -370,19 +372,19 @@ class NodeDetector(BaseDetector):
         raw_scripts = pkg_data.get("scripts", {})
         scripts = raw_scripts if isinstance(raw_scripts, dict) else {}
 
-        test_cmd: Optional[str] = None
+        test_cmd: str | None = None
         if "test" in scripts and isinstance(scripts["test"], str):
             test_val = scripts["test"]
             if "no test specified" not in test_val.lower():
                 test_cmd = f"{package_manager} test" if package_manager != "npm" else "npm test"
                 context.add_explain(f"Detected Test Script{scope_label}: '{test_val}' (via {pkg_json_path})")
 
-        build_cmd: Optional[str] = None
+        build_cmd: str | None = None
         if "build" in scripts:
             build_cmd = f"{package_manager} run build" if package_manager != "npm" else "npm run build"
             context.add_explain(f"Detected Build Script{scope_label}: 'build' (via {pkg_json_path})")
 
-        lint_cmd: Optional[str] = None
+        lint_cmd: str | None = None
         if "lint" in scripts:
             lint_cmd = f"{package_manager} run lint" if package_manager != "npm" else "npm run lint"
             context.add_explain(f"Detected Linter Script{scope_label}: 'lint' (via {pkg_json_path})")
@@ -390,11 +392,11 @@ class NodeDetector(BaseDetector):
         # 5. Framework Detection & Backing Services
         raw_deps = pkg_data.get("dependencies", {})
         raw_dev_deps = pkg_data.get("devDependencies", {})
-        deps: Dict[str, Any] = {
+        deps: dict[str, Any] = {
             **(raw_deps if isinstance(raw_deps, dict) else {}),
             **(raw_dev_deps if isinstance(raw_dev_deps, dict) else {}),
         }
-        framework: Optional[str] = None
+        framework: str | None = None
 
         if "next" in deps:
             framework = "Next.js"
@@ -541,7 +543,7 @@ class NodeDetector(BaseDetector):
     def analyze(self, indexer: RepoIndexer, context: ProjectContext) -> None:
         context.add_explain("Analyzing Node.js / JavaScript / TypeScript ecosystem...")
 
-        root_pkg_data: Dict[str, Any] = {}
+        root_pkg_data: dict[str, Any] = {}
         if indexer.has_file("package.json"):
             try:
                 parsed = json.loads(indexer.read_text("package.json") or "{}")

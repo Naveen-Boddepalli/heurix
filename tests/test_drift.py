@@ -5,6 +5,7 @@ Tests for Drift Detection.
 from __future__ import annotations
 
 from pathlib import Path
+
 from heurix.core.context import LanguageContext, ProjectContext, ServiceRequirement
 from heurix.core.drift import DriftDetector, inspect_workflow_ast
 
@@ -783,6 +784,7 @@ jobs:
 
 def test_multijob_drift_monorepo_working_dir_and_packages(tmp_path: Path):
     from ruamel.yaml import YAML
+
     from heurix.core.context import MonorepoPackage
     from heurix.core.drift import WorkflowASTInfo
     from heurix.synthesizers.github_actions import GitHubActionsSynthesizer
@@ -1167,6 +1169,7 @@ jobs:
 
 def test_phase3_drift_policy(tmp_path: Path):
     from ruamel.yaml import YAML
+
     from heurix.core.context import MonorepoPackage
     from heurix.core.drift import WorkflowASTInfo
     from heurix.synthesizers.github_actions import GitHubActionsSynthesizer
@@ -1521,7 +1524,7 @@ def test_e2e_split_and_combined_zero_drift(tmp_path: Path):
 
 
 def test_drift_mongodb_service_missing_when_pymongo_in_codebase(tmp_path: Path):
-    from heurix.core.context import ProjectContext, ServiceRequirement, LanguageContext
+    from heurix.core.context import LanguageContext, ProjectContext, ServiceRequirement
     from heurix.core.drift import DriftDetector
 
     wf_dir = tmp_path / ".github" / "workflows"

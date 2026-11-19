@@ -11,13 +11,12 @@ import pytest
 from ruamel.yaml import YAML
 
 from heurix.core.context import ContainerContext, LanguageContext, ProjectContext
-from heurix.core.policy import K8sProbePolicy
+from heurix.core.policy import SENSITIVE_KEYWORDS, K8sProbePolicy
 from heurix.core.validator import PreflightValidator
 from heurix.synthesizers.kubernetes import (
     K8S_FRAMEWORK_PROFILES,
     K8sProfile,
     KubernetesSynthesizer,
-    SENSITIVE_KEYWORDS,
     _is_sensitive_env_key,
     _resolve_probe,
 )

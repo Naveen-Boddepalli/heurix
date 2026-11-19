@@ -7,15 +7,14 @@ from __future__ import annotations
 import configparser
 import re
 import sys
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from collections.abc import Sequence
+from typing import Any
 
 if sys.version_info >= (3, 11):
     import tomllib
 else:
-    try:
-        import tomli as tomllib
-    except ImportError:
-        import tomllib  # type: ignore
+    import tomli as tomllib
+
 from heurix.core.context import LanguageContext, MonorepoPackage, ProjectContext, ServiceRequirement
 from heurix.core.indexer import RepoIndexer
 from heurix.core.monorepo import NON_PACKAGE_DIRS, discover_monorepo_topology
@@ -31,8 +30,8 @@ _CLASSIFIER_PYTHON_RE = re.compile(r"Programming Language :: Python :: (3\.\d+)"
 _TOX_PY_FACTOR_RE = re.compile(r"^(?:py)?(3)\.?(\d+)$", re.IGNORECASE)
 
 def _extract_pg_credentials(
-    context: ProjectContext, indexer: Optional[RepoIndexer] = None
-) -> Tuple[str, str, str]:
+    context: ProjectContext, indexer: RepoIndexer | None = None
+) -> tuple[str, str, str]:
     """Extract postgres user, password, db from context.env_vars, .env templates, or parsed DATABASE_URL."""
     user = context.env_vars.get("POSTGRES_USER")
     password = context.env_vars.get("POSTGRES_PASSWORD")
@@ -107,7 +106,7 @@ def _strip_python_mock_deps(deps_lower: str) -> tuple[str, list[str]]:
     return cleaned, found_mocks
 
 
-def _extract_classifier_versions(data: Dict[str, Any]) -> List[str]:
+def _extract_classifier_versions(data: dict[str, Any]) -> list[str]:
     """
     Extract discrete Python 3.x minor versions from pyproject.toml Trove classifiers
     across `[project].classifiers` and `[tool.poetry].classifiers`, sorted numerically.
@@ -115,7 +114,7 @@ def _extract_classifier_versions(data: Dict[str, Any]) -> List[str]:
     if not isinstance(data, dict):
         return []
 
-    raw_classifiers: List[Any] = []
+    raw_classifiers: list[Any] = []
     project = data.get("project")
     if isinstance(project, dict) and isinstance(project.get("classifiers"), list):
         raw_classifiers.extend(project["classifiers"])
@@ -126,7 +125,7 @@ def _extract_classifier_versions(data: Dict[str, Any]) -> List[str]:
         if isinstance(poetry, dict) and isinstance(poetry.get("classifiers"), list):
             raw_classifiers.extend(poetry["classifiers"])
 
-    versions: Dict[Tuple[int, int], str] = {}
+    versions: dict[tuple[int, int], str] = {}
     for entry in raw_classifiers:
         if not isinstance(entry, str):
             continue
@@ -139,10 +138,10 @@ def _extract_classifier_versions(data: Dict[str, Any]) -> List[str]:
     return [versions[k] for k in sorted(versions)]
 
 
-def _split_tox_envlist_tokens(raw_envlist: str) -> List[str]:
+def _split_tox_envlist_tokens(raw_envlist: str) -> list[str]:
     """Split tox envlist on commas, newlines, and whitespace outside {...} braces."""
-    tokens: List[str] = []
-    buf: List[str] = []
+    tokens: list[str] = []
+    buf: list[str] = []
     depth = 0
     for line in raw_envlist.splitlines():
         cleaned_line = re.sub(r"(?:^|\s)#.*$", "", line)
@@ -171,11 +170,11 @@ def _split_tox_envlist_tokens(raw_envlist: str) -> List[str]:
     return tokens
 
 
-def _expand_tox_braces(token: str, max_results: int = 128) -> List[str]:
+def _expand_tox_braces(token: str, max_results: int = 128) -> list[str]:
     """Expand brace factor expressions like `py{310,311,312}-django{42,50}` safely."""
     results = [token]
     while True:
-        next_results: List[str] = []
+        next_results: list[str] = []
         expanded_any = False
         for item in results:
             match = re.search(r"\{([^{}]+)\}", item)
@@ -197,7 +196,7 @@ def _expand_tox_braces(token: str, max_results: int = 128) -> List[str]:
     return results
 
 
-def _extract_tox_versions(content: str) -> List[str]:
+def _extract_tox_versions(content: str) -> list[str]:
     """
     Parse tox.ini `[tox]` `envlist` / `env_list` using ConfigParser(interpolation=None),
     expanding brace factor expressions and extracting sorted Python 3.x versions.
@@ -218,7 +217,7 @@ def _extract_tox_versions(content: str) -> List[str]:
     if not raw_envlist:
         return []
 
-    versions: Dict[Tuple[int, int], str] = {}
+    versions: dict[tuple[int, int], str] = {}
     for token in _split_tox_envlist_tokens(raw_envlist):
         for expanded in _expand_tox_braces(token):
             for factor in re.split(r"[-_]", expanded):
@@ -258,7 +257,7 @@ class PythonDetector(BaseDetector):
             return True
         return bool(indexer.find_files("*.py"))
 
-    def _detect_root_lockfile(self, indexer: RepoIndexer) -> Optional[Tuple[str, str, str]]:
+    def _detect_root_lockfile(self, indexer: RepoIndexer) -> tuple[str, str, str] | None:
         if indexer.has_file("uv.lock"):
             return ("uv", "uv sync --frozen", "uv.lock")
         if indexer.has_file("poetry.lock"):
@@ -276,15 +275,15 @@ class PythonDetector(BaseDetector):
         base_dir: str,
         add_language_ctx: bool = True,
         *,
-        add_monorepo_pkg: Optional[bool] = None,
-        is_workspace_root: Optional[bool] = None,
-        root_version: Optional[Tuple[str, str]] = None,
-        root_lockfile: Optional[Tuple[str, str, str]] = None,
+        add_monorepo_pkg: bool | None = None,
+        is_workspace_root: bool | None = None,
+        root_version: tuple[str, str] | None = None,
+        root_lockfile: tuple[str, str, str] | None = None,
     ) -> LanguageContext:
         pkg_path = None if base_dir == "." else base_dir
         pyproject_path = _join(base_dir, "pyproject.toml")
         pyproject_content = (indexer.read_text(pyproject_path) or "") if indexer.has_file(pyproject_path) else ""
-        pyproject_data: Dict[str, Any] = {}
+        pyproject_data: dict[str, Any] = {}
         if pyproject_content:
             try:
                 parsed = tomllib.loads(pyproject_content)
@@ -341,7 +340,7 @@ class PythonDetector(BaseDetector):
         tox_path = _join(base_dir, "tox.ini")
         tox_versions = _extract_tox_versions(indexer.read_text(tox_path) or "") if indexer.has_file(tox_path) else []
 
-        matrix_versions: List[str] = []
+        matrix_versions: list[str] = []
         if len(classifier_versions) >= 2:
             matrix_versions = classifier_versions
             if version_source == "default":
@@ -361,7 +360,7 @@ class PythonDetector(BaseDetector):
         # 2. Package Manager, Lockfile, and cache_dependency_path
         package_manager = "pip"
         install_cmd = ""
-        cache_dependency_path: Optional[str] = None
+        cache_dependency_path: str | None = None
 
         uv_lock = _join(base_dir, "uv.lock")
         poetry_lock = _join(base_dir, "poetry.lock")
@@ -372,7 +371,7 @@ class PythonDetector(BaseDetector):
 
         has_uv_tool = False
         has_dep_groups = False
-        opt_deps: Dict[str, Any] = {}
+        opt_deps: dict[str, Any] = {}
         if pyproject_data:
             tool = pyproject_data.get("tool")
             if isinstance(tool, dict) and "uv" in tool:
@@ -442,7 +441,7 @@ class PythonDetector(BaseDetector):
             context.add_explain(f"Detected Package Manager: pip (via {pyproject_path}, cmd: {install_cmd})")
 
         # 3. Framework & Dependency Scanning
-        framework: Optional[str] = None
+        framework: str | None = None
         deps_text = ""
         for fn in ["pyproject.toml", "requirements.txt", "requirements-dev.txt", "Pipfile", "setup.py"]:
             c = indexer.read_text(_join(base_dir, fn))
@@ -484,7 +483,7 @@ class PythonDetector(BaseDetector):
         # `python -m pytest` puts the working directory on sys.path, so flat-layout
         # projects (app.py next to tests/) import cleanly; bare `pytest` does not.
         test_cmd = "python -m pytest"
-        unit_test_runner: Optional[str] = None
+        unit_test_runner: str | None = None
         if "pytest" in deps_lower or indexer.has_file(_join(base_dir, "pytest.ini")) or has_tests_dir or "[tool.pytest" in deps_text:
             test_cmd = "python -m pytest"
             unit_test_runner = "pytest"
@@ -503,8 +502,8 @@ class PythonDetector(BaseDetector):
         has_e2e_dir = indexer.has_file(_join(base_dir, "e2e")) or any(
             f.startswith(e2e_dir_prefix) for f in indexer.files
         )
-        e2e_test_runner: Optional[str] = None
-        e2e_cmd: Optional[str] = None
+        e2e_test_runner: str | None = None
+        e2e_cmd: str | None = None
         if (
             "playwright" in deps_lower
             or indexer.has_file(_join(base_dir, "playwright.config.py"))
@@ -656,7 +655,7 @@ class PythonDetector(BaseDetector):
         root_lockfile = self._detect_root_lockfile(indexer)
 
         # Resolve optional root .python-version / .tool-versions even when no root package exists
-        root_version: Optional[Tuple[str, str]] = None
+        root_version: tuple[str, str] | None = None
         if indexer.has_file(".python-version"):
             raw = indexer.read_text(".python-version") or ""
             match = re.search(r"(\d+\.\d+)", raw.strip())

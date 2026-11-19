@@ -173,7 +173,7 @@ def test_replaced_user_values_are_reported():
 
 
 def test_unchanged_merge_reports_nothing():
-    merger, out = _merge(_NEW_WF, _NEW_WF)
+    merger, _out = _merge(_NEW_WF, _NEW_WF)
     assert merger.replaced == []
 
 

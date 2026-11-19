@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import re
 from pathlib import PurePosixPath
-from typing import Dict, List, Optional, Tuple
 
 from heurix.core.context import ProjectContext, ServiceRequirement
 from heurix.core.indexer import RepoIndexer
@@ -52,7 +51,7 @@ def _image_basename(image: str) -> str:
     return last.split(":", 1)[0]
 
 
-def service_kind(svc: ServiceRequirement) -> Optional[str]:
+def service_kind(svc: ServiceRequirement) -> str | None:
     """Classify a service as 'postgres', 'redis' or 'mongodb', or None if unknown."""
     base = _image_basename(svc.image or "")
     if base in _POSTGRES_IMAGES:
@@ -78,14 +77,14 @@ def _merge_compose_into(target: ServiceRequirement, compose: ServiceRequirement)
 def _dedupe_services(context: ProjectContext) -> None:
     """Collapse services that share a kind and a scope into a single entry."""
     services = context.services
-    inferred_by_kind: Dict[str, List[ServiceRequirement]] = {}
+    inferred_by_kind: dict[str, list[ServiceRequirement]] = {}
     for svc in services:
         kind = service_kind(svc)
         if kind and not is_compose_service(svc):
             inferred_by_kind.setdefault(kind, []).append(svc)
 
-    kept: List[ServiceRequirement] = []
-    seen: Dict[Tuple[str, Optional[str]], ServiceRequirement] = {}
+    kept: list[ServiceRequirement] = []
+    seen: dict[tuple[str, str | None], ServiceRequirement] = {}
     for svc in services:
         kind = service_kind(svc)
         if kind is None:
@@ -119,9 +118,9 @@ def _dedupe_services(context: ProjectContext) -> None:
     context.services = kept
 
 
-def _ensure_postgres_credentials(context: ProjectContext, indexer: Optional[RepoIndexer]) -> None:
+def _ensure_postgres_credentials(context: ProjectContext, indexer: RepoIndexer | None) -> None:
     """Give Postgres services the credentials the official image needs to start."""
-    defaults: Optional[Tuple[str, str, str]] = None
+    defaults: tuple[str, str, str] | None = None
     for svc in context.services:
         if service_kind(svc) != "postgres":
             continue
@@ -136,7 +135,7 @@ def _ensure_postgres_credentials(context: ProjectContext, indexer: Optional[Repo
             env.pop("POSTGRES_PASSWORD")
         if defaults is None:
             defaults = _extract_pg_credentials(context, indexer=indexer)
-        for key, value in zip(_PG_ENV_KEYS, defaults):
+        for key, value in zip(_PG_ENV_KEYS, defaults, strict=True):
             env.setdefault(key, value)
         context.add_explain(
             f"Added CI credentials to postgres service '{svc.name}' "
@@ -161,7 +160,7 @@ def _ensure_default_ports(context: ProjectContext) -> None:
             )
 
 
-def reconcile_services(context: ProjectContext, indexer: Optional[RepoIndexer] = None) -> None:
+def reconcile_services(context: ProjectContext, indexer: RepoIndexer | None = None) -> None:
     """Deduplicate backing services, publish default ports, and fill Postgres credentials."""
     if not context.services:
         return
@@ -173,7 +172,7 @@ def reconcile_services(context: ProjectContext, indexer: Optional[RepoIndexer] =
 _INTERPOLATION_RE = re.compile(r"^\$\{([A-Za-z_][A-Za-z0-9_]*)(?::?-(.*))?\}$|^\$([A-Za-z_][A-Za-z0-9_]*)$")
 
 
-def resolve_compose_value(value: str) -> Optional[str]:
+def resolve_compose_value(value: str) -> str | None:
     """
     Resolve a compose environment value for use on a CI runner.
 

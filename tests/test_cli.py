@@ -5,7 +5,9 @@ Tests for Heurix CLI Commands.
 from __future__ import annotations
 
 from pathlib import Path
+
 from typer.testing import CliRunner
+
 from heurix.cli import app
 
 runner = CliRunner()
@@ -170,6 +172,7 @@ non_destructive = false
 
 def test_path_traversal_resolve_safe_path(tmp_path: Path):
     import pytest
+
     from heurix.cli import resolve_safe_path
 
     repo = tmp_path / "repo"
@@ -265,6 +268,7 @@ def test_cli_yaml_syntax_error_exits_cleanly(tmp_path: Path):
 def test_cli_monorepo_nested_gitignore_and_matrix_roundtrip(tmp_path: Path):
     import json
     import re
+
     from ruamel.yaml import YAML
 
     # Build polyglot monorepo fixture:
@@ -371,6 +375,7 @@ os = ["ubuntu-latest", "macos-latest"]
 
 def test_cli_monorepo_smart_merge_preserves_custom_steps(tmp_path: Path):
     import json
+
     from ruamel.yaml import YAML
 
     (tmp_path / "pnpm-workspace.yaml").write_text("packages:\n  - 'apps/*'\n", encoding="utf-8")
@@ -516,7 +521,9 @@ def test_cli_phase3_policy_and_template_override(tmp_path: Path):
     import json
     import re
     import sys
+
     from ruamel.yaml import YAML
+
     from heurix.core.policy import parse_heurix_policy
 
     if sys.version_info >= (3, 11):
@@ -796,6 +803,7 @@ include_k8s = true
 
 def test_cli_interactive_ambiguity_and_non_interactive_flags(tmp_path: Path, monkeypatch):
     import json
+
     from ruamel.yaml import YAML
 
     def _create_ambiguous_repo(repo_dir: Path) -> None:
@@ -1098,6 +1106,7 @@ def test_cli_partial_validation_optional_k8s_and_strict(tmp_path: Path, monkeypa
 def test_cli_init_pre_commit_hooks_lifecycle(tmp_path: Path, monkeypatch):
     import os
     import stat
+
     from heurix.core.hooks import HOOK_END_MARKER, HOOK_START_MARKER
 
     # 1. Fresh git repo with --hooks creates .heurix.toml + executable pre-commit hook

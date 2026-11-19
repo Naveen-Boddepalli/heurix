@@ -2,6 +2,14 @@
 
 All notable changes to Heurix (`hx`) are documented here.
 
+## Unreleased
+
+### Fixed — `# @heurix:preserve` on workflow steps
+- **Preserved steps after a `with:` block were overwritten.** A full-line `# @heurix:preserve` above a step that follows a step ending in a mapping (such as `actions/setup-python` with `with: python-version`) was not recognized, so `hx generate` replaced the step and dropped the directive. Directives are now read from the source lines directly above each step, however the previous step ends.
+- **Preserve after a `run: |` block applied to the wrong step.** The directive froze the block-scalar step above it instead of the step it was written for.
+- **Adjacent preserved steps gained a duplicate directive on every run.** Two consecutive steps each with a full-line `# @heurix:preserve` got an extra marker above the second one each time `hx generate` ran.
+- **A new generated step inserted next to a preserved step could be frozen.** The directive meant for the following step was left above the inserted step, so later runs treated that generated step as preserved and stopped updating it.
+
 ## 0.3.0 — 2026-11-17
 
 ### Added

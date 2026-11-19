@@ -1,32 +1,43 @@
 import { useRef, useState } from 'react';
 import { HX_VERSION, INSTALL_METHODS } from '../data/siteData';
 import { links } from '../lib/links';
+import { useMagnetic, useTabIndicator } from '../lib/usePointerVars';
 import { CodeBlock } from './CodeBlock';
+import { HeroGraph } from './HeroGraph';
+import { TerminalReplay } from './TerminalReplay';
+
+const TABS = INSTALL_METHODS;
 
 export function Hero() {
   const [selectedId, setSelectedId] = useState(INSTALL_METHODS[0].id);
   const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const tablistRef = useRef<HTMLDivElement | null>(null);
+  const actionsRef = useRef<HTMLDivElement | null>(null);
+
+  useTabIndicator(tablistRef, selectedId);
+  useMagnetic(actionsRef, '.btn');
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLButtonElement>, index: number) {
     let nextIndex = -1;
-    if (e.key === 'ArrowRight') nextIndex = (index + 1) % INSTALL_METHODS.length;
-    else if (e.key === 'ArrowLeft') nextIndex = (index - 1 + INSTALL_METHODS.length) % INSTALL_METHODS.length;
+    if (e.key === 'ArrowRight') nextIndex = (index + 1) % TABS.length;
+    else if (e.key === 'ArrowLeft') nextIndex = (index - 1 + TABS.length) % TABS.length;
     else if (e.key === 'Home') nextIndex = 0;
-    else if (e.key === 'End') nextIndex = INSTALL_METHODS.length - 1;
+    else if (e.key === 'End') nextIndex = TABS.length - 1;
 
     if (nextIndex !== -1) {
       e.preventDefault();
-      setSelectedId(INSTALL_METHODS[nextIndex].id);
+      setSelectedId(TABS[nextIndex].id);
       tabRefs.current[nextIndex]?.focus();
     }
   }
 
   return (
     <section id="top" className="hero">
+      <HeroGraph />
       <div className="container hero-grid">
         <div className="hero-copy">
           <h1 id="main-content" tabIndex={-1}>
-            CI config generated from what&rsquo;s actually in your repo.
+            CI config generated from <span className="hl-mark">what&rsquo;s actually in your repo.</span>
           </h1>
 
           <p className="hero-lede">
@@ -41,7 +52,7 @@ export function Hero() {
             marked <code># @heurix:preserve</code> stay where they are.
           </p>
 
-          <div className="hero-actions">
+          <div className="hero-actions" ref={actionsRef}>
             <a href={links.playground} className="btn btn-primary">
               Try it in the browser
             </a>
@@ -57,25 +68,26 @@ export function Hero() {
         </div>
 
         <aside className="install-card" aria-label="Install Heurix">
-          <div role="tablist" aria-label="Installation methods" className="tablist">
-            {INSTALL_METHODS.map((method, idx) => (
+          <div role="tablist" aria-label="Installation methods" className="tablist" ref={tablistRef}>
+            {TABS.map((tab, idx) => (
               <button
-                key={method.id}
+                key={tab.id}
                 ref={(el) => {
                   tabRefs.current[idx] = el;
                 }}
                 type="button"
                 role="tab"
-                id={`install-tab-${method.id}`}
-                aria-selected={selectedId === method.id}
-                tabIndex={selectedId === method.id ? 0 : -1}
+                id={`install-tab-${tab.id}`}
+                aria-selected={selectedId === tab.id}
+                tabIndex={selectedId === tab.id ? 0 : -1}
                 className="tab-btn"
-                onClick={() => setSelectedId(method.id)}
+                onClick={() => setSelectedId(tab.id)}
                 onKeyDown={(e) => handleKeyDown(e, idx)}
               >
-                {method.label}
+                {tab.label}
               </button>
             ))}
+            <span className="tab-indicator" aria-hidden="true" />
           </div>
 
           {INSTALL_METHODS.map((method) => {
@@ -96,9 +108,10 @@ export function Hero() {
             );
           })}
 
+          {/* The first run, played back on a sample repo */}
           <div className="install-next">
             <span className="install-next-label">Then, from your repo root:</span>
-            <CodeBlock title="First run" code={'hx generate --dry-run   # preview, writes nothing\nhx generate             # write + smart-merge\nhx check                # exit 1 on drift'} />
+            <TerminalReplay />
           </div>
         </aside>
       </div>

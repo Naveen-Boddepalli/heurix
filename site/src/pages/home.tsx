@@ -2,6 +2,7 @@ import { CliExamples } from '../components/CliExamples';
 import { ComparisonTable } from '../components/ComparisonTable';
 import { Hero } from '../components/Hero';
 import { HeuristicsGrid } from '../components/HeuristicsGrid';
+import { Pipeline } from '../components/Pipeline';
 import { links } from '../lib/links';
 import { mountPage } from './PageShell';
 
@@ -9,11 +10,12 @@ mountPage(
   'home',
   <>
     <Hero />
+    <Pipeline />
     <HeuristicsGrid />
     <CliExamples />
     <ComparisonTable />
     <section className="section">
-      <div className="container cta-band">
+      <div className="container cta-band reveal">
         <div>
           <h2>See it on a real repo</h2>
           <p>

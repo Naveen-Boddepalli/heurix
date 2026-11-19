@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   downloadZipArchive,
   formatAllConfigsText,
@@ -7,6 +7,7 @@ import {
 import { checkDrift, runHeurixScan, simulateSmartMerge } from '../engine/heuristics';
 import { PRESET_REPOS, STARTER_FILE_TEMPLATES } from '../engine/presets';
 import type { VirtualFile } from '../engine/types';
+import { useTabIndicator } from '../lib/usePointerVars';
 import { CodeBlock } from './CodeBlock';
 
 type OutputTab = 'generate' | 'scan' | 'merge' | 'drift';
@@ -41,6 +42,8 @@ export function Playground() {
   const [addFileError, setAddFileError] = useState<string | null>(null);
 
   const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const outputTablistRef = useRef<HTMLDivElement | null>(null);
+  useTabIndicator(outputTablistRef, activeTab);
 
   function selectPreset(id: string) {
     const next = PRESET_REPOS.find((p) => p.id === id) ?? PRESET_REPOS[0];
@@ -135,6 +138,10 @@ export function Playground() {
   );
 
   const outputKeys = Object.keys(scanResult.synthesized);
+
+  // Bumps on every re-scan so the status line can pulse
+  const [scanGen, setScanGen] = useState(0);
+  useEffect(() => setScanGen((g) => g + 1), [scanResult]);
   const activeOutputPath = outputKeys.includes(selectedOutputFile)
     ? selectedOutputFile
     : outputKeys[0] ?? '';
@@ -367,7 +374,7 @@ export function Playground() {
 
             <div className="scan-meta" aria-live="polite">
               <span className={`status-chip is-${policyStatus.tone}`}>{policyStatus.label}</span>
-              <span>
+              <span key={scanGen} className="scan-count">
                 {outputKeys.length} files, scanned in {scanResult.durationMs} ms
               </span>
             </div>
@@ -464,9 +471,9 @@ export function Playground() {
                 </form>
               )}
 
-              <ul className="file-tree" aria-label="Repository files">
-                {files.map((file) => (
-                  <li key={file.path} className="file-row">
+              <ul key={presetId} className="file-tree" aria-label="Repository files">
+                {files.map((file, k) => (
+                  <li key={file.path} className="file-row" style={{ '--k': k } as React.CSSProperties}>
                     <input
                       type="checkbox"
                       className="file-toggle"
@@ -521,7 +528,7 @@ export function Playground() {
 
             {/* Right Panel: Synthesized Results & Explainability */}
             <div className="workbench-main">
-              <div role="tablist" aria-label="Heurix output views" className="tablist">
+              <div role="tablist" aria-label="Heurix output views" className="tablist" ref={outputTablistRef}>
                 {OUTPUT_TABS.map((tab, idx) => (
                   <button
                     key={tab.id}
@@ -541,6 +548,7 @@ export function Playground() {
                     <span className="tab-hint">{tab.hint}</span>
                   </button>
                 ))}
+                <span className="tab-indicator" aria-hidden="true" />
               </div>
 
               {/* Tab 1: hx generate */}
@@ -621,6 +629,7 @@ export function Playground() {
                   <CodeBlock
                     title={activeOutputPath || 'No targets generated'}
                     code={activeOutputCode}
+                    flashChanges
                   />
                 </div>
               </div>

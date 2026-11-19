@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { SITE_DOCS } from '../data/docsData';
 import { CodeBlock } from './CodeBlock';
 import { LlmsContent } from './LlmsContent';
@@ -295,6 +295,7 @@ export function DocsSection() {
   const [selectedDocId, setSelectedDocId] = useState(docIdFromHash);
   const [searchQuery, setSearchQuery] = useState('');
   const articleRef = useRef<HTMLElement | null>(null);
+  const navGroupsRef = useRef<HTMLDivElement | null>(null);
 
   const q = searchQuery.trim().toLowerCase();
 
@@ -341,6 +342,30 @@ export function DocsSection() {
   useEffect(() => {
     document.title = `${currentDoc.title} · Heurix docs`;
   }, [currentDoc.title]);
+
+  // Sliding highlight behind the current page in the sidebar
+  useLayoutEffect(() => {
+    const groups = navGroupsRef.current;
+    if (!groups) return;
+    const measure = () => {
+      const active = groups.querySelector<HTMLElement>('.docs-nav-btn[aria-current="page"]');
+      if (!active) {
+        groups.classList.remove('has-indicator');
+        return;
+      }
+      let top = 0;
+      for (let n: HTMLElement | null = active; n && n !== groups; n = n.offsetParent as HTMLElement | null) {
+        top += n.offsetTop;
+      }
+      groups.style.setProperty('--ind-y', `${top}px`);
+      groups.style.setProperty('--ind-h', `${active.offsetHeight}px`);
+      groups.classList.add('has-indicator');
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(groups);
+    return () => ro.disconnect();
+  }, [currentDoc.id, visibleDocs]);
 
   function openDoc(id: string) {
     if (id !== selectedDocId) {
@@ -407,7 +432,8 @@ export function DocsSection() {
                 </button>
               </div>
             ) : (
-              <div className="docs-nav-groups">
+              <div className="docs-nav-groups" ref={navGroupsRef}>
+                <span className="docs-nav-indicator" aria-hidden="true" />
                 {groupedDocs.map(([group, items]) => (
                   <div key={group} className="docs-nav-group">
                     <h2 className="docs-nav-group-title">{group}</h2>
@@ -462,7 +488,9 @@ export function DocsSection() {
               </div>
             )}
 
-            {currentDoc.render(q)}
+            <div key={currentDoc.id} className="doc-swap">
+              {currentDoc.render(q)}
+            </div>
 
             <nav className="docs-pager" aria-label="Previous and next page">
               {prevDoc ? (

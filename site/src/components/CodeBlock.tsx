@@ -1,13 +1,15 @@
-import { useId, useState, type ReactNode } from 'react';
+import { useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 
 interface CodeBlockProps {
   title: string;
   code: string;
   badge?: string;
   highlightDiff?: boolean;
+  /** Briefly highlight lines that changed since the last render with the same title. */
+  flashChanges?: boolean;
 }
 
-function highlightYamlLine(line: string): ReactNode {
+export function highlightYamlLine(line: string): ReactNode {
   // Whole-line preserve directive
   if (line.includes('@heurix:preserve') || line.includes('@autoyaml:preserve')) {
     return <span className="tok-preserve">{line}</span>;
@@ -79,9 +81,28 @@ function highlightYamlLine(line: string): ReactNode {
   return line;
 }
 
-export function CodeBlock({ title, code, badge, highlightDiff = false }: CodeBlockProps) {
+export function CodeBlock({ title, code, badge, highlightDiff = false, flashChanges = false }: CodeBlockProps) {
   const [copied, setCopied] = useState(false);
   const statusId = useId();
+  const prevRef = useRef<{ title: string; code: string } | null>(null);
+  const [changed, setChanged] = useState<{ lines: Set<number>; gen: number }>({ lines: new Set(), gen: 0 });
+
+  // Compare against the previous output for the same file; lines that are new or edited get flashed
+  useLayoutEffect(() => {
+    if (!flashChanges) return;
+    const prev = prevRef.current;
+    prevRef.current = { title, code };
+    if (!prev || prev.title !== title || prev.code === code) return;
+    const before = new Map<string, number>();
+    for (const l of prev.code.split('\n')) before.set(l, (before.get(l) ?? 0) + 1);
+    const lines = new Set<number>();
+    code.split('\n').forEach((l, i) => {
+      const n = before.get(l) ?? 0;
+      if (n > 0) before.set(l, n - 1);
+      else if (l.trim()) lines.add(i);
+    });
+    if (lines.size) setChanged((c) => ({ lines, gen: c.gen + 1 }));
+  }, [code, title, flashChanges]);
 
   async function handleCopy() {
     try {
@@ -114,10 +135,20 @@ export function CodeBlock({ title, code, badge, highlightDiff = false }: CodeBlo
           )}
           <button
             type="button"
-            className="code-copy-btn"
+            className={`code-copy-btn${copied ? ' is-copied' : ''}`}
             onClick={handleCopy}
             aria-label={`Copy ${title}`}
           >
+            <svg className="copy-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              {copied ? (
+                <path d="M5 12.5l4.5 4.5L19 7.5" />
+              ) : (
+                <>
+                  <rect x="9" y="9" width="11" height="11" rx="2" />
+                  <path d="M5 15V6a2 2 0 0 1 2-2h9" />
+                </>
+              )}
+            </svg>
             {copied ? 'Copied' : 'Copy'}
           </button>
           <span id={statusId} className="visually-hidden" aria-live="polite">
@@ -139,8 +170,14 @@ export function CodeBlock({ title, code, badge, highlightDiff = false }: CodeBlo
               }
             }
 
+            const flash = changed.lines.has(idx);
+            if (flash) cls = cls ? `${cls} line-changed` : 'line-changed';
             return (
-              <span key={idx} className={cls || undefined}>
+              <span
+                key={flash ? `${idx}-${changed.gen}` : idx}
+                className={cls || undefined}
+                style={highlightDiff && cls ? ({ '--n': idx } as React.CSSProperties) : undefined}
+              >
                 {highlightYamlLine(line)}
                 {idx < lines.length - 1 ? '\n' : ''}
               </span>

@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import { HX_VERSION, INSTALL_METHODS } from '../data/siteData';
 import { links } from '../lib/links';
 import { CodeBlock } from './CodeBlock';
+import { HeroGraph } from './HeroGraph';
 
 export function Hero() {
   const [selectedId, setSelectedId] = useState(INSTALL_METHODS[0].id);
@@ -23,6 +24,7 @@ export function Hero() {
 
   return (
     <section id="top" className="hero">
+      <HeroGraph />
       <div className="container hero-grid">
         <div className="hero-copy">
           <h1 id="main-content" tabIndex={-1}>

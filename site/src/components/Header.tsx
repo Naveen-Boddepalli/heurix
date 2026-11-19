@@ -1,55 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
 import { HX_VERSION, REPO_URL } from '../data/siteData';
+import { links, type PageId } from '../lib/links';
 
-const NAV_ITEMS = [
-  { href: '#playground', label: 'Playground' },
-  { href: '#heuristics', label: 'Heuristics' },
-  { href: '#cli', label: 'CLI' },
-  { href: '#config', label: 'Config' },
-  { href: '#changelog', label: 'Changelog' },
-  { href: '#docs', label: 'Docs' },
-  { href: '#visibility', label: 'AI' },
+const NAV_ITEMS: { href: string; label: string; page: PageId | null }[] = [
+  { href: links.playground, label: 'Playground', page: 'playground' },
+  { href: links.docs(), label: 'Docs', page: 'docs' },
+  { href: links.docs('cli-reference'), label: 'CLI', page: null },
+  { href: links.docs('changelog'), label: 'Changelog', page: null },
 ];
 
-export function Header() {
-  const [activeHash, setActiveHash] = useState('');
+export function Header({ current }: { current: PageId }) {
   const [hiddenOnScroll, setHiddenOnScroll] = useState(false);
   const headerRef = useRef<HTMLElement | null>(null);
-
-  // Sync active navigation hash
-  useEffect(() => {
-    const syncHash = () => {
-      if (window.location.hash) {
-        setActiveHash(window.location.hash);
-      }
-    };
-    syncHash();
-    window.addEventListener('hashchange', syncHash);
-    return () => window.removeEventListener('hashchange', syncHash);
-  }, []);
-
-  // Scroll-spy: highlight the nav item for the section currently in view
-  useEffect(() => {
-    if (typeof IntersectionObserver === 'undefined') return;
-    const sections = NAV_ITEMS.map((item) => document.querySelector<HTMLElement>(item.href)).filter(
-      (el): el is HTMLElement => el !== null
-    );
-    const visible = new Map<string, number>();
-    const observer = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          if (entry.isIntersecting) visible.set(`#${entry.target.id}`, entry.boundingClientRect.top);
-          else visible.delete(`#${entry.target.id}`);
-        }
-        if (visible.size === 0) return;
-        const [top] = [...visible.entries()].sort((a, b) => Math.abs(a[1]) - Math.abs(b[1]));
-        setActiveHash(top[0]);
-      },
-      { rootMargin: '-35% 0px -55% 0px' }
-    );
-    sections.forEach((el) => observer.observe(el));
-    return () => observer.disconnect();
-  }, []);
 
   // Fallback for browsers without scroll-state container queries
   useEffect(() => {
@@ -126,7 +88,7 @@ export function Header() {
         Skip to main content
       </a>
       <div className="container header-inner">
-        <a href="#top" className="brand-link" aria-label="Heurix home">
+        <a href={links.home} className="brand-link" aria-label="Heurix home">
           <svg width="26" height="26" viewBox="0 0 32 32" fill="none" aria-hidden="true">
             <rect width="32" height="32" rx="7" fill="#0f172a" />
             <path
@@ -159,11 +121,7 @@ export function Header() {
           <ul className="nav-links">
             {NAV_ITEMS.map((item) => (
               <li key={item.href}>
-                <a
-                  href={item.href}
-                  aria-current={activeHash === item.href ? 'page' : undefined}
-                  onClick={() => setActiveHash(item.href)}
-                >
+                <a href={item.href} aria-current={item.page === current ? 'page' : undefined}>
                   {item.label}
                 </a>
               </li>
@@ -223,9 +181,8 @@ export function Header() {
                 <li key={item.href}>
                   <a
                     href={item.href}
-                    aria-current={activeHash === item.href ? 'page' : undefined}
+                    aria-current={item.page === current ? 'page' : undefined}
                     onClick={() => {
-                      setActiveHash(item.href);
                       const el = document.getElementById('mobile-site-menu') as HTMLElement & {
                         hidePopover?: () => void;
                       };

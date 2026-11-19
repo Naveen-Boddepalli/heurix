@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import { HX_VERSION, INSTALL_METHODS } from '../data/siteData';
+import { links } from '../lib/links';
 import { CodeBlock } from './CodeBlock';
 
 export function Hero() {
@@ -41,17 +42,17 @@ export function Hero() {
           </p>
 
           <div className="hero-actions">
-            <a href="#playground" className="btn btn-primary">
+            <a href={links.playground} className="btn btn-primary">
               Try it in the browser
             </a>
-            <a href="#docs" className="btn">
+            <a href={links.docs('getting-started')} className="btn">
               Docs
             </a>
           </div>
 
           <p className="hero-release">
             v{HX_VERSION} adds CI path filters (<code>[ci].paths</code> and <code>[ci].paths_ignore</code>).{' '}
-            <a href="#changelog">Changelog</a>
+            <a href={links.docs('changelog')}>Changelog</a>
           </p>
         </div>
 

@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <script>
+      try {
+        var saved = localStorage.getItem('color-scheme');
+        if (saved === 'light' || saved === 'dark') {
+          document.querySelector('meta[name="color-scheme"]').content = saved;
+        }
+      } catch (e) {}
+    </script>
+    <title>Playground · Heurix (hx)</title>
+    <meta name="description" content="Try hx in the browser: edit a sample repo and see the generated GitHub Actions, Dependabot, and Kubernetes YAML update as you type." />
+    <link rel="icon" type="image/svg+xml" href="%BASE_URL%favicon.svg" />
+    <link rel="alternate" type="text/plain" title="llms.txt" href="%BASE_URL%llms.txt" />
+    <meta property="og:title" content="Playground · Heurix (hx)" />
+    <meta property="og:description" content="Try hx in the browser: edit a sample repo and see the generated GitHub Actions, Dependabot, and Kubernetes YAML update as you type." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/pages/playground.tsx"></script>
+  </body>
+</html>

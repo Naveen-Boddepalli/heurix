@@ -1,4 +1,5 @@
 import { CLI_COMMANDS } from '../data/siteData';
+import { links } from '../lib/links';
 import { CodeBlock } from './CodeBlock';
 
 export function CliExamples() {
@@ -9,7 +10,8 @@ export function CliExamples() {
           <h2>Commands</h2>
           <p>
             Running <code>hx</code> on its own is the same as <code>hx generate</code>. It asks before changing an
-            existing file; pass <code>--yes</code> to skip the prompts in CI.
+            existing file; pass <code>--yes</code> to skip the prompts in CI. <code>hx scan</code> and{' '}
+            <code>hx init</code> are covered in the <a href={links.docs('cli-reference')}>CLI reference</a>.
           </p>
         </div>
 

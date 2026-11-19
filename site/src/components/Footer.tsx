@@ -1,22 +1,23 @@
 import { HX_VERSION, REPO_URL } from '../data/siteData';
+import { links } from '../lib/links';
 
 const FOOTER_COLUMNS = [
   {
-    title: 'Product',
+    title: 'Site',
     links: [
-      { href: '#playground', label: 'Playground' },
-      { href: '#heuristics', label: 'Heuristics' },
-      { href: '#cli', label: 'CLI' },
-      { href: '#config', label: 'Configuration' },
+      { href: links.home, label: 'Home' },
+      { href: links.playground, label: 'Playground' },
+      { href: links.docs(), label: 'Docs' },
+      { href: links.docs('changelog'), label: 'Changelog' },
     ],
   },
   {
-    title: 'Resources',
+    title: 'Docs',
     links: [
-      { href: '#docs', label: 'Documentation' },
-      { href: '#changelog', label: 'Release notes' },
-      { href: 'llms.txt', label: 'llms.txt' },
-      { href: 'llms-full.txt', label: 'llms-full.txt' },
+      { href: links.docs('getting-started'), label: 'Getting started' },
+      { href: links.docs('cli-reference'), label: 'CLI reference' },
+      { href: links.docs('configuration'), label: 'Configuration' },
+      { href: links.docs('llms-txt'), label: 'llms.txt' },
     ],
   },
   {
@@ -39,8 +40,8 @@ export function Footer() {
           <p>Generates GitHub Actions, Dependabot, and Kubernetes config from your repo.</p>
           <p className="footer-meta">
             v{HX_VERSION} · MIT licensed ·{' '}
-            <a href={`${REPO_URL}/blob/main/CHANGELOG.md`} target="_blank" rel="noreferrer">
-              Changelog
+            <a href={REPO_URL} target="_blank" rel="noreferrer">
+              Source on GitHub
             </a>
           </p>
         </div>

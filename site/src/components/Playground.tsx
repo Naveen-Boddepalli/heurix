@@ -339,10 +339,12 @@ export function Playground() {
   }
 
   return (
-    <section id="playground" className="section">
-      <div className="container">
+    <section id="playground" className="page-section">
+      <div className="container container-wide">
         <div className="section-header">
-          <h2>Playground</h2>
+          <h1 id="main-content" tabIndex={-1}>
+            Playground
+          </h1>
           <p>
             Pick a sample repo, or edit and toggle its files. The scan reruns in your browser on every change. It
             uses a TypeScript port of the detectors, so treat it as a preview of what the CLI will write.

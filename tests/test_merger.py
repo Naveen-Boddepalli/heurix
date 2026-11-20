@@ -1162,3 +1162,200 @@ jobs:
     assert step_names.count("Job Post-Step") == 1
     assert step_names.count("Custom Compliance Check") == 1
     assert "@heurix:preserve" in ci_run_1
+
+
+_ADJACENT_NEW_WF = """name: CI
+on: [push]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+      - name: Install dependencies
+        run: pip install -e .
+      - name: Run tests (python)
+        run: pytest
+"""
+
+
+def _adjacent_preserved_existing(custom_steps: int) -> str:
+    """Workflow whose managed job ends with `custom_steps` adjacent steps, each under its own preserve line."""
+    lines = [
+        "name: CI",
+        "on: [push]",
+        "jobs:",
+        "  test:",
+        "    runs-on: ubuntu-latest",
+        "    steps:",
+        "      - name: Checkout repository",
+        "        uses: actions/checkout@v7",
+        "      - name: Install dependencies",
+        "        run: pip install -e .",
+        "      # @heurix:preserve",
+        "      - name: Run tests (python)",
+        "        run: pytest --cov",
+    ]
+    for i in range(custom_steps - 1):
+        lines += [
+            "      # @heurix:preserve",
+            f"      - name: Custom step {i}",
+            f"        run: echo {i}",
+        ]
+    return "\n".join(lines) + "\n"
+
+
+def _merge_until_stable(existing: str, new: str, runs: int = 4) -> list[str]:
+    outputs = [existing]
+    for _ in range(runs):
+        outputs.append(SmartMerger().merge_yaml(outputs[-1], new))
+    return outputs
+
+
+def test_adjacent_preserved_steps_keep_one_marker_each():
+    for custom_steps in (2, 3):
+        existing = _adjacent_preserved_existing(custom_steps)
+        outputs = _merge_until_stable(existing, _ADJACENT_NEW_WF)
+
+        for out in outputs[1:]:
+            assert out.count("@heurix:preserve") == custom_steps, out
+            assert "pytest --cov" in out
+            for i in range(custom_steps - 1):
+                assert out.count(f"Custom step {i}") == 1
+        # Re-merging must not change the file (idempotent across runs).
+        assert outputs[1] == outputs[2] == outputs[3] == outputs[4]
+        assert outputs[1] == existing
+
+
+def test_adjacent_preserved_steps_in_middle_of_job_keep_one_marker_each():
+    existing = """name: CI
+on: [push]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+      # @heurix:preserve
+      - name: Custom setup
+        run: ./setup.sh
+      # @heurix:preserve
+      - name: Install dependencies
+        run: pip install -e '.[all]'
+      - name: Run tests (python)
+        run: pytest
+"""
+    outputs = _merge_until_stable(existing, _ADJACENT_NEW_WF)
+    for out in outputs[1:]:
+        assert out.count("@heurix:preserve") == 2, out
+        assert "pip install -e '.[all]'" in out
+    assert outputs[1] == outputs[2] == outputs[3] == outputs[4]
+
+
+_SHAPES_NEW_WF = """name: CI
+on: [push]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Build
+        run: |
+          make build
+      - name: Install dependencies
+        run: pip install -e .
+      - name: Run tests (python)
+        run: pytest
+"""
+
+
+def test_preserved_step_after_with_mapping_is_not_overwritten():
+    existing = _SHAPES_NEW_WF.replace(
+        "      - name: Install dependencies\n        run: pip install -e .\n",
+        "      # @heurix:preserve\n      - name: Install dependencies\n        run: pip install -e '.[all]'\n",
+    ).replace("      - name: Build\n        run: |\n          make build\n", "")
+    new = _SHAPES_NEW_WF.replace("      - name: Build\n        run: |\n          make build\n", "")
+    merger = SmartMerger()
+    outputs = [existing]
+    for _ in range(3):
+        outputs.append(SmartMerger().merge_yaml(outputs[-1], new))
+    first = merger.merge_yaml(existing, new)
+
+    assert "pip install -e '.[all]'" in first
+    assert first.count("@heurix:preserve") == 1
+    assert not any("Install dependencies" in note for note in merger.replaced)
+    assert outputs[1] == outputs[2] == outputs[3] == existing
+
+
+def test_preserved_step_after_block_scalar_is_attributed_correctly():
+    existing = _SHAPES_NEW_WF.replace(
+        "      - name: Install dependencies\n        run: pip install -e .\n",
+        "      # @heurix:preserve\n      - name: Install dependencies\n        run: pip install -e '.[all]'\n",
+    ).replace("make build", "make build-custom")
+    merger = SmartMerger()
+    out = merger.merge_yaml(existing, _SHAPES_NEW_WF)
+
+    # The step after the block scalar is preserved; the block-scalar step itself is not.
+    assert "pip install -e '.[all]'" in out
+    assert "make build-custom" not in out
+    assert "make build\n" in out
+    assert out.count("@heurix:preserve") == 1
+    assert SmartMerger().merge_yaml(out, _SHAPES_NEW_WF) == out
+
+
+def test_new_step_inserted_between_preserved_steps_is_not_frozen():
+    existing = """name: CI
+on: [push]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+      # @heurix:preserve
+      - name: Install dependencies
+        run: pip install -e '.[all]'
+      # @heurix:preserve
+      - name: Run tests (python)
+        run: pytest --cov
+"""
+    new = """name: CI
+on: [push]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+      - name: Install dependencies
+        run: pip install -e .
+      - name: Lint code (python)
+        run: ruff check .
+      - name: Run tests (python)
+        run: pytest
+"""
+    first = SmartMerger().merge_yaml(existing, new)
+    lint_block = first.split("- name: Lint code (python)")[0].rstrip().splitlines()[-1]
+    assert "@heurix:preserve" not in lint_block
+    assert first.count("@heurix:preserve") == 2
+
+    # The generated step still follows the generator on the next run.
+    second = SmartMerger().merge_yaml(first, new.replace("ruff check .", "ruff check src"))
+    assert "ruff check src" in second
+    assert "pip install -e '.[all]'" in second
+    assert "pytest --cov" in second
+
+
+def test_inline_preserve_markers_on_adjacent_steps_are_stable():
+    existing = _adjacent_preserved_existing(3).replace("      # @heurix:preserve\n", "")
+    existing = existing.replace("- name: Run tests (python)", "- name: Run tests (python)  # @heurix:preserve")
+    existing = existing.replace("- name: Custom step 0", "- name: Custom step 0  # @heurix:preserve")
+    existing = existing.replace("- name: Custom step 1", "- name: Custom step 1  # @heurix:preserve")
+    outputs = _merge_until_stable(existing, _ADJACENT_NEW_WF)
+    assert outputs[1] == outputs[2] == existing
+    assert outputs[1].count("@heurix:preserve") == 3

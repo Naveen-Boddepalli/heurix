@@ -9,6 +9,7 @@ from typing import Any
 
 from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedMap, CommentedSeq
+from ruamel.yaml.scalarstring import FoldedScalarString, LiteralScalarString
 
 IDENTIFIER_KEYS = ("name", "package-ecosystem", "containerPort", "port", "id")
 PROBE_HANDLER_KEYS = frozenset({"httpGet", "tcpSocket", "exec", "grpc"})
@@ -343,78 +344,112 @@ class SmartMerger:
         return result
 
     @staticmethod
-    def _collect_comment_values(token: Any, require_newline_marker: bool = False) -> list[str]:
-        """Extract string values from a ruamel.yaml comment token or token list."""
-        values: list[str] = []
-        items = token if isinstance(token, list) else [token]
-        for t in items:
-            val = getattr(t, "value", None)
-            if val is None:
-                continue
-            if require_newline_marker:
-                if any(m in val for m in PRESERVE_MARKERS) and val.startswith("\n"):
-                    values.append(val)
+    def _classify_preserved_steps(seq: Any, raw_lines: list[str]) -> list[tuple[bool, bool]] | None:
+        """
+        Read preserve directives from the source text, per step: (preserved, internal).
+
+        `internal` means the directive sits inside the step's own lines (e.g. inline on
+        `- name: X  # @heurix:preserve`) and travels with the step object. Otherwise it is
+        a full-line comment directly above the step. ruamel parks that comment at the tail
+        of the previous step, at a depth that depends on how that step ends (plain scalar,
+        `with:` mapping, `run: |` block), so the source lines are the reliable signal.
+
+        Returns None when line information is unavailable.
+        """
+        lc = getattr(seq, "lc", None)
+        if lc is None or not raw_lines or not len(seq):
+            return None
+        try:
+            positions = [lc.item(i) for i in range(len(seq))]
+        except Exception:
+            return None
+
+        def _indent(line: str) -> int:
+            return len(line) - len(line.lstrip())
+
+        def _is_comment(line: str) -> bool:
+            return line.strip().startswith("#")
+
+        def _has_marker(line: str) -> bool:
+            hash_at = line.find("#")
+            return hash_at >= 0 and any(m in line[hash_at:] for m in PRESERVE_MARKERS)
+
+        # Comment block directly above each step: comment/blank lines no deeper than the
+        # step's content column (deeper lines are the previous step's block scalar body).
+        above_start: list[int] = []
+        above_marker: list[bool] = []
+        for line_no, content_col in positions:
+            k = line_no - 1
+            found = False
+            while k >= 0 and k < len(raw_lines):
+                line = raw_lines[k]
+                if not line.strip():
+                    k -= 1
+                    continue
+                if _is_comment(line) and _indent(line) <= content_col:
+                    found = found or _has_marker(line)
+                    k -= 1
+                    continue
+                break
+            above_start.append(k + 1)
+            above_marker.append(found)
+
+        result: list[tuple[bool, bool]] = []
+        for i, (line_no, content_col) in enumerate(positions):
+            if i + 1 < len(positions):
+                end = above_start[i + 1]
             else:
-                values.append(val)
-        return values
+                # Last step: its lines run until a non-comment line at or left of the dash.
+                dash_col = max(content_col - 2, 0)
+                end = line_no + 1
+                while end < len(raw_lines):
+                    line = raw_lines[end]
+                    if line.strip() and not _is_comment(line) and _indent(line) <= dash_col:
+                        break
+                    if _is_comment(line) and _indent(line) < dash_col:
+                        break
+                    end += 1
+            internal = any(_has_marker(raw_lines[k]) for k in range(line_no, min(end, len(raw_lines))))
+            result.append((above_marker[i] or internal, internal))
+        return result
 
-    def _has_internal_preserve_comment(self, seq: Any, idx: int, item: Any) -> bool:
-        """Check whether preserve directive comments are attached directly inside a step mapping."""
-        comment_blobs: list[str] = []
-        if hasattr(item, "ca") and item.ca:
-            if item.ca.comment:
-                for token in item.ca.comment:
-                    if token:
-                        comment_blobs.extend(self._collect_comment_values(token))
-            if item.ca.items:
-                keys = list(item.keys()) if hasattr(item, "keys") else []
-                for k, key_tokens in item.ca.items.items():
-                    is_last_key = (k == keys[-1]) if keys else False
-                    for token in key_tokens:
-                        if not token:
-                            continue
-                        for val in self._collect_comment_values(token):
-                            # Trailing comment with leading newline on non-final step belongs to next item
-                            if is_last_key and hasattr(seq, "__len__") and idx < len(seq) - 1 and val.startswith("\n"):
-                                continue
-                            comment_blobs.append(val)
+    @staticmethod
+    def _strip_parked_next_step_marker(step: Any) -> None:
+        """
+        Remove a full-line preserve directive that ruamel parked at the tail of `step`.
 
-        combined = "\n".join(comment_blobs)
-        return any(m in combined for m in PRESERVE_MARKERS)
-
-    def _has_preserve_comment(self, seq: Any, idx: int, item: Any) -> bool:
-        """Check ruamel.yaml comment attributes on sequence index and mapping keys."""
-        comment_blobs: list[str] = []
-
-        # Sequence comments for first item (comments placed above first list item)
-        if idx == 0 and hasattr(seq, "ca") and seq.ca and seq.ca.comment:
-            for token in seq.ca.comment:
-                if token:
-                    comment_blobs.extend(self._collect_comment_values(token))
-
-        # 1. Check sequence item comments attached to index
-        if hasattr(seq, "ca") and seq.ca and seq.ca.items and idx in seq.ca.items:
-            for token in seq.ca.items[idx]:
-                if token:
-                    comment_blobs.extend(self._collect_comment_values(token))
-
-        # 2. Check previous item trailing comment (ruamel attaches comments written above item to prev item ca)
-        if idx > 0 and hasattr(seq, "__getitem__"):
-            prev_item = seq[idx - 1]
-            if hasattr(prev_item, "ca") and prev_item.ca and prev_item.ca.items:
-                keys = list(prev_item.keys()) if hasattr(prev_item, "keys") else []
-                if keys:
-                    tokens = prev_item.ca.items.get(keys[-1])
-                    if tokens:
-                        for token in tokens:
-                            if token:
-                                comment_blobs.extend(self._collect_comment_values(token, require_newline_marker=True))
-
-        if any(m in "\n".join(comment_blobs) for m in PRESERVE_MARKERS):
-            return True
-
-        # 3. Check mapping internal comments (pre-comments on keys, inline comments)
-        return self._has_internal_preserve_comment(seq, idx, item)
+        That line was written above the *next* step. Left in place it is emitted again
+        after this step wherever it lands, duplicating the re-attached directive or
+        freezing whichever step follows it. The first line of a token on a plain scalar
+        is an inline comment on that key and is kept.
+        """
+        node: Any = step
+        while isinstance(node, (CommentedMap, CommentedSeq)) and len(node):
+            if isinstance(node, CommentedMap):
+                last_key: Any = list(node.keys())[-1]
+            else:
+                last_key = len(node) - 1
+            tokens = node.ca.items.get(last_key) if node.ca and node.ca.items else None
+            if tokens:
+                value = node[last_key]
+                first_line_inline = not isinstance(value, (LiteralScalarString, FoldedScalarString))
+                for t_idx, token in enumerate(tokens):
+                    val = getattr(token, "value", None)
+                    if not val or not any(m in val for m in PRESERVE_MARKERS):
+                        continue
+                    lines = val.split("\n")
+                    kept = [
+                        line
+                        for n, line in enumerate(lines)
+                        if (n == 0 and first_line_inline and not val.startswith("\n"))
+                        or not (line.strip().startswith("#") and any(m in line for m in PRESERVE_MARKERS))
+                    ]
+                    new_val = "\n".join(kept)
+                    if not new_val.strip():
+                        tokens[t_idx] = None
+                    else:
+                        token.value = new_val
+            node = node[last_key]
 
     def _match_steps(self, existing_steps: list[Any], new_steps: list[Any]) -> tuple[dict[int, int], dict[int, int]]:
         """
@@ -493,7 +528,7 @@ class SmartMerger:
         elif key == "services":
             merged_job.pop(key, None)
 
-    def _merge_job(self, existing_job: Any, new_job: Any, raw_existing: str = "", job_id: str = "") -> Any:
+    def _merge_job(self, existing_job: Any, new_job: Any, raw_existing: str, job_id: str = "") -> Any:
         if not isinstance(existing_job, dict) or not isinstance(new_job, dict):
             return new_job
 
@@ -567,7 +602,16 @@ class SmartMerger:
         existing_steps = list(existing_job.get("steps") or [])
         existing_seq = existing_job.get("steps")
 
-        ex_preserved = [self._has_preserve_comment(existing_seq, idx, step) for idx, step in enumerate(existing_steps)]
+        raw_lines = raw_existing.splitlines()
+        classified = self._classify_preserved_steps(existing_seq, raw_lines) if existing_steps else None
+        if classified is not None and len(classified) == len(existing_steps):
+            ex_preserved = [preserved for preserved, _ in classified]
+            ex_internal = [internal for _, internal in classified]
+        else:
+            # No source positions to read directives from: keep every existing step as written
+            # rather than risk overwriting one the user preserved.
+            ex_preserved = [True] * len(existing_steps)
+            ex_internal = [True] * len(existing_steps)
 
         ex_to_new, new_to_ex = self._match_steps(existing_steps, new_steps)
 
@@ -593,9 +637,12 @@ class SmartMerger:
 
         def _append_existing(ex_idx: int) -> None:
             step = existing_steps[ex_idx]
+            if ex_idx < len(existing_steps) - 1:
+                # The directive above the next step is re-attached below if that step is kept.
+                self._strip_parked_next_step_marker(step)
             pos = len(final_steps)
             final_steps.append(step)
-            if ex_preserved[ex_idx] and not self._has_internal_preserve_comment(existing_seq, ex_idx, step):
+            if ex_preserved[ex_idx] and not ex_internal[ex_idx]:
                 preserve_comment_indices.append(pos)
 
         for j, new_step in enumerate(new_steps):
@@ -621,7 +668,6 @@ class SmartMerger:
         # without `indent` ruamel writes it at column 0.
         dash_col = 0
         step_lc = getattr(existing_seq, "lc", None)
-        raw_lines = raw_existing.splitlines()
         if step_lc is not None and existing_steps:
             try:
                 line_no, content_col = step_lc.item(0)

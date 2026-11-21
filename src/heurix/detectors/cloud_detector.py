@@ -12,6 +12,27 @@ from heurix.core.indexer import RepoIndexer
 from heurix.detectors.base import BaseDetector
 
 
+def _read_json_object(indexer: RepoIndexer, context: ProjectContext, path: str) -> dict[str, Any]:
+    """Parse `path` as a JSON object; warn and return {} if it is invalid or not an object."""
+    raw = indexer.read_text(path) or ""
+    if not raw.strip():
+        return {}
+    try:
+        data = json.loads(raw)
+    except ValueError as e:
+        context.add_warning(f"Could not parse {path} ({e}); its settings were ignored.")
+        return {}
+    if not isinstance(data, dict):
+        context.add_warning(f"{path} is not a JSON object (found {type(data).__name__}); its settings were ignored.")
+        return {}
+    return data
+
+
+def _str_or_none(value: Any) -> str | None:
+    """Return `value` if it is a non-empty string, else None."""
+    return value if isinstance(value, str) and value.strip() else None
+
+
 class CloudDetector(BaseDetector):
     """
     Detects cloud deployment targets such as Vercel and Firebase,
@@ -38,14 +59,10 @@ class CloudDetector(BaseDetector):
         if indexer.has_file("vercel.json") or indexer.has_file(".vercel"):
             vercel_config: dict[str, Any] = {}
             if indexer.has_file("vercel.json"):
-                raw = indexer.read_text("vercel.json") or ""
-                try:
-                    vercel_config = json.loads(raw)
-                except Exception:
-                    pass
+                vercel_config = _read_json_object(indexer, context, "vercel.json")
 
-            project_name = vercel_config.get("name") or context.repo_name
-            framework = vercel_config.get("framework")
+            project_name = _str_or_none(vercel_config.get("name")) or context.repo_name
+            framework = _str_or_none(vercel_config.get("framework"))
             features: list[str] = ["hosting"]
             if vercel_config.get("functions") or any(f.startswith("api/") for f in indexer.files):
                 features.append("serverless")
@@ -73,20 +90,14 @@ class CloudDetector(BaseDetector):
         if indexer.has_file("firebase.json") or indexer.has_file(".firebaserc"):
             firebase_config: dict[str, Any] = {}
             if indexer.has_file("firebase.json"):
-                raw = indexer.read_text("firebase.json") or ""
-                try:
-                    firebase_config = json.loads(raw)
-                except Exception:
-                    pass
+                firebase_config = _read_json_object(indexer, context, "firebase.json")
 
             project_id = None
             if indexer.has_file(".firebaserc"):
-                raw_rc = indexer.read_text(".firebaserc") or ""
-                try:
-                    rc_data = json.loads(raw_rc)
-                    project_id = rc_data.get("projects", {}).get("default")
-                except Exception:
-                    pass
+                rc_data = _read_json_object(indexer, context, ".firebaserc")
+                projects = rc_data.get("projects")
+                if isinstance(projects, dict):
+                    project_id = _str_or_none(projects.get("default"))
 
             project_id = project_id or context.repo_name
 

@@ -2,6 +2,11 @@
 
 All notable changes to Heurix (`hx`) are documented here.
 
+## Unreleased
+
+### Fixed
+- **Crash on unusual `vercel.json`, `firebase.json` or `.firebaserc`.** A file holding valid JSON that isn't an object (an array, a number, `null`), or a non-string project `name` / `default`, made `hx scan`, `hx generate` and `hx check` abort with a traceback. These files are now ignored with a warning, and the repository name is used as the project ID. Invalid JSON in them now prints a warning instead of being skipped silently.
+
 ## 0.3.1 — 2026-11-20
 
 Upgrading: re-run `hx generate` if a workflow keeps steps with full-line `# @heurix:preserve` markers. Steps that earlier versions overwrote are not restored, so check those steps against your own copy.

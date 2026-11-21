@@ -5,6 +5,8 @@ Non-Destructive Smart Merge and AST Round-Trip Preservation.
 from __future__ import annotations
 
 import io
+import re
+from collections.abc import Iterable
 from typing import Any
 
 from ruamel.yaml import YAML
@@ -31,6 +33,41 @@ def _normalize_step_uses(step: Any) -> str | None:
     if not val:
         return None
     return val.split("@", 1)[0].strip().lower()
+
+
+_SHA40_REF_RE = re.compile(r"^[0-9a-fA-F]{40}$")
+_VERSION_REF_RE = re.compile(r"^v?(\d+(?:\.\d+)*)$")
+
+
+def _version_key(ref: str) -> tuple[int, ...] | None:
+    """Parse `v7`, `v7.1.0` or `7.1` into a comparable tuple; None for branches, SHAs and other refs."""
+    match = _VERSION_REF_RE.match(ref)
+    return tuple(int(part) for part in match.group(1).split(".")) if match else None
+
+
+def _reconcile_action_ref(existing_uses: Any, new_uses: Any) -> str | None:
+    """Pick the `uses:` value for a generated step that replaces an existing step using the same action.
+
+    Never moves an action backwards, so bumps made by Dependabot or by hand survive regeneration:
+    - a commit SHA in the synthesized value comes from `[ci].action_shas` policy and always wins;
+    - otherwise an existing commit SHA, branch or other non-version ref is the user's choice and is kept;
+    - between two version tags the newer one is used.
+    Returns None when the synthesized value should be used unchanged.
+    """
+    if not isinstance(existing_uses, str) or not isinstance(new_uses, str):
+        return None
+    if "@" not in existing_uses or "@" not in new_uses:
+        return None
+    ex_action, ex_ref = (part.strip() for part in existing_uses.split("@", 1))
+    new_action, new_ref = (part.strip() for part in new_uses.split("@", 1))
+    if ex_action.lower() != new_action.lower() or not ex_ref or ex_ref == new_ref:
+        return None
+    if _SHA40_REF_RE.match(new_ref):
+        return None
+    ex_key, new_key = _version_key(ex_ref), _version_key(new_ref)
+    if ex_key is not None and new_key is not None:
+        return f"{new_action}@{ex_ref}" if ex_key > new_key else None
+    return f"{new_action}@{ex_ref}"
 
 
 def _normalize_step_name(step: Any) -> str | None:
@@ -175,10 +212,17 @@ class SmartMerger:
     # @heurix:preserve / # @autoyaml:preserve directives.
     """
 
-    def __init__(self, authoritative_trigger_paths: bool = False):
+    def __init__(
+        self,
+        authoritative_trigger_paths: bool = False,
+        policy_pinned_actions: Iterable[str] = (),
+    ):
         # When True (`.heurix.toml` sets [ci].paths / paths_ignore), the generated
         # push/pull_request path filters replace whatever the existing file has.
         self.authoritative_trigger_paths = authoritative_trigger_paths
+        # Actions whose ref `.heurix.toml` sets ([ci].action_versions / action_shas). Their generated
+        # ref always wins; every other action keeps an existing ref that is newer or user-chosen.
+        self.policy_pinned_actions = frozenset(a.strip().lower() for a in policy_pinned_actions)
         self.yaml = YAML()
         self.yaml.preserve_quotes = True
         self.yaml.indent(mapping=2, sequence=4, offset=2)
@@ -412,6 +456,21 @@ class SmartMerger:
             internal = any(_has_marker(raw_lines[k]) for k in range(line_no, min(end, len(raw_lines))))
             result.append((above_marker[i] or internal, internal))
         return result
+
+    @staticmethod
+    def _carry_uses_eol_comment(existing_step: Any, new_step: Any) -> None:
+        """Copy the inline comment on an existing `uses:` line (e.g. `# v10` after a SHA) to `new_step`."""
+        if not isinstance(existing_step, CommentedMap) or not isinstance(new_step, CommentedMap):
+            return
+        entry = existing_step.ca.items.get("uses")
+        token = entry[2] if entry and len(entry) > 2 else None
+        value = getattr(token, "value", None)
+        if not isinstance(value, str) or value.startswith("\n"):
+            return
+        first_line = value.split("\n", 1)[0].strip()
+        if first_line.startswith("#") and not any(m in first_line for m in PRESERVE_MARKERS):
+            new_step.ca.items.pop("uses", None)
+            new_step.yaml_add_eol_comment(first_line, "uses")
 
     @staticmethod
     def _strip_parked_next_step_marker(step: Any) -> None:
@@ -654,11 +713,18 @@ class SmartMerger:
                 _append_existing(new_to_ex[j])
             else:
                 if j in new_to_ex:
-                    old_run = _normalize_step_run(existing_steps[new_to_ex[j]])
+                    existing_step = existing_steps[new_to_ex[j]]
+                    old_run = _normalize_step_run(existing_step)
                     new_run = _normalize_step_run(new_step)
                     if old_run and new_run and old_run != new_run:
                         label = str(new_step.get("name") or new_run)
                         self.replaced.append(f"jobs.{job_id}.steps['{label}'].run: '{old_run}' -> '{new_run}'")
+                    if _normalize_step_uses(new_step) not in self.policy_pinned_actions:
+                        kept_uses = _reconcile_action_ref(existing_step.get("uses"), new_step.get("uses"))
+                        if kept_uses is not None:
+                            new_step = new_step.copy()
+                            new_step["uses"] = kept_uses
+                            self._carry_uses_eol_comment(existing_step, new_step)
                 final_steps.append(new_step)
 
         for ex_idx in trailing_existing:

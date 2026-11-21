@@ -47,7 +47,7 @@ def test_github_actions_synthesizer():
     content = res[".github/workflows/ci.yml"]
 
     assert "actions/checkout@v7" in content
-    assert "astral-sh/setup-uv@v5" in content
+    assert "astral-sh/setup-uv@v10.4.0" in content
     assert (
         "python-version: '3.12'" in content or 'python-version: "3.12"' in content or "python-version: 3.12" in content
     )

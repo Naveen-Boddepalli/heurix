@@ -6,6 +6,11 @@ All notable changes to Heurix (`hx`) are documented here.
 
 ### Fixed
 - **Crash on unusual `vercel.json`, `firebase.json` or `.firebaserc`.** A file holding valid JSON that isn't an object (an array, a number, `null`), or a non-string project `name` / `default`, made `hx scan`, `hx generate` and `hx check` abort with a traceback. These files are now ignored with a warning, and the repository name is used as the project ID. Invalid JSON in them now prints a warning instead of being skipped silently.
+- **`hx generate` undid Dependabot's action bumps.** Heurix configures Dependabot for `github-actions`, but regenerating reset every generated step's `uses:` to Heurix's default, so a bump such as `astral-sh/setup-uv@v5` → `@v10` was reverted with no notice. Generated steps now keep an existing ref that is newer than the default, or that isn't a version tag (a commit SHA keeps its `# v1.2.3` comment, a branch is left alone), and older refs are still upgraded. Refs set in `.heurix.toml` (`[ci].action_versions`, `[ci].action_shas`) always apply.
+
+### Changed
+- **Default action versions:** `astral-sh/setup-uv@v10.4.0` (was `v5`; setup-uv no longer publishes floating major tags, so the full tag is used) and `pnpm/action-setup@v6` (was `v4`). Both accept the same inputs Heurix passes.
+- The docs listed outdated defaults for `setup-python`, `setup-node` and `setup-go`; they now match what Heurix generates.
 
 ## 0.3.1 — 2026-11-20
 

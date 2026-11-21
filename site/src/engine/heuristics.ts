@@ -39,10 +39,10 @@ function isDeploymentSecret(key: string): boolean {
 /** Default action refs, mirroring ACTION_VERSIONS in synthesizers/github_actions.py. */
 export const ACTION_VERSIONS: Record<string, string> = {
   'actions/checkout': 'v7',
-  'astral-sh/setup-uv': 'v5',
+  'astral-sh/setup-uv': 'v10.4.0',
   'actions/setup-python': 'v7.1.0',
   'snok/install-poetry': 'v1',
-  'pnpm/action-setup': 'v4',
+  'pnpm/action-setup': 'v6',
   'actions/setup-node': 'v7',
   'oven-sh/setup-bun': 'v2',
   'dtolnay/rust-toolchain': 'stable',

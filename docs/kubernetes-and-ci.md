@@ -4,7 +4,7 @@ From a single `ProjectContext` Intermediate Representation, Heurix synthesizes t
 
 ## 1. GitHub Actions (`.github/workflows/ci.yml`)
 
-- Pins exact runtime setup actions (`actions/setup-python@v5`, `astral-sh/setup-uv@v5`, `actions/setup-node@v4`, `pnpm/action-setup@v4`, `oven-sh/setup-bun@v2`, `dtolnay/rust-toolchain@stable`, `actions/setup-go@v5`).
+- Pins exact runtime setup actions (`actions/setup-python@v7.1.0`, `astral-sh/setup-uv@v10.4.0`, `actions/setup-node@v7`, `pnpm/action-setup@v6`, `oven-sh/setup-bun@v2`, `dtolnay/rust-toolchain@stable`, `actions/setup-go@v7`).
 - Enables package manager caching (`cache: 'pnpm'`, `Swatinem/rust-cache@v2`, `enable-cache: true`).
 - Injects `services:` containers (`postgres:16-alpine`, `redis:7-alpine`, etc.) with Docker health checks (`pg_isready`, `redis-cli ping`) and ports.
 - Wires non-sensitive defaults from `.env.example` into `env:` and sensitive variables into `${{ secrets.KEY }}`.

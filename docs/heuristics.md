@@ -7,7 +7,7 @@ Heurix uses eight modular, deterministic detectors (`BaseDetector` subclasses) t
 - **Trigger signals:** `pyproject.toml`, `requirements.txt`, `Pipfile`, `setup.py`, `setup.cfg`, `.python-version`, `uv.lock`, `poetry.lock`, or `*.py` files.
 - **Version pinning:** Checks `.python-version`, `.tool-versions`, and `pyproject.toml` (`project.requires-python` or `tool.poetry.dependencies.python`). Defaults to `3.12`.
 - **Package managers & lockfiles:**
-  - `uv.lock` → `uv sync --frozen` (uses `astral-sh/setup-uv@v5` with cache enabled)
+  - `uv.lock` → `uv sync --frozen` (uses `astral-sh/setup-uv@v10.4.0` with cache enabled)
   - `poetry.lock` → `poetry install --no-interaction` (uses `snok/install-poetry@v1`)
   - `Pipfile` / `Pipfile.lock` → `pipenv install --deploy`
   - `requirements.txt` (+ `requirements-dev.txt`) → `pip install -r requirements.txt`
@@ -21,7 +21,7 @@ Heurix uses eight modular, deterministic detectors (`BaseDetector` subclasses) t
 - **Trigger signals:** `package.json`, `.nvmrc`, `.node-version`, `pnpm-lock.yaml`, `yarn.lock`, `bun.lockb`.
 - **Version pinning:** Checks `.nvmrc`, `.node-version`, and `package.json` `engines.node`. Defaults to `20.x`.
 - **Package managers:**
-  - `pnpm-lock.yaml` → `pnpm i --frozen-lockfile` (`pnpm/action-setup@v4` + `cache: 'pnpm'`)
+  - `pnpm-lock.yaml` → `pnpm i --frozen-lockfile` (`pnpm/action-setup@v6` + `cache: 'pnpm'`)
   - `yarn.lock` → `yarn install --frozen-lockfile` (`cache: 'yarn'`)
   - `bun.lockb` / `bun.lock` → `bun install --frozen-lockfile` (`oven-sh/setup-bun@v2`)
   - `package-lock.json` → `npm ci` (`cache: 'npm'`)
@@ -40,7 +40,7 @@ Heurix uses eight modular, deterministic detectors (`BaseDetector` subclasses) t
 - **Trigger signals:** `go.mod` or `*.go` files.
 - **Version pinning:** Parses the `go <version>` directive from `go.mod` (defaults to `1.22`).
 - **Frameworks:** `Gin`, `Echo`, `Fiber`.
-- **Synthesized commands:** `go mod download`, `golangci-lint run`, `go build -v ./...`, `go test -v -race -cover ./...` paired with `actions/setup-go@v5`.
+- **Synthesized commands:** `go mod download`, `golangci-lint run`, `go build -v ./...`, `go test -v -race -cover ./...` paired with `actions/setup-go@v7`.
 
 ## 5. C / C++ (`CppDetector`)
 

@@ -6,6 +6,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from heurix.core.context import ProjectContext
 from heurix.core.indexer import RepoIndexer
 from heurix.detectors.docker_detector import DockerDetector
@@ -1568,3 +1570,63 @@ def test_node_detector_exact_nvmrc_and_node_version(tmp_path: Path):
     node = context.get_language("node")
     assert node is not None
     assert node.runtime_version == "20.11.0"
+
+
+_NON_OBJECT_JSON = ["[]", '"x"', "1", "null", "true"]
+
+
+def _analyze_cloud(tmp_path: Path) -> ProjectContext:
+    from heurix.detectors.cloud_detector import CloudDetector
+
+    context = ProjectContext(repo_name="fallback-name", repo_root=str(tmp_path))
+    CloudDetector().analyze(RepoIndexer(tmp_path), context)
+    return context
+
+
+@pytest.mark.parametrize("config_file", ["vercel.json", "firebase.json", ".firebaserc"])
+@pytest.mark.parametrize("payload", _NON_OBJECT_JSON)
+def test_cloud_detector_ignores_non_object_json(tmp_path: Path, config_file: str, payload: str):
+    (tmp_path / config_file).write_text(payload, encoding="utf-8")
+
+    context = _analyze_cloud(tmp_path)
+
+    assert len(context.deployment_targets) == 1
+    target = context.deployment_targets[0]
+    assert target.project_id == "fallback-name"
+    assert target.features == ["hosting"]
+    assert any(config_file in w and "not a JSON object" in w for w in context.warnings)
+
+
+@pytest.mark.parametrize("config_file", ["vercel.json", "firebase.json", ".firebaserc"])
+def test_cloud_detector_warns_on_invalid_json(tmp_path: Path, config_file: str):
+    (tmp_path / config_file).write_text("{not json", encoding="utf-8")
+
+    context = _analyze_cloud(tmp_path)
+
+    assert context.deployment_targets[0].project_id == "fallback-name"
+    assert any(config_file in w and "Could not parse" in w for w in context.warnings)
+
+
+def test_cloud_detector_empty_config_is_silent(tmp_path: Path):
+    (tmp_path / "vercel.json").write_text("", encoding="utf-8")
+
+    context = _analyze_cloud(tmp_path)
+
+    assert context.deployment_targets[0].project_id == "fallback-name"
+    assert context.warnings == []
+
+
+@pytest.mark.parametrize(
+    ("config_file", "payload"),
+    [
+        ("vercel.json", '{"name": 1, "framework": ["nextjs"]}'),
+        (".firebaserc", '{"projects": {"default": 1}}'),
+        (".firebaserc", '{"projects": ["prod"]}'),
+    ],
+)
+def test_cloud_detector_ignores_non_string_project_names(tmp_path: Path, config_file: str, payload: str):
+    (tmp_path / config_file).write_text(payload, encoding="utf-8")
+
+    context = _analyze_cloud(tmp_path)
+
+    assert context.deployment_targets[0].project_id == "fallback-name"

@@ -239,7 +239,10 @@ def _run_generate(
             show_diff(rel_path, old_text, new_text, style=effective_diff_style)
 
     # 6. Diff preview or smart merge
-    merger = SmartMerger(authoritative_trigger_paths=policy.ci.has_path_filters)
+    merger = SmartMerger(
+        authoritative_trigger_paths=policy.ci.has_path_filters,
+        policy_pinned_actions=[*policy.ci.action_versions, *policy.ci.action_shas],
+    )
     files_to_write: dict[str, str] = {}
     non_destructive = policy.engine.non_destructive
 

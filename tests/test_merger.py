@@ -1359,3 +1359,80 @@ def test_inline_preserve_markers_on_adjacent_steps_are_stable():
     outputs = _merge_until_stable(existing, _ADJACENT_NEW_WF)
     assert outputs[1] == outputs[2] == existing
     assert outputs[1].count("@heurix:preserve") == 3
+
+
+def _uses_wf(checkout: str, uv: str, rust: str = "dtolnay/rust-toolchain@stable") -> str:
+    return f"""name: CI
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: {checkout}
+      - name: Install uv
+        uses: {uv}
+        with:
+          enable-cache: true
+      - name: Set up Rust
+        uses: {rust}
+      - name: Run tests
+        run: uv run pytest
+"""
+
+
+def _merged_uses(existing: str, new: str, merger: SmartMerger | None = None) -> list[str]:
+    from ruamel.yaml import YAML
+
+    out = (merger or SmartMerger()).merge_yaml(existing, new)
+    return [str(s["uses"]) for s in YAML(typ="safe").load(out)["jobs"]["test"]["steps"] if "uses" in s]
+
+
+def test_regenerate_keeps_actions_bumped_past_the_default():
+    """Dependabot bumps must survive `hx generate`; the generated default is older here."""
+    existing = _uses_wf("actions/checkout@v8", "astral-sh/setup-uv@v10.4.0")
+    new = _uses_wf("actions/checkout@v7", "astral-sh/setup-uv@v5")
+
+    assert _merged_uses(existing, new)[:2] == ["actions/checkout@v8", "astral-sh/setup-uv@v10.4.0"]
+
+
+def test_regenerate_upgrades_actions_older_than_the_default():
+    existing = _uses_wf("actions/checkout@v4", "astral-sh/setup-uv@v3")
+    new = _uses_wf("actions/checkout@v7", "astral-sh/setup-uv@v5")
+
+    assert _merged_uses(existing, new)[:2] == ["actions/checkout@v7", "astral-sh/setup-uv@v5"]
+
+
+def test_regenerate_keeps_user_sha_pins_and_their_version_comment():
+    sha = "0123456789abcdef0123456789abcdef01234567"
+    existing = _uses_wf(f"actions/checkout@{sha}  # v7.0.1", "astral-sh/setup-uv@main")
+    new = _uses_wf("actions/checkout@v7", "astral-sh/setup-uv@v5")
+
+    outputs = _merge_until_stable(existing, new)
+
+    assert outputs[1] == outputs[2] == outputs[4]
+    assert f"uses: actions/checkout@{sha}  # v7.0.1" in outputs[1]
+    assert _merged_uses(existing, new)[:2] == [f"actions/checkout@{sha}", "astral-sh/setup-uv@main"]
+
+
+def test_regenerate_applies_policy_sha_pins_over_existing_refs():
+    sha = "fedcba9876543210fedcba9876543210fedcba98"
+    existing = _uses_wf("actions/checkout@v9", "astral-sh/setup-uv@v10")
+    new = _uses_wf(f"actions/checkout@{sha}  # v7", "astral-sh/setup-uv@v5")
+
+    assert _merged_uses(existing, new)[0] == f"actions/checkout@{sha}"
+
+
+def test_regenerate_applies_policy_action_versions_even_when_older():
+    existing = _uses_wf("actions/checkout@v9", "astral-sh/setup-uv@v10")
+    new = _uses_wf("actions/checkout@v7", "astral-sh/setup-uv@v6")
+    merger = SmartMerger(policy_pinned_actions=["astral-sh/setup-uv"])
+
+    assert _merged_uses(existing, new, merger)[:2] == ["actions/checkout@v9", "astral-sh/setup-uv@v6"]
+
+
+def test_regenerate_switches_to_a_different_action():
+    existing = _uses_wf("actions/checkout@v7", "astral-sh/setup-uv@v10", rust="actions-rs/toolchain@v1")
+    new = _uses_wf("actions/checkout@v7", "astral-sh/setup-uv@v5")
+
+    # Matched by step name, but a different action: the generated one replaces it.
+    assert _merged_uses(existing, new)[2] == "dtolnay/rust-toolchain@stable"

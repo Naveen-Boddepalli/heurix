@@ -1245,3 +1245,35 @@ def test_cli_generate_empty_directory_refusal(tmp_path: Path):
     res_override = runner.invoke(app, ["generate", "--path", str(empty_dir), "--yes", "--allow-empty"])
     assert res_override.exit_code == 0
     assert "Refusing to generate empty workflows" not in res_override.stdout
+
+
+def test_cli_harden_lists_added_keys_and_is_stable(tmp_path: Path):
+    (tmp_path / "requirements.txt").write_text("pytest\n", encoding="utf-8")
+    workflow = tmp_path / ".github" / "workflows" / "ci.yml"
+    workflow.parent.mkdir(parents=True)
+    workflow.write_text(
+        "name: CI\non:\n  push:\n    branches:\n      - main\njobs:\n  test:\n    runs-on: ubuntu-latest\n"
+        "    steps:\n      - name: Checkout repository\n        uses: actions/checkout@v7\n",
+        encoding="utf-8",
+    )
+    args = ["generate", "--path", str(tmp_path), "--yes", "--no-explain", "--no-k8s"]
+
+    plain = runner.invoke(app, args)
+    assert plain.exit_code == 0, plain.stdout
+    assert "adding hardening" not in plain.stdout
+    assert "permissions:" not in workflow.read_text(encoding="utf-8")
+
+    (tmp_path / ".heurix.toml").write_text("[ci]\nharden = true\n", encoding="utf-8")
+    hardened = runner.invoke(app, args)
+    assert hardened.exit_code == 0, hardened.stdout
+    out = " ".join(hardened.stdout.split())
+    assert "adding hardening ([ci] harden = true)" in out
+    assert "jobs.test.timeout-minutes" in out
+    text = workflow.read_text(encoding="utf-8")
+    assert "permissions:\n  contents: read" in text
+    assert "persist-credentials: false" in text
+
+    again = runner.invoke(app, args)
+    assert again.exit_code == 0, again.stdout
+    assert "adding hardening" not in again.stdout
+    assert workflow.read_text(encoding="utf-8") == text

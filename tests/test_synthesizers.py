@@ -2348,3 +2348,68 @@ def test_ci_env_policy_overrides_service_urls_and_is_validated():
     bad_ctx = _postgres_ctx(policy_config={"ci": {"env": "not-a-mapping"}})
     bad_env = _test_step_env(GitHubActionsSynthesizer().synthesize(bad_ctx)[".github/workflows/ci.yml"])
     assert bad_env["DATABASE_URL"].startswith("postgresql://")
+
+
+def _hardening_context(**policy: object) -> ProjectContext:
+    return ProjectContext(
+        repo_name="web",
+        repo_root="/web",
+        languages=[
+            LanguageContext(
+                language="python",
+                runtime_version="3.12",
+                version_source=".python-version",
+                package_manager="pip",
+                install_cmd="pip install -r requirements.txt",
+                test_cmd="pytest",
+            )
+        ],
+        deployment_targets=[
+            DeploymentTarget(
+                platform="vercel",
+                config_file="vercel.json",
+                project_id="web",
+                deploy_cmd="vercel --prod",
+                required_secrets=["VERCEL_TOKEN"],
+            )
+        ],
+        policy_config={"ci": policy} if policy else {},
+    )
+
+
+def test_new_workflows_are_hardened():
+    from ruamel.yaml import YAML
+
+    content = GitHubActionsSynthesizer().synthesize(_hardening_context())[".github/workflows/ci.yml"]
+    doc = YAML(typ="safe").load(content)
+
+    assert doc["permissions"] == {"contents": "read"}
+    assert doc["concurrency"] == {
+        "group": "${{ github.workflow }}-${{ github.ref }}",
+        "cancel-in-progress": "${{ github.event_name == 'pull_request' }}",
+    }
+    assert set(doc["jobs"]) == {"test", "deploy_vercel"}
+    for job in doc["jobs"].values():
+        assert job["timeout-minutes"] == 60
+        checkout = next(s for s in job["steps"] if str(s.get("uses", "")).startswith("actions/checkout@"))
+        assert checkout["with"] == {"persist-credentials": False}
+    # The key order GitHub users expect: permissions and concurrency ahead of the triggers.
+    assert list(doc)[:4] == ["name", "permissions", "concurrency", "on"]
+
+
+def test_policy_sets_job_timeout():
+    from ruamel.yaml import YAML
+
+    content = GitHubActionsSynthesizer().synthesize(_hardening_context(timeout_minutes=15))[".github/workflows/ci.yml"]
+
+    assert {job["timeout-minutes"] for job in YAML(typ="safe").load(content)["jobs"].values()} == {15}
+
+
+def test_policy_rejects_out_of_range_timeouts():
+    from heurix.core.policy import HeurixPolicy, parse_heurix_policy
+
+    for bad in (0, 361):
+        policy, errors = parse_heurix_policy({"ci": {"timeout_minutes": bad}})
+        assert errors
+        assert policy.ci.timeout_minutes == 60
+    assert HeurixPolicy.from_raw({}).ci.harden is False

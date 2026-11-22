@@ -210,6 +210,12 @@ class CiPolicy(_PolicyBase):
     action_shas: dict[str, str] = Field(default_factory=dict)
     action_versions: dict[str, str] = Field(default_factory=dict)
     permissions: dict[str, str] = Field(default_factory=dict)
+    # New workflows are always hardened (least-privilege `permissions`, a `concurrency`
+    # group, job timeouts, `persist-credentials: false` on checkout). `harden = true`
+    # also adds whichever of these an existing workflow lacks, never replacing set values.
+    harden: bool = False
+    # `timeout-minutes` for generated jobs (GitHub's own default is 360).
+    timeout_minutes: int = Field(default=60, ge=1, le=360)
     runners: dict[str, _NonEmptyStr] = Field(default_factory=dict)
     steps: CiStepsPolicy = Field(default_factory=CiStepsPolicy)
     # Explicit overrides for CI service-container connection URLs

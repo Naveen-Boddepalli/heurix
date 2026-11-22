@@ -9,6 +9,7 @@ From a single `ProjectContext` Intermediate Representation, Heurix synthesizes t
 - Injects `services:` containers (`postgres:16-alpine`, `redis:7-alpine`, etc.) with Docker health checks (`pg_isready`, `redis-cli ping`) and ports.
 - Wires non-sensitive defaults from `.env.example` into `env:` and sensitive variables into `${{ secrets.KEY }}`.
 - Adds `deploy_vercel` or `deploy_firebase` jobs (with `needs: test`) when cloud targets (`vercel.json`, `firebase.json`, `.firebaserc`) are present.
+- Hardens every new workflow: `permissions: contents: read`, a `concurrency` group per branch or PR (a new push cancels a superseded pull-request run, never a run on a pushed branch, so deploys aren't cut off), `timeout-minutes` on each job (60, or `[ci].timeout_minutes`), and `persist-credentials: false` on checkout. Existing workflows get these only with `[ci] harden = true` (see [Hardening existing workflows](getting-started.md#hardening-existing-workflows)).
 
 ## 2. Dependabot (`.github/dependabot.yml`)
 

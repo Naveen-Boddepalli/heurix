@@ -4,6 +4,10 @@ All notable changes to Heurix (`hx`) are documented here.
 
 ## Unreleased
 
+### Added — hardened workflows
+- **New workflows are hardened by default.** Generated `ci.yml` files now include a `concurrency` group per branch or PR (a new push cancels a superseded pull-request run, but never a run on a pushed branch, so deploys aren't interrupted), `timeout-minutes` on every job (default 60, set with `[ci].timeout_minutes`), and `persist-credentials: false` on checkout, alongside the existing `permissions: contents: read`.
+- **`[ci] harden = true` hardens an existing workflow.** It adds whichever of `permissions`, `concurrency`, job `timeout-minutes` and checkout `persist-credentials: false` are missing, and `hx generate` lists each one before writing. Values you already set are never replaced, and jobs you wrote yourself are left alone. Without `harden`, an existing workflow keeps exactly the hardening it has, because adding `permissions: contents: read` can break a job that pushes or deploys with the job token.
+
 ### Fixed
 - **Crash on unusual `vercel.json`, `firebase.json` or `.firebaserc`.** A file holding valid JSON that isn't an object (an array, a number, `null`), or a non-string project `name` / `default`, made `hx scan`, `hx generate` and `hx check` abort with a traceback. These files are now ignored with a warning, and the repository name is used as the project ID. Invalid JSON in them now prints a warning instead of being skipped silently.
 - **`hx generate` undid Dependabot's action bumps.** Heurix configures Dependabot for `github-actions`, but regenerating reset every generated step's `uses:` to Heurix's default, so a bump such as `astral-sh/setup-uv@v5` → `@v10` was reverted with no notice. Generated steps now keep an existing ref that is newer than the default, or that isn't a version tag (a commit SHA keeps its `# v1.2.3` comment, a branch is left alone), and older refs are still upgraded. Refs set in `.heurix.toml` (`[ci].action_versions`, `[ci].action_shas`) always apply.

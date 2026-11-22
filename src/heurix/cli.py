@@ -242,6 +242,7 @@ def _run_generate(
     merger = SmartMerger(
         authoritative_trigger_paths=policy.ci.has_path_filters,
         policy_pinned_actions=[*policy.ci.action_versions, *policy.ci.action_shas],
+        harden=policy.ci.harden,
     )
     files_to_write: dict[str, str] = {}
     non_destructive = policy.engine.non_destructive
@@ -270,6 +271,15 @@ def _run_generate(
                 console.print(
                     "  [dim]To keep your version, add '# @heurix:preserve' to the end of "
                     "that key's line (or on the line above a step).[/dim]"
+                )
+
+            if non_destructive and merger.hardened:
+                console.print(f"[cyan]🔒 {escape(rel_path)}: adding hardening ({escape('[ci]')} harden = true):[/cyan]")
+                for note in merger.hardened:
+                    console.print(f"  [cyan]•[/cyan] {escape(note)}")
+                console.print(
+                    "  [dim]A job that needs more access (pushing, commenting, deploying) can set its own "
+                    "'permissions:' block.[/dim]"
                 )
 
             if diff:
@@ -511,6 +521,8 @@ include_dependabot = true
 include_k8s = __INCLUDE_K8S__  # also controls whether `hx check` verifies k8s/ manifests
 # default_branch = "main"
 # pin_actions = true
+# harden = true          # add permissions, concurrency, job timeouts and persist-credentials: false to an existing ci.yml
+# timeout_minutes = 60   # timeout-minutes for generated jobs
 # paths_ignore = ["docs/**", "**/*.md"]  # skip CI when only these files change
 # paths = ["src/**", "tests/**"]         # run CI only for these files (replaces the monorepo filter)
 #

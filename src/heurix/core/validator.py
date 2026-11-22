@@ -35,6 +35,8 @@ GITHUB_WORKFLOW_SCHEMA = {
     "properties": {
         "name": {"type": "string"},
         "on": {"type": ["object", "string", "array"]},
+        "permissions": {"type": ["object", "string"]},
+        "concurrency": {"type": ["object", "string"]},
         "jobs": {
             "type": "object",
             "minProperties": 1,
@@ -43,6 +45,7 @@ GITHUB_WORKFLOW_SCHEMA = {
                 "required": ["runs-on", "steps"],
                 "properties": {
                     "runs-on": {"type": "string"},
+                    "timeout-minutes": {"type": ["integer", "string"]},
                     "needs": {
                         "oneOf": [
                             {"type": "string"},

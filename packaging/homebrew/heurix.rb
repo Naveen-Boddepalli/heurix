@@ -3,8 +3,8 @@ class Heurix < Formula
 
   desc "Deterministic Codebase Scanner & Automated YAML Synthesizer"
   homepage "https://github.com/Naveen-Boddepalli/heurix"
-  url "https://files.pythonhosted.org/packages/source/h/heurix/heurix-0.3.1.tar.gz"
-  sha256 "dea2a81433988e2326a66833d46c9041349dcba9a73eb68097f8ec0a37eb2f42"
+  url "https://files.pythonhosted.org/packages/source/h/heurix/heurix-0.4.0.tar.gz"
+  sha256 "83670efded43ca39ae953fd374932993ed1139492dad1c7c639f50dc232412c2"
   license "MIT"
   head "https://github.com/Naveen-Boddepalli/heurix.git", branch: "main"
 

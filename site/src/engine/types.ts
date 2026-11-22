@@ -94,6 +94,8 @@ export interface HeurixPolicy {
   includeDependabot: boolean;
   paths: string[] | null;
   pathsIgnore: string[];
+  /** `[ci].timeout_minutes`: timeout-minutes for generated jobs (1-360, default 60). */
+  timeoutMinutes: number;
   imageTag: string | null;
   overrides: Record<string, string>;
 }

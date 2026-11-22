@@ -2,7 +2,9 @@
 
 All notable changes to Heurix (`hx`) are documented here.
 
-## Unreleased
+## 0.4.0 — 2026-11-22
+
+Upgrading: an existing `ci.yml` regenerates exactly as before. To add least-privilege `permissions`, a `concurrency` group, job timeouts and `persist-credentials: false` to it, set `[ci] harden = true` in `.heurix.toml`, run `hx generate`, and review the list of added keys. Give any job you wrote that pushes, comments or deploys with the job token its own `permissions:` block.
 
 ### Added — hardened workflows
 - **New workflows are hardened by default.** Generated `ci.yml` files now include a `concurrency` group per branch or PR (a new push cancels a superseded pull-request run, but never a run on a pushed branch, so deploys aren't interrupted), `timeout-minutes` on every job (default 60, set with `[ci].timeout_minutes`), and `persist-credentials: false` on checkout, alongside the existing `permissions: contents: read`.

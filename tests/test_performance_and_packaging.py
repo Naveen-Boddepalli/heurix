@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import time
+import warnings
 import zipfile
 from pathlib import Path
 
@@ -26,6 +27,47 @@ except ImportError:  # pragma: no cover - Python 3.10 fallback
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 LATENCY_BUDGET_SECONDS = 1.0
+
+
+def _changelog_releases(changelog_text: str) -> list[str]:
+    """Release versions from `## X.Y.Z — date` headings, newest first (skips `## Unreleased`)."""
+    return re.findall(r"^## (\d+\.\d+\.\d+)\b", changelog_text, re.MULTILINE)
+
+
+def _formula_version_problem(formula_version: str, project_version: str, releases: list[str]) -> str | None:
+    """Return why the Homebrew formula's tarball version is wrong, or None if it is acceptable.
+
+    The formula's sha256 can only be set once the release sdist is on PyPI, so during a release
+    the formula may still point at the release just before it. Two releases behind means the
+    follow-up was forgotten.
+    """
+    if formula_version == project_version:
+        return None
+    if project_version not in releases:
+        return f"CHANGELOG.md has no '## {project_version}' heading"
+    position = releases.index(project_version)
+    previous = releases[position + 1] if position + 1 < len(releases) else None
+    if formula_version == previous:
+        return None
+    return (
+        f"Homebrew formula points at heurix-{formula_version}.tar.gz; expected {project_version} "
+        f"(or {previous} until {project_version} is on PyPI)"
+    )
+
+
+@pytest.mark.parametrize(
+    ("formula", "project", "ok"),
+    [
+        ("0.4.0", "0.4.0", True),  # formula updated after publishing
+        ("0.3.1", "0.4.0", True),  # release in progress: sdist not on PyPI yet
+        ("0.3.0", "0.4.0", False),  # follow-up skipped for a whole release
+        ("0.4.1", "0.4.0", False),  # formula ahead of the package
+        ("0.4.0", "0.5.0", False),  # version bumped without a changelog entry
+    ],
+)
+def test_formula_version_may_trail_one_release(formula: str, project: str, ok: bool) -> None:
+    releases = ["0.4.0", "0.3.1", "0.3.0"]
+    assert (_formula_version_problem(formula, project, releases) is None) is ok
 
 
 def _resolve_hx_command() -> list[str]:
@@ -158,7 +200,7 @@ def test_packaging_wheel_homebrew_docker_and_workflows(tmp_path: Path) -> None:
     pyproject_data = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     project = pyproject_data["project"]
     assert project["name"] == "heurix"
-    assert project["version"] == "0.3.1"
+    assert project["version"] == "0.4.0"
     assert project["requires-python"] == ">=3.10"
     assert project["scripts"] == {"hx": "heurix.cli:app", "heurix": "heurix.cli:app"}
     assert "jinja2>=3.1.6" in project["dependencies"]
@@ -229,7 +271,17 @@ def test_packaging_wheel_homebrew_docker_and_workflows(tmp_path: Path) -> None:
     formula_text = formula_path.read_text(encoding="utf-8")
     assert f'desc "{project["description"]}"' in formula_text
     assert f'homepage "{project["urls"]["Homepage"]}"' in formula_text
-    assert f"heurix-{project['version']}.tar.gz" in formula_text
+    formula_tarball = re.search(r"/heurix-(\d+\.\d+\.\d+)\.tar\.gz\"", formula_text)
+    assert formula_tarball, "Homebrew formula has no heurix-X.Y.Z.tar.gz url"
+    releases = _changelog_releases((REPO_ROOT / "CHANGELOG.md").read_text(encoding="utf-8"))
+    problem = _formula_version_problem(formula_tarball.group(1), project["version"], releases)
+    assert problem is None, problem
+    if formula_tarball.group(1) != project["version"]:
+        warnings.warn(
+            f"Homebrew formula still points at {formula_tarball.group(1)}; set the {project['version']} "
+            "url and sha256 once that release is on PyPI.",
+            stacklevel=1,
+        )
     assert 'license "MIT"' in formula_text
     assert "virtualenv_install_with_resources" in formula_text
     # The release tarball checksum must be real, not a placeholder.

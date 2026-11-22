@@ -152,6 +152,7 @@ function emptyPolicy(): HeurixPolicy {
     includeDependabot: true,
     paths: null,
     pathsIgnore: [],
+    timeoutMinutes: 60,
     imageTag: null,
     overrides: {},
   };
@@ -179,6 +180,13 @@ function loadPolicy(indexer: VirtualRepoIndexer): HeurixPolicy {
     if (typeof ci.include_dependabot === 'boolean') policy.includeDependabot = ci.include_dependabot;
     policy.paths = asStringList(ci.paths, 'paths');
     policy.pathsIgnore = asStringList(ci.paths_ignore ?? ci['paths-ignore'], 'paths_ignore') ?? [];
+    if (ci.timeout_minutes !== undefined) {
+      const t = ci.timeout_minutes;
+      if (typeof t !== 'number' || !Number.isInteger(t) || t < 1 || t > 360) {
+        throw new Error('[ci].timeout_minutes must be a whole number from 1 to 360');
+      }
+      policy.timeoutMinutes = t;
+    }
     if (typeof k8s.image_tag === 'string') policy.imageTag = k8s.image_tag;
     for (const [lang, val] of Object.entries(doc.overrides ?? {})) {
       if (typeof val === 'string' || typeof val === 'number') policy.overrides[lang] = String(val);
@@ -1010,6 +1018,14 @@ function resolvePathFilters(
   return { paths, pathsIgnore };
 }
 
+/** Checkout without leaving the job token in .git/config, as hx generates it. */
+const CHECKOUT_STEP = [
+  '      - name: Checkout repository',
+  uses('actions/checkout'),
+  '        with:',
+  '          persist-credentials: false',
+];
+
 function synthesizeGitHubActions(context: ProjectContext, policy: HeurixPolicy): string {
   const { paths, pathsIgnore } = resolvePathFilters(context, policy);
   const filterLines: string[] = [];
@@ -1022,6 +1038,9 @@ function synthesizeGitHubActions(context: ProjectContext, policy: HeurixPolicy):
     'name: CI',
     'permissions:',
     '  contents: read',
+    'concurrency:',
+    '  group: ${{ github.workflow }}-${{ github.ref }}',
+    "  cancel-in-progress: ${{ github.event_name == 'pull_request' }}",
     'on:',
     '  push:',
     '    branches:',
@@ -1035,7 +1054,8 @@ function synthesizeGitHubActions(context: ProjectContext, policy: HeurixPolicy):
     ...filterLines,
   ];
 
-  lines.push('jobs:', '  test:', `    runs-on: ${context.runner}`);
+  const timeout = `    timeout-minutes: ${policy.timeoutMinutes}`;
+  lines.push('jobs:', '  test:', `    runs-on: ${context.runner}`, timeout);
 
   if (context.services.length > 0) {
     lines.push('    services:');
@@ -1066,7 +1086,7 @@ function synthesizeGitHubActions(context: ProjectContext, policy: HeurixPolicy):
     }
   }
 
-  lines.push('    steps:', '      - name: Checkout repository', uses('actions/checkout'));
+  lines.push('    steps:', ...CHECKOUT_STEP);
 
   for (const lang of context.languages) {
     if (lang.language === 'python') {
@@ -1209,9 +1229,9 @@ function synthesizeGitHubActions(context: ProjectContext, policy: HeurixPolicy):
         '    needs: test',
         '    runs-on: ubuntu-latest',
         "    if: github.ref == 'refs/heads/main' && github.event_name == 'push'",
+        timeout,
         '    steps:',
-        '      - name: Checkout repository',
-        uses('actions/checkout'),
+        ...CHECKOUT_STEP,
         '      - name: Deploy to Vercel (Production)',
         uses('amondnet/vercel-action'),
         '        with:',
@@ -1227,9 +1247,9 @@ function synthesizeGitHubActions(context: ProjectContext, policy: HeurixPolicy):
         '    needs: test',
         '    runs-on: ubuntu-latest',
         "    if: github.ref == 'refs/heads/main' && github.event_name == 'push'",
+        timeout,
         '    steps:',
-        '      - name: Checkout repository',
-        uses('actions/checkout'),
+        ...CHECKOUT_STEP,
         '      - name: Deploy to Firebase Hosting',
         uses('FirebaseExtended/action-hosting-deploy'),
         '        with:',

@@ -1,4 +1,4 @@
-export const HX_VERSION = '0.3.1';
+export const HX_VERSION = '0.4.0';
 export const REPO_URL = 'https://github.com/Naveen-Boddepalli/heurix';
 
 export const INSTALL_METHODS = [

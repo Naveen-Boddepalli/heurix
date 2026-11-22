@@ -45,13 +45,14 @@ def _version_key(ref: str) -> tuple[int, ...] | None:
     return tuple(int(part) for part in match.group(1).split(".")) if match else None
 
 
-def _reconcile_action_ref(existing_uses: Any, new_uses: Any) -> str | None:
+def _reconcile_action_ref(existing_uses: Any, new_uses: Any, keep_existing: bool = False) -> str | None:
     """Pick the `uses:` value for a generated step that replaces an existing step using the same action.
 
     Never moves an action backwards, so bumps made by Dependabot or by hand survive regeneration:
     - a commit SHA in the synthesized value comes from `[ci].action_shas` policy and always wins;
     - otherwise an existing commit SHA, branch or other non-version ref is the user's choice and is kept;
-    - between two version tags the newer one is used.
+    - between two version tags the newer one is used, unless `keep_existing` (the workflow is in
+      a lockfile, where any changed ref fails the run until the lock is updated) keeps the existing one.
     Returns None when the synthesized value should be used unchanged.
     """
     if not isinstance(existing_uses, str) or not isinstance(new_uses, str):
@@ -64,6 +65,8 @@ def _reconcile_action_ref(existing_uses: Any, new_uses: Any) -> str | None:
         return None
     if _SHA40_REF_RE.match(new_ref):
         return None
+    if keep_existing:
+        return f"{new_action}@{ex_ref}"
     ex_key, new_key = _version_key(ex_ref), _version_key(new_ref)
     if ex_key is not None and new_key is not None:
         return f"{new_action}@{ex_ref}" if ex_key > new_key else None
@@ -228,6 +231,10 @@ class SmartMerger:
         # `permissions` / `concurrency`, job `timeout-minutes`, checkout `persist-credentials`).
         # Without it, an existing workflow keeps exactly the hardening it already has.
         self.harden = harden
+        # Set per file by the caller. None: the workflow isn't in actions.lock. Otherwise it is, and
+        # this maps each locked action (lowercased) to its locked ref: existing refs are kept exactly
+        # (`gh actions-lock --relock` and Dependabot move them) and new steps reuse a locked ref.
+        self.locked_action_refs: dict[str, str] | None = None
         self.yaml = YAML()
         self.yaml.preserve_quotes = True
         self.yaml.indent(mapping=2, sequence=4, offset=2)
@@ -342,6 +349,8 @@ class SmartMerger:
         raw_existing: str,
     ) -> dict[Any, Any]:
         result = existing.copy()
+        if self.locked_action_refs:
+            self._prefer_locked_refs(new, self.locked_action_refs)
 
         # Update metadata if needed, but preserve user triggers if customized
         if "name" in new and "name" not in result:
@@ -471,6 +480,27 @@ class SmartMerger:
             internal = any(_has_marker(raw_lines[k]) for k in range(line_no, min(end, len(raw_lines))))
             result.append((above_marker[i] or internal, internal))
         return result
+
+    def _prefer_locked_refs(self, new_doc: Any, locked: dict[str, str]) -> None:
+        """Point generated steps at the ref actions.lock already pins for the same action.
+
+        Avoids lockfile churn (a new job's checkout reuses the locked `v7.0.1` instead of `v7`).
+        Policy-pinned actions keep their configured ref.
+        """
+        jobs = new_doc.get("jobs") if isinstance(new_doc, dict) else None
+        if not isinstance(jobs, dict):
+            return
+        for job in jobs.values():
+            steps = job.get("steps") if isinstance(job, dict) else None
+            if not isinstance(steps, list):
+                continue
+            for step in steps:
+                action = _normalize_step_uses(step)
+                if action is None or action in self.policy_pinned_actions or action not in locked:
+                    continue
+                current = str(step["uses"]).split("@", 1)
+                if len(current) == 2 and not _SHA40_REF_RE.match(current[1].strip()):
+                    step["uses"] = f"{current[0].strip()}@{locked[action]}"
 
     @staticmethod
     def _insert_near(
@@ -787,7 +817,9 @@ class SmartMerger:
                         label = str(new_step.get("name") or new_run)
                         self.replaced.append(f"jobs.{job_id}.steps['{label}'].run: '{old_run}' -> '{new_run}'")
                     if _normalize_step_uses(new_step) not in self.policy_pinned_actions:
-                        kept_uses = _reconcile_action_ref(existing_step.get("uses"), new_step.get("uses"))
+                        kept_uses = _reconcile_action_ref(
+                            existing_step.get("uses"), new_step.get("uses"), self.locked_action_refs is not None
+                        )
                         if kept_uses is not None:
                             new_step = new_step.copy()
                             new_step["uses"] = kept_uses

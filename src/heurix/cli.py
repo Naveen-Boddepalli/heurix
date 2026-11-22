@@ -16,6 +16,7 @@ from heurix import __version__
 from heurix.core.context import ProjectContext
 from heurix.core.drift import DriftDetector
 from heurix.core.hooks import install_pre_commit_hook
+from heurix.core.lockfile import LOCK_COMMAND, LOCKFILE_PATH, LockfileError, load_lockfile, workflow_action_refs
 from heurix.core.merger import SmartMerger, YamlSyntaxError
 from heurix.core.policy import HeurixPolicy
 from heurix.core.validator import PreflightValidator
@@ -246,11 +247,16 @@ def _run_generate(
     )
     files_to_write: dict[str, str] = {}
     non_destructive = policy.engine.non_destructive
+    try:
+        lock = load_lockfile(repo_path)
+    except LockfileError:
+        lock = None  # `hx check` reports an unreadable lockfile
 
     for rel_path, new_content in synthesized.items():
         target_file = _resolve_or_exit(repo_path, rel_path)
         if target_file.exists():
             existing_content = target_file.read_text(encoding="utf-8", errors="replace")
+            merger.locked_action_refs = lock.locked_refs(rel_path) if lock and lock.covers(rel_path) else None
             try:
                 merged_content = merger.merge_yaml(existing_content, new_content) if non_destructive else new_content
             except YamlSyntaxError as e:
@@ -281,6 +287,18 @@ def _run_generate(
                     "  [dim]A job that needs more access (pushing, commenting, deploying) can set its own "
                     "'permissions:' block.[/dim]"
                 )
+
+            if lock and lock.covers(rel_path):
+                unlocked = lock.missing(rel_path, workflow_action_refs(merger.yaml.load(merged_content)))
+                if unlocked:
+                    console.print(
+                        f"[yellow]⚠ {escape(rel_path)} is in {LOCKFILE_PATH}, which has no entry for: "
+                        f"{escape(', '.join(unlocked))}[/yellow]"
+                    )
+                    console.print(
+                        f"  [dim]After writing, run '{LOCK_COMMAND}' and commit the lockfile, or the workflow "
+                        "fails at job start.[/dim]"
+                    )
 
             if diff:
                 _render_diff(rel_path, existing_content, merged_content)

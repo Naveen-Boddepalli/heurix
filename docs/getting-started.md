@@ -111,6 +111,17 @@ timeout_minutes = 30   # optional; default 60, GitHub's own default is 360
 - Only missing keys are added. A `permissions`, `concurrency`, `timeout-minutes`, or `persist-credentials` you already set is kept, so a checkout with `persist-credentials: true` keeps working.
 - Jobs you wrote yourself are left alone. If one of them needs write access, give it its own `permissions:` block, which overrides the workflow-level one for that job.
 
+### Pinning actions to commit SHAs
+
+Tags such as `@v7` can be moved to different code. To pin every action to the commit its tag points at now, run:
+
+```bash
+hx pin --dry-run   # preview
+hx pin
+```
+
+Each `uses: actions/checkout@v7` becomes `uses: actions/checkout@<sha>  # v7`, and Dependabot keeps the pins updated. If your repository uses a GitHub Actions lockfile (`.github/workflows/actions.lock`), use `gh actions-lock` instead. In that case `hx generate` keeps the locked refs, reuses them for new steps, and lists any new action that needs `gh actions-lock` before the workflow can run. `hx check` reports the same gap as an error.
+
 ## Preserving custom YAML edits
 
 Whenever Heurix updates an existing `.github/workflows/ci.yml`, it uses `ruamel.yaml` round-trip AST merging rather than overwriting the file. Custom jobs (such as Slack notifications or deployment hooks) and any step marked with `# @heurix:preserve` are left untouched:

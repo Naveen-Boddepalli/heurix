@@ -11,7 +11,7 @@
 
 ### Why Pure Logic?
 - **100% Deterministic & Reproducible:** No LLM hallucinations or non-determinism; vetted action pins with least-privilege `permissions: contents: read` and customizable action versions/commit SHAs via `.heurix.toml`.
-- **Instantaneous & Offline:** Runs locally in milliseconds without network calls or API keys.
+- **Instantaneous & Offline:** Runs locally in milliseconds without network calls or API keys. The one exception is `hx pin`, which you run explicitly to resolve action tags to commit SHAs.
 - **Non-Destructive AST Smart Merge:** Traverses `ruamel.yaml` ASTs recursively to preserve comments, custom user jobs, triggers, and any step tagged with `# @heurix:preserve` or `# @autoyaml:preserve` across repeated runs.
 - **Pre-Flight Schema Validation:** Validates single- and multi-document YAML outputs against JSON schemas (`PreflightValidator`) before writing a single byte to disk, with symlink/path-traversal protection.
 - **Structural Drift Detection:** `hx check` parses existing CI workflows and Dependabot configs structurally to detect missing backing services, pinned runtime mismatches, or outdated package manager setup.
@@ -121,13 +121,20 @@ Verifies structurally whether `.github/workflows/ci.yml` and `.github/dependabot
 hx check
 ```
 
-### 4. `hx scan`
+### 4. `hx pin`
+Pin every workflow action to a full commit SHA, keeping the tag as a comment that Dependabot uses to update it (`uses: actions/checkout@<sha>  # v7`). Refs are resolved with `git ls-remote`, so no token is needed. In repositories that use a GitHub Actions lockfile (`.github/workflows/actions.lock`), use `gh actions-lock` instead; `hx generate` keeps locked refs and `hx check` reports actions missing from the lockfile.
+```bash
+hx pin --dry-run
+hx pin
+```
+
+### 5. `hx scan`
 Inspect the strongly-typed `ProjectContext` Intermediate Representation (IR) as JSON:
 ```bash
 hx scan
 ```
 
-### 5. `hx init` & `.heurix.toml` Policy Overrides
+### 6. `hx init` & `.heurix.toml` Policy Overrides
 Initialize an optional `.heurix.toml` policy file for custom runners, synthesizer toggles, action SHA pinning, or version overrides:
 ```bash
 hx init
@@ -175,7 +182,9 @@ heurix/
 │       │   ├── indexer.py          # .gitignore-aware repo indexer & language scorer
 │       │   ├── merger.py           # ruamel.yaml recursive AST merge & comment preservation
 │       │   ├── validator.py        # Multi-doc pre-flight JSON schema validator
-│       │   └── drift.py            # Structural AST drift detection engine
+│       │   ├── drift.py            # Structural AST drift detection engine
+│       │   ├── lockfile.py         # GitHub Actions workflow lockfile (actions.lock) reader
+│       │   └── pinning.py          # hx pin: resolve action tags to commit SHAs
 │       ├── detectors/              # Modular language, infra & cloud providers
 │       │   ├── base.py
 │       │   ├── python_detector.py

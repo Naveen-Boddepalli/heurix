@@ -39,6 +39,13 @@ ACTION_VERSIONS: dict[str, str] = {
     "FirebaseExtended/action-hosting-deploy": "v0",
 }
 
+# One run per branch or PR. A new push cancels a superseded pull-request run, but never a run
+# on a pushed branch, so a deploy job on the default branch is never cut off midway.
+WORKFLOW_CONCURRENCY: dict[str, str] = {
+    "group": "${{ github.workflow }}-${{ github.ref }}",
+    "cancel-in-progress": "${{ github.event_name == 'pull_request' }}",
+}
+
 _SHA40_RE = re.compile(r"^[0-9a-fA-F]{40}$")
 _INVALID_JOB_ID_CHARS_RE = re.compile(r"[^a-zA-Z0-9_-]+")
 _MULTI_HYPHEN_RE = re.compile(r"-{2,}")
@@ -315,6 +322,9 @@ def _build_action_step_vm(
 ) -> dict[str, Any]:
     """Build a plain workflow step view-model referencing a pinned tag or 40-char commit SHA."""
     default_ref = (action_versions or {}).get(action_repo) or ACTION_VERSIONS.get(action_repo, "v4")
+    if action_repo == "actions/checkout":
+        # Don't leave the job token in .git/config for later steps to pick up.
+        with_cfg = {"persist-credentials": False, **(with_cfg or {})}
     step: dict[str, Any] = {"name": name}
     pinned_sha = action_shas.get(action_repo, "").strip()
     if pinned_sha and _SHA40_RE.match(pinned_sha):
@@ -1289,10 +1299,14 @@ class GitHubActionsSynthesizer(BaseSynthesizer):
         deploy_if = f"github.ref == 'refs/heads/{default_branch}' && github.event_name == 'push'"
         jobs_vm.update(_build_deploy_jobs_vm(context, deploy_needs, deploy_if, action_shas, policy))
 
+        for job_vm in jobs_vm.values():
+            job_vm.setdefault("timeout-minutes", policy.ci.timeout_minutes)
+
         permissions_vm = dict(policy.ci.permissions) if policy.ci.permissions else {"contents": "read"}
         workflow_vm: dict[str, Any] = {
             "name": "CI",
             "permissions": permissions_vm,
+            "concurrency": WORKFLOW_CONCURRENCY,
             "on": {
                 "push": {
                     "branches": list(trigger_branches),

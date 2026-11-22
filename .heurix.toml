@@ -3,3 +3,7 @@
 [ci]
 # Docs and the web frontend have their own workflow (pages.yml); skip tests when only they change.
 paths_ignore = ["docs/**", "site/**", "**/*.md", "llms.txt", "llms-full.txt"]
+# CI only reads the repo, so the workflow runs with a read-only token, one run per branch or PR,
+# and a job timeout.
+harden = true
+timeout_minutes = 20

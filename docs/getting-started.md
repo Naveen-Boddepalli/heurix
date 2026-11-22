@@ -97,6 +97,20 @@ paths_ignore = ["docs/**", "**/*.md"]  # skip CI when only these files change
 - Patterns must not start with `!`. Put exclusions in `paths_ignore`.
 - When either key is set, `hx generate` overwrites the trigger filters in an existing `ci.yml` and lists the old values it replaced.
 
+### Hardening existing workflows
+
+New workflows are generated hardened: least-privilege `permissions`, a `concurrency` group, job timeouts, and `persist-credentials: false` on checkout. A workflow that already exists keeps the hardening it has, because adding `permissions: contents: read` can break a job that pushes, comments, or deploys with the job token. To add what's missing:
+
+```toml
+[ci]
+harden = true
+timeout_minutes = 30   # optional; default 60, GitHub's own default is 360
+```
+
+- `hx generate` lists every key it adds before writing.
+- Only missing keys are added. A `permissions`, `concurrency`, `timeout-minutes`, or `persist-credentials` you already set is kept, so a checkout with `persist-credentials: true` keeps working.
+- Jobs you wrote yourself are left alone. If one of them needs write access, give it its own `permissions:` block, which overrides the workflow-level one for that job.
+
 ## Preserving custom YAML edits
 
 Whenever Heurix updates an existing `.github/workflows/ci.yml`, it uses `ruamel.yaml` round-trip AST merging rather than overwriting the file. Custom jobs (such as Slack notifications or deployment hooks) and any step marked with `# @heurix:preserve` are left untouched:

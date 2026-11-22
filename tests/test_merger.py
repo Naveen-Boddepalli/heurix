@@ -1436,3 +1436,107 @@ def test_regenerate_switches_to_a_different_action():
 
     # Matched by step name, but a different action: the generated one replaces it.
     assert _merged_uses(existing, new)[2] == "dtolnay/rust-toolchain@stable"
+
+
+_HARDENED_NEW_WF = """name: CI
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+on:
+  push:
+    branches:
+      - main
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Run tests
+        run: pytest
+"""
+
+_UNHARDENED_EXISTING_WF = """name: CI
+on:
+  push:
+    branches:
+      - main
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+      - name: Run tests
+        run: pytest
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: git push origin HEAD:release
+"""
+
+
+def test_existing_workflow_is_unchanged_without_harden():
+    merger = SmartMerger()
+
+    out = merger.merge_yaml(_UNHARDENED_EXISTING_WF, _HARDENED_NEW_WF)
+
+    assert out == _UNHARDENED_EXISTING_WF
+    assert merger.hardened == []
+
+
+def test_harden_adds_missing_keys_to_managed_jobs_only():
+    from ruamel.yaml import YAML
+
+    merger = SmartMerger(harden=True)
+    out = merger.merge_yaml(_UNHARDENED_EXISTING_WF, _HARDENED_NEW_WF)
+    doc = YAML(typ="safe").load(out)
+
+    assert list(doc)[:4] == ["name", "permissions", "concurrency", "on"]
+    assert doc["permissions"] == {"contents": "read"}
+    assert list(doc["jobs"]["test"])[:2] == ["runs-on", "timeout-minutes"]
+    assert doc["jobs"]["test"]["steps"][0]["with"] == {"persist-credentials": False}
+    # A custom job Heurix doesn't manage is left exactly as written.
+    assert doc["jobs"]["release"] == YAML(typ="safe").load(_UNHARDENED_EXISTING_WF)["jobs"]["release"]
+    assert merger.hardened == [
+        "permissions",
+        "concurrency",
+        "jobs.test.timeout-minutes",
+        "jobs.test.steps['Checkout repository'].with.persist-credentials",
+    ]
+
+    again = SmartMerger(harden=True)
+    assert again.merge_yaml(out, _HARDENED_NEW_WF) == out
+    assert again.hardened == []
+
+
+def test_harden_never_replaces_values_the_user_set():
+    existing = """name: CI
+permissions: write-all
+concurrency: deploy-${{ github.ref }}
+on:
+  push:
+    branches:
+      - main
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: true
+      - name: Run tests
+        run: pytest
+"""
+    for harden in (False, True):
+        merger = SmartMerger(harden=harden)
+        assert merger.merge_yaml(existing, _HARDENED_NEW_WF) == existing
+        assert merger.hardened == []

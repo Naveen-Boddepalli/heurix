@@ -216,6 +216,7 @@ class SmartMerger:
         self,
         authoritative_trigger_paths: bool = False,
         policy_pinned_actions: Iterable[str] = (),
+        harden: bool = False,
     ):
         # When True (`.heurix.toml` sets [ci].paths / paths_ignore), the generated
         # push/pull_request path filters replace whatever the existing file has.
@@ -223,6 +224,10 @@ class SmartMerger:
         # Actions whose ref `.heurix.toml` sets ([ci].action_versions / action_shas). Their generated
         # ref always wins; every other action keeps an existing ref that is newer or user-chosen.
         self.policy_pinned_actions = frozenset(a.strip().lower() for a in policy_pinned_actions)
+        # `[ci] harden = true`: add the hardening keys an existing workflow lacks (top-level
+        # `permissions` / `concurrency`, job `timeout-minutes`, checkout `persist-credentials`).
+        # Without it, an existing workflow keeps exactly the hardening it already has.
+        self.harden = harden
         self.yaml = YAML()
         self.yaml.preserve_quotes = True
         self.yaml.indent(mapping=2, sequence=4, offset=2)
@@ -230,6 +235,8 @@ class SmartMerger:
         self.yaml.width = 4096
         # Human-readable notes about existing values the last merge replaced.
         self.replaced: list[str] = []
+        # Hardening keys the last merge added to an existing workflow (only with `harden`).
+        self.hardened: list[str] = []
 
     def merge_yaml(self, existing_content: str, new_content: str) -> str:
         """
@@ -237,6 +244,7 @@ class SmartMerger:
         Raises YamlSyntaxError if existing_content cannot be parsed.
         """
         self.replaced = []
+        self.hardened = []
         if not existing_content.strip():
             return new_content
 
@@ -365,6 +373,13 @@ class SmartMerger:
                     ):
                         ex_trigger["paths"] = new_trigger["paths"]
 
+        if self.harden:
+            for key in ("permissions", "concurrency"):
+                if key in new and key not in result:
+                    before = "on" if "on" in result else "jobs"
+                    self._insert_near(result, key, new[key], before=before)
+                    self.hardened.append(key)
+
         # Preserve custom jobs
         existing_jobs = result.get("jobs", CommentedMap())
         new_jobs = new.get("jobs", CommentedMap())
@@ -456,6 +471,55 @@ class SmartMerger:
             internal = any(_has_marker(raw_lines[k]) for k in range(line_no, min(end, len(raw_lines))))
             result.append((above_marker[i] or internal, internal))
         return result
+
+    @staticmethod
+    def _insert_near(
+        mapping: Any, key: str, value: Any, *, before: str | None = None, after: str | None = None
+    ) -> None:
+        """Insert `key` just before `before` or just after `after`, appending when neither key exists."""
+        keys = list(mapping.keys())
+        if before is not None and before in keys:
+            pos = keys.index(before)
+        elif after is not None and after in keys:
+            pos = keys.index(after) + 1
+        else:
+            pos = len(keys)
+        if isinstance(mapping, CommentedMap):
+            mapping.insert(pos, key, value)
+        else:
+            mapping[key] = value
+
+    def _reconcile_checkout_credentials(self, existing_step: Any, new_step: Any, job_id: str) -> Any:
+        """Settle `persist-credentials` on a generated checkout step that replaces an existing one.
+
+        An explicit value in the existing step is kept (a job that pushes needs `true`). Otherwise the
+        generated `false` is added only with `harden`, so an existing workflow doesn't change silently.
+        """
+        if _normalize_step_uses(new_step) != "actions/checkout":
+            return new_step
+        new_with = new_step.get("with")
+        if not isinstance(new_with, dict) or "persist-credentials" not in new_with:
+            return new_step
+        ex_with = existing_step.get("with") if isinstance(existing_step, dict) else None
+        if isinstance(ex_with, dict) and "persist-credentials" in ex_with:
+            kept = ex_with["persist-credentials"]
+            if new_with["persist-credentials"] == kept:
+                return new_step
+            new_step, new_with = new_step.copy(), new_with.copy()
+            new_with["persist-credentials"] = kept
+            new_step["with"] = new_with
+            return new_step
+        if self.harden:
+            label = str(new_step.get("name") or "actions/checkout")
+            self.hardened.append(f"jobs.{job_id}.steps['{label}'].with.persist-credentials")
+            return new_step
+        new_step, new_with = new_step.copy(), new_with.copy()
+        del new_with["persist-credentials"]
+        if new_with:
+            new_step["with"] = new_with
+        else:
+            del new_step["with"]
+        return new_step
 
     @staticmethod
     def _carry_uses_eol_comment(existing_step: Any, new_step: Any) -> None:
@@ -595,6 +659,9 @@ class SmartMerger:
         # Update runs-on, services, defaults, needs, and strategy from new_job.
         # A trailing `# @heurix:preserve` on the key line keeps the user's value.
         self._sync_key(merged_job, existing_job, new_job, "runs-on", job_id)
+        if self.harden and "timeout-minutes" in new_job and "timeout-minutes" not in merged_job:
+            self._insert_near(merged_job, "timeout-minutes", new_job["timeout-minutes"], after="runs-on")
+            self.hardened.append(f"jobs.{job_id}.timeout-minutes")
         self._sync_key(merged_job, existing_job, new_job, "services", job_id)
 
         if "defaults" in new_job:
@@ -725,6 +792,7 @@ class SmartMerger:
                             new_step = new_step.copy()
                             new_step["uses"] = kept_uses
                             self._carry_uses_eol_comment(existing_step, new_step)
+                    new_step = self._reconcile_checkout_credentials(existing_step, new_step, job_id)
                 final_steps.append(new_step)
 
         for ex_idx in trailing_existing:

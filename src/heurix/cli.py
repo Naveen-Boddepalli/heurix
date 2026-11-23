@@ -280,6 +280,14 @@ def _run_generate(
                     "that key's line (or on the line above a step).[/dim]"
                 )
 
+            if non_destructive and merger.retired:
+                console.print(f"[yellow]⚠ {escape(rel_path)}: generated jobs renamed or no longer needed:[/yellow]")
+                for note in merger.retired:
+                    console.print(f"  [yellow]•[/yellow] {escape(note)}")
+                console.print(
+                    "  [dim]To keep a job exactly as it is, add '# @heurix:preserve' on the line above its key.[/dim]"
+                )
+
             if non_destructive and merger.hardened:
                 console.print(f"[cyan]🔒 {escape(rel_path)}: adding hardening ({escape('[ci]')} harden = true):[/cyan]")
                 for note in merger.hardened:

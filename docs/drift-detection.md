@@ -9,6 +9,7 @@ As repositories evolve—new database packages added to `pyproject.toml`, Node v
 3. **Missing backing services:** Checks whether services required by dependencies or `docker-compose.yml` (such as `postgres` or `redis`) are missing from `.github/workflows/ci.yml`'s `services:` block.
 4. **Runtime version mismatch:** Verifies pinned versions from `.python-version`, `.nvmrc`, `rust-toolchain.toml`, or `go.mod` appear in the workflow.
 5. **Package manager alignment:** Checks whether lockfile changes (like switching to `uv.lock`) are reflected in setup actions (such as `astral-sh/setup-uv`).
+6. **Workflow lockfile coverage:** If the repository has a GitHub Actions lockfile (`.github/workflows/actions.lock`, written by `gh actions-lock`), reports `ERROR` for each workflow listed in it that uses an action with no lock entry. GitHub fails those runs at job start, so the fix is to run `gh actions-lock` and commit the lockfile. A lockfile that can't be read (invalid YAML, or a newer format without a `workflows` map) is reported as a `WARNING`. Workflows not listed in the lockfile aren't checked.
 
 ## Exit codes & automation
 

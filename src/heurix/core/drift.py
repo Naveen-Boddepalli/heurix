@@ -15,6 +15,7 @@ from typing import Any, NamedTuple
 from ruamel.yaml import YAML
 
 from heurix.core.context import ProjectContext
+from heurix.core.lockfile import LOCK_COMMAND, LOCKFILE_PATH, LockfileError, load_lockfile, workflow_action_refs
 from heurix.core.policy import HeurixPolicy, StepPolicy, normalize_service_name
 
 _MATRIX_REF_RE = re.compile(r"\bmatrix\.([A-Za-z0-9_-]+)\b")
@@ -911,4 +912,47 @@ class DriftDetector:
                     matrix_versions=lang.matrix_versions,
                 )
 
+        findings.extend(self._check_lockfile_coverage())
+        return findings
+
+    def _check_lockfile_coverage(self) -> list[DriftFinding]:
+        """Report actions in lockfile-onboarded workflows that `actions.lock` has no entry for.
+
+        GitHub fails such a run at job start, so a missing entry is an error.
+        """
+        try:
+            lock = load_lockfile(self.root)
+        except LockfileError as e:
+            return [
+                DriftFinding(
+                    file_path=LOCKFILE_PATH,
+                    issue=f"Could not read the workflow lockfile: {e}",
+                    severity="WARNING",
+                    recommendation=f"Run '{LOCK_COMMAND}' to regenerate it, or upgrade Heurix if the format is newer.",
+                )
+            ]
+        if lock is None:
+            return []
+        findings: list[DriftFinding] = []
+        for wf_path in sorted(lock.workflows):
+            wf_file = self.root / wf_path
+            if not wf_file.is_file():
+                continue
+            try:
+                doc = self.yaml.load(wf_file.read_text(encoding="utf-8", errors="replace"))
+            except Exception:
+                continue  # malformed workflows are reported by the per-file checks
+            missing = lock.missing(wf_path, workflow_action_refs(doc))
+            if missing:
+                findings.append(
+                    DriftFinding(
+                        file_path=wf_path,
+                        issue=(
+                            f"{len(missing)} action(s) have no entry in {LOCKFILE_PATH}, so the workflow will fail "
+                            f"at job start: {', '.join(missing)}"
+                        ),
+                        severity="ERROR",
+                        recommendation=f"Run '{LOCK_COMMAND}' and commit the updated lockfile.",
+                    )
+                )
         return findings

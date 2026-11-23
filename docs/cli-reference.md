@@ -50,9 +50,34 @@ hx check [--path .]
 
 **Exit codes:**
 - `0`: Zero drift detected — workflows match codebase IR.
-- `1`: Drift detected (e.g., missing `postgres`/`redis` service container, mismatched runtime version, missing `setup-uv`, or missing workflow files).
+- `1`: Drift detected (e.g., missing `postgres`/`redis` service container, mismatched runtime version, missing `setup-uv`, missing workflow files, or an action missing from `.github/workflows/actions.lock`).
 
 Ideal for CI pipelines and Git pre-commit hooks.
+
+## `hx pin`
+
+Pins every action in `.github/workflows/*.yml` to a full commit SHA, keeping the original ref as a comment that Dependabot and Renovate use to update the pin:
+
+```yaml
+# before
+      - uses: actions/checkout@v7
+# after
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+```
+
+```bash
+hx pin [--path .] [--dry-run]
+```
+
+- Refs are resolved with `git ls-remote` against github.com, so `git` must be installed. No token is needed and there is no API rate limit. This is the only Heurix command that uses the network.
+- Files are edited line by line: comments, quoting and layout are kept, and an existing comment on the line follows the ref (`# v7 your note`).
+- Refs that are already SHAs, local actions (`./`), `docker://` images and `${{ }}` expressions are left alone. `dtolnay/rust-toolchain` is skipped, because its ref selects the toolchain.
+- If `.github/workflows/actions.lock` exists, `hx pin` changes nothing and points you to `gh actions-lock`, since the lockfile holds the pins.
+- Later `hx generate` runs keep the pins and their comments.
+
+**Exit codes:**
+- `0`: Every ref was pinned, or was already pinned.
+- `1`: A ref couldn't be resolved (the rest are still pinned and written), or the repository uses a lockfile.
 
 ## `hx scan`
 

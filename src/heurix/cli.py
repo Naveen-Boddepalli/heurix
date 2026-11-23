@@ -16,7 +16,9 @@ from heurix import __version__
 from heurix.core.context import ProjectContext
 from heurix.core.drift import DriftDetector
 from heurix.core.hooks import install_pre_commit_hook
+from heurix.core.lockfile import LOCK_COMMAND, LOCKFILE_PATH, LockfileError, load_lockfile, workflow_action_refs
 from heurix.core.merger import SmartMerger, YamlSyntaxError
+from heurix.core.pinning import WORKFLOWS_DIR, pin_workflows, workflow_files
 from heurix.core.policy import HeurixPolicy
 from heurix.core.validator import PreflightValidator
 from heurix.detectors import analyze_repository
@@ -246,11 +248,16 @@ def _run_generate(
     )
     files_to_write: dict[str, str] = {}
     non_destructive = policy.engine.non_destructive
+    try:
+        lock = load_lockfile(repo_path)
+    except LockfileError:
+        lock = None  # `hx check` reports an unreadable lockfile
 
     for rel_path, new_content in synthesized.items():
         target_file = _resolve_or_exit(repo_path, rel_path)
         if target_file.exists():
             existing_content = target_file.read_text(encoding="utf-8", errors="replace")
+            merger.locked_action_refs = lock.locked_refs(rel_path) if lock and lock.covers(rel_path) else None
             try:
                 merged_content = merger.merge_yaml(existing_content, new_content) if non_destructive else new_content
             except YamlSyntaxError as e:
@@ -281,6 +288,18 @@ def _run_generate(
                     "  [dim]A job that needs more access (pushing, commenting, deploying) can set its own "
                     "'permissions:' block.[/dim]"
                 )
+
+            if lock and lock.covers(rel_path):
+                unlocked = lock.missing(rel_path, workflow_action_refs(merger.yaml.load(merged_content)))
+                if unlocked:
+                    console.print(
+                        f"[yellow]⚠ {escape(rel_path)} is in {LOCKFILE_PATH}, which has no entry for: "
+                        f"{escape(', '.join(unlocked))}[/yellow]"
+                    )
+                    console.print(
+                        f"  [dim]After writing, run '{LOCK_COMMAND}' and commit the lockfile, or the workflow "
+                        "fails at job start.[/dim]"
+                    )
 
             if diff:
                 _render_diff(rel_path, existing_content, merged_content)
@@ -463,6 +482,58 @@ def check(
         console.print(f"  [dim]↳ Recommendation: {f.recommendation}[/dim]\n")
 
     raise typer.Exit(code=1)
+
+
+@app.command()
+def pin(
+    path: str = typer.Option(".", "--path", "-p", help="Root directory of repository."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show what would be pinned without writing files."),
+):
+    """
+    Pin workflow actions to full commit SHAs (uses: x@v7 -> uses: x@<sha>  # v7).
+    Resolves refs with 'git ls-remote' against github.com; this is Heurix's only online command.
+    """
+    repo_path = _resolve_repo_dir_or_exit(path)
+    if (repo_path / LOCKFILE_PATH).is_file():
+        console.print(
+            f"[yellow]This repository uses a workflow lockfile ({LOCKFILE_PATH}).[/yellow] "
+            f"Pins live there, so run '{LOCK_COMMAND}' instead of 'hx pin'."
+        )
+        raise typer.Exit(code=1)
+    if not workflow_files(repo_path):
+        console.print(f"[dim]No workflows found under {WORKFLOWS_DIR}/; nothing to pin.[/dim]")
+        raise typer.Exit(code=0)
+
+    with console.status("Resolving action refs with git ls-remote..."):
+        result = pin_workflows(repo_path)
+
+    for change in result.changes:
+        console.print(
+            f"[green]{change.file_path}:{change.line}[/green] {escape(change.action)}@{escape(change.ref)} "
+            f"[dim]→[/dim] {change.sha}"
+        )
+    for file_path, line, reason in result.skipped:
+        console.print(f"[dim]{file_path}:{line} skipped {escape(reason)}[/dim]")
+    for file_path, line, error in result.failures:
+        console.print(f"[red]{file_path}:{line} {escape(error)}[/red]")
+
+    if not dry_run:
+        for rel_path, text in result.updated_files.items():
+            _resolve_or_exit(repo_path, rel_path).write_text(text, encoding="utf-8")
+
+    pinned = len(result.changes)
+    files = len(result.updated_files)
+    if pinned == 0 and not result.failures:
+        console.print("[bold green]✔ Every action is already pinned to a commit SHA.[/bold green]")
+    elif dry_run:
+        console.print(f"\n[bold]Dry run:[/bold] would pin {pinned} action ref(s) in {files} file(s).")
+    else:
+        console.print(f"\n[bold green]✔ Pinned {pinned} action ref(s) in {files} file(s).[/bold green]")
+    if result.failures:
+        console.print(
+            f"[bold red]{len(result.failures)} ref(s) could not be resolved and were left as they are.[/bold red]"
+        )
+        raise typer.Exit(code=1)
 
 
 @app.command()

@@ -38,6 +38,7 @@ jobs:
 
 6. **Replacement Notices:** When a merge would replace a value you edited by hand (a `runs-on` runner or a generated step's `run:` command) without a preserve directive, `hx generate` lists each replaced value before writing, so edits are never lost silently.
 7. **Action Versions Never Move Backwards:** On a generated step, Heurix keeps your `uses:` ref when it is newer than its default (for example `astral-sh/setup-uv@v11` after a Dependabot bump) or when it isn't a version tag at all (a commit SHA, with its `# v1.2.3` comment, or a branch). It upgrades refs that are older than its default. Versions you set in `.heurix.toml` (`[ci].action_versions`, or `[ci].action_shas` with `pin_actions = true`) always win.
+   In a workflow listed in `.github/workflows/actions.lock`, every existing ref is kept exactly, even an older one, unless `.heurix.toml` sets it, because a ref the lockfile doesn't list fails the run. New steps reuse a ref already locked for the same action, so only new actions need `gh actions-lock`.
 
 ## Disabling Smart Merge
 

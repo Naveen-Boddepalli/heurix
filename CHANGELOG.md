@@ -2,6 +2,12 @@
 
 All notable changes to Heurix (`hx`) are documented here.
 
+## Unreleased
+
+### Added — action pinning and workflow lockfiles
+- **`hx pin` pins workflow actions to commit SHAs.** It rewrites `uses: actions/checkout@v7` to `uses: actions/checkout@<sha>  # v7` in every `.github/workflows/*.yml`, editing line by line so comments and layout are kept. Refs are resolved with `git ls-remote` (no token, no API rate limit). `--dry-run` previews the changes. A ref that can't be resolved is reported and the command exits with 1. This is Heurix's only command that uses the network.
+- **GitHub Actions workflow lockfiles (`.github/workflows/actions.lock`).** `hx check` reports an error when a workflow listed in the lockfile uses an action that has no lock entry, because GitHub fails that run at job start. `hx generate` keeps every existing ref in a locked workflow, even an older one, reuses locked refs for new steps, and lists the new actions to lock with `gh actions-lock`. `hx pin` defers to `gh actions-lock` in repositories with a lockfile.
+
 ## 0.4.0 — 2026-11-22
 
 Upgrading: an existing `ci.yml` regenerates exactly as before. To add least-privilege `permissions`, a `concurrency` group, job timeouts and `persist-credentials: false` to it, set `[ci] harden = true` in `.heurix.toml`, run `hx generate`, and review the list of added keys. Give any job you wrote that pushes, comments or deploys with the job token its own `permissions:` block.

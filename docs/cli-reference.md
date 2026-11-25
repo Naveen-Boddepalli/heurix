@@ -45,12 +45,16 @@ hx diff --path . --k8s
 Continuous drift detection. Scans the codebase and checks whether `.github/workflows/ci.yml`, `.github/dependabot.yml`, and configured manifests match current repository dependencies, runtime pins, and package managers.
 
 ```bash
-hx check [--path .]
+hx check [--path .] [--security] [--format text|json|sarif]
 ```
 
+- `--security`: also audit every workflow for security issues: excessive token permissions, third-party actions not pinned to a SHA, `pull_request_target` and `workflow_run`, checking out pull request code in them, template injection, persisted checkout credentials and `secrets: inherit`. See [the rule list](drift-detection.md#security-audit-hx-check---security).
+- `--format` / `-f`: `text` (default), `json`, or `sarif` for GitHub code scanning. In `json` and `sarif` mode only the report goes to stdout. See [machine-readable reports](drift-detection.md#machine-readable-reports).
+
 **Exit codes:**
-- `0`: Zero drift detected — workflows match codebase IR.
-- `1`: Drift detected (e.g., missing `postgres`/`redis` service container, mismatched runtime version, missing `setup-uv`, missing workflow files, or an action missing from `.github/workflows/actions.lock`).
+- `0`: Zero drift detected — workflows match codebase IR (and, with `--security`, no security findings).
+- `1`: Drift detected (e.g., missing `postgres`/`redis` service container, mismatched runtime version, missing `setup-uv`, missing workflow files, or an action missing from `.github/workflows/actions.lock`), or a security finding with `--security`.
+- `2`: Unknown `--format`.
 
 Ideal for CI pipelines and Git pre-commit hooks.
 

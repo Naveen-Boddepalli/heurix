@@ -4,6 +4,13 @@ All notable changes to Heurix (`hx`) are documented here.
 
 ## Unreleased
 
+### Added — workflow security audit
+- **`hx check --security` audits every workflow.** It reports `permissions: write-all` and jobs running with the default token, third-party actions and reusable workflows not pinned to a commit SHA, `pull_request_target` and `workflow_run` triggers, checking out pull request code in them, template injection of attacker-controlled values (`${{ github.event.issue.title }}`, commit messages, `github.head_ref`) into scripts, `actions/checkout` keeping the job token, and `secrets: inherit`. Rule IDs match zizmor's, and `# hx: ignore[rule-id]` or `# zizmor: ignore[rule-id]` on a line silences that finding. Heurix's generated workflows have no findings except third-party tags, which `hx pin` clears.
+- **`hx check --format json|sarif`.** JSON gives scripts a stable report. SARIF 2.1.0 uploads to GitHub code scanning with `github/codeql-action/upload-sarif`, with security severity scores for security rules. Scan warnings go to stderr so stdout holds only the report.
+
+### Changed
+- Heurix's own workflows are pinned to commit SHAs and no longer keep checkout credentials.
+
 ### Added — action pinning and workflow lockfiles
 - **`hx pin` pins workflow actions to commit SHAs.** It rewrites `uses: actions/checkout@v7` to `uses: actions/checkout@<sha>  # v7` in every `.github/workflows/*.yml`, editing line by line so comments and layout are kept. Refs are resolved with `git ls-remote` (no token, no API rate limit). `--dry-run` previews the changes. A ref that can't be resolved is reported and the command exits with 1. This is Heurix's only command that uses the network.
 - **GitHub Actions workflow lockfiles (`.github/workflows/actions.lock`).** `hx check` reports an error when a workflow listed in the lockfile uses an action that has no lock entry, because GitHub fails that run at job start. `hx generate` keeps every existing ref in a locked workflow, even an older one, reuses locked refs for new steps, and lists the new actions to lock with `gh actions-lock`. `hx pin` defers to `gh actions-lock` in repositories with a lockfile.

@@ -9,6 +9,7 @@ Use Heurix when a repository needs reproducible CI/CD pipelines, Dependabot main
 - Existing YAML files are never blindly overwritten. `SmartMerger` uses `ruamel.yaml` AST round-trip merging to preserve custom jobs (e.g., Slack notifications), comments, and any step marked with `# @heurix:preserve`.
 - Every generated YAML artifact passes `PreflightValidator` (JSON Schema validation) before a single byte is written to disk.
 - `hx check` runs continuous drift detection and exits with code `1` whenever codebase dependencies, pinned versions, or lockfiles diverge from existing `.github/workflows/ci.yml` or `.github/dependabot.yml`—ideal for CI guards and Git pre-commit hooks.
+- `hx check --security` audits every workflow (rule IDs match zizmor: excessive-permissions, unpinned-uses, dangerous-triggers, untrusted-checkout, template-injection, artipacked, secrets-inherit); `--format json|sarif` prints machine-readable reports, and SARIF uploads to GitHub code scanning.
 - `hx pin` is the only command that uses the network: it rewrites `uses: owner/repo@v7` to `uses: owner/repo@<sha>  # v7` via `git ls-remote`. Repositories with a GitHub Actions lockfile (`.github/workflows/actions.lock`) use `gh actions-lock` instead; `hx generate` keeps locked refs and `hx check` errors on actions missing from the lockfile.
 - Zero-config by default; optional team overrides live in `.heurix.toml` (generated via `hx init` with `[engine]`, `[ci]`, and `[overrides]` sections).
 

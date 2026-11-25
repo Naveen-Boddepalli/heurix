@@ -122,6 +122,9 @@ class DriftFinding(NamedTuple):
     issue: str
     severity: str  # "WARNING", "ERROR", "INFO"
     recommendation: str
+    # Stable ID for machine-readable output ("drift", or a security rule such as "unpinned-uses").
+    rule_id: str = "drift"
+    line: int | None = None  # 1-based, when the finding points at one line
 
 
 @dataclass
@@ -929,6 +932,7 @@ class DriftDetector:
                     issue=f"Could not read the workflow lockfile: {e}",
                     severity="WARNING",
                     recommendation=f"Run '{LOCK_COMMAND}' to regenerate it, or upgrade Heurix if the format is newer.",
+                    rule_id="lockfile",
                 )
             ]
         if lock is None:
@@ -953,6 +957,7 @@ class DriftDetector:
                         ),
                         severity="ERROR",
                         recommendation=f"Run '{LOCK_COMMAND}' and commit the updated lockfile.",
+                        rule_id="lockfile",
                     )
                 )
         return findings

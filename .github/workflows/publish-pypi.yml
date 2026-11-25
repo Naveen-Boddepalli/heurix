@@ -17,16 +17,21 @@ on:
           - pypi
           - testpypi
 
+permissions:
+  contents: read
+
 jobs:
   build:
     name: Build Distribution Packages
     runs-on: ubuntu-latest
     steps:
       - name: Checkout source
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7
         with:
           python-version: '3.12'
 
@@ -59,7 +64,7 @@ jobs:
           "${SMOKE_DIR}/venv/bin/hx" generate --path "${SMOKE_DIR}/repo" --dry-run --yes
 
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7
         with:
           name: python-package-distributions
           path: dist/
@@ -77,14 +82,14 @@ jobs:
       url: ${{ inputs.repository == 'testpypi' && 'https://test.pypi.org/p/heurix' || 'https://pypi.org/p/heurix' }}
     steps:
       - name: Download distribution artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8
         with:
           name: python-package-distributions
           path: dist/
 
       - name: Publish to TestPyPI
         if: ${{ inputs.repository == 'testpypi' }}
-        uses: pypa/gh-action-pypi-publish@release/v1
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086  # release/v1
         with:
           repository-url: https://test.pypi.org/legacy/
           packages-dir: dist/
@@ -93,7 +98,7 @@ jobs:
         env:
           PYPI_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
         if: ${{ inputs.repository != 'testpypi' && env.PYPI_TOKEN != '' }}
-        uses: pypa/gh-action-pypi-publish@release/v1
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086  # release/v1
         with:
           packages-dir: dist/
           password: ${{ secrets.PYPI_API_TOKEN }}
@@ -102,13 +107,13 @@ jobs:
         env:
           PYPI_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
         if: ${{ inputs.repository != 'testpypi' && env.PYPI_TOKEN == '' }}
-        uses: pypa/gh-action-pypi-publish@release/v1
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086  # release/v1
         with:
           packages-dir: dist/
 
       - name: Attach artifacts to GitHub Release
         if: github.event_name == 'release' || startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@40c2ca6ddd77ba2a30bbea8f67409c0f76868d67  # v3
         with:
           files: dist/*
           fail_on_unmatched_files: false

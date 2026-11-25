@@ -76,3 +76,5 @@ jobs:
         run: ruff format --check .
       - name: Type check (mypy)
         run: mypy
+      - name: Drift and workflow security check (hx check --security)
+        run: hx check --security

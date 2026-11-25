@@ -338,3 +338,41 @@ def test_generated_workflows_only_need_pinning(tmp_path: Path, files: dict[str, 
 
 def test_every_rule_has_metadata():
     assert all(severity in {"ERROR", "WARNING"} and text for severity, text in RULES.values())
+
+
+def test_lockfile_does_not_cover_reusable_workflow_calls(tmp_path: Path):
+    """gh actions-lock locks step actions only, so an unpinned reusable workflow is still reported."""
+    _workflow(
+        tmp_path,
+        "on: push\npermissions: {}\njobs:\n  a:\n    runs-on: x\n    steps:\n      - uses: o/a@v1\n"
+        "  shared:\n    uses: octo-org/workflows/.github/workflows/ci.yml@v1\n",
+    )
+    (tmp_path / ".github/workflows/actions.lock").write_text(
+        "version: 'v0.0.3'\nworkflows:\n  '.github/workflows/ci.yml':\n    - 'o/a@v1'\n", encoding="utf-8"
+    )
+
+    findings = audit_workflows(tmp_path)
+
+    assert [(f.rule_id, f.line) for f in findings] == [("unpinned-uses", 9)]
+    assert "jobs.shared uses octo-org/workflows/.github/workflows/ci.yml@v1" in findings[0].issue
+    # hx pin defers to the lockfile here, so the fix is a hand-made pin.
+    assert findings[0].recommendation.startswith("Pin it to a commit SHA by hand")
+
+
+@pytest.mark.parametrize(
+    "ref",
+    [
+        "${{ github.event.workflow_run.pull_requests[0].head.sha }}",
+        "${{ github.event.workflow_run.head_sha }}",
+        "${{ github.event.workflow_run.head_branch }}",
+    ],
+)
+def test_untrusted_checkout_in_workflow_run(tmp_path: Path, ref: str):
+    _workflow(
+        tmp_path,
+        "on:\n  workflow_run:\n    workflows: [CI]\n    types: [completed]\npermissions: {}\njobs:\n  report:\n"
+        "    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v7\n        with:\n"
+        f"          persist-credentials: false\n          ref: {ref}\n",
+    )
+
+    assert _rules(tmp_path) == [("dangerous-triggers", 2), ("untrusted-checkout", 13)]

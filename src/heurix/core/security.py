@@ -61,6 +61,7 @@ _INDEX_RE = re.compile(r"\[[^\]]*\]")
 # Expressions in a checkout `ref:` / `repository:` that select the pull request's own code.
 _PR_HEAD_RE = re.compile(
     r"github\.event\.pull_request\.head\.|github\.head_ref|github\.event\.workflow_run\.head_|"
+    r"github\.event\.workflow_run\.pull_requests|"
     r"refs/pull/|github\.event\.number|github\.event\.pull_request\.number|merge_commit_sha"
 )
 
@@ -210,7 +211,8 @@ class _Audit:
     def _reusable_call(self, job_id: str, job: Mapping[str, Any]) -> None:
         uses = job.get("uses")
         if is_remote_action(uses):
-            self._pin(str(uses), _line_of_key(job, "uses"), f"jobs.{job_id}")
+            # gh actions-lock doesn't lock reusable workflow calls, so the lockfile never covers them.
+            self._pin(str(uses), _line_of_key(job, "uses"), f"jobs.{job_id}", lockable=False)
         if job.get("secrets") == "inherit":
             self.add(
                 "secrets-inherit",
@@ -269,16 +271,25 @@ class _Audit:
                     "as artifacts.",
                 )
 
-    def _pin(self, uses: str, line: int | None, where: str) -> None:
+    def _pin(self, uses: str, line: int | None, where: str, *, lockable: bool = True) -> None:
         action, _, ref = uses.partition("@")
-        if self.locked or _SHA_RE.match(ref) or action.split("/", 1)[0].lower() in FIRST_PARTY_OWNERS:
+        if _SHA_RE.match(ref) or action.split("/", 1)[0].lower() in FIRST_PARTY_OWNERS:
             return
+        if lockable and self.locked:
+            return
+        if lockable:
+            fix = f"Pin it to a commit SHA with 'hx pin', or lock the workflow with '{LOCK_COMMAND}'."
+        elif self.locked:
+            # hx pin defers to the lockfile in this repository, so this one is pinned by hand.
+            fix = f"Pin it to a commit SHA by hand; '{LOCK_COMMAND}' doesn't lock reusable workflow calls."
+        else:
+            fix = f"Pin it to a commit SHA with 'hx pin'; '{LOCK_COMMAND}' doesn't lock reusable workflow calls."
         self.add(
             "unpinned-uses",
             "WARNING",
             line,
             f"{where} uses {uses}, a tag or branch its owner can move to different code.",
-            f"Pin it to a commit SHA with 'hx pin', or lock the workflow with '{LOCK_COMMAND}'.",
+            fix,
         )
 
 

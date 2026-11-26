@@ -22,6 +22,86 @@ class YamlSyntaxError(Exception):
     """Raised when existing or synthesized YAML content contains invalid syntax."""
 
 
+def _line_indent(line: str) -> int:
+    return len(line) - len(line.lstrip())
+
+
+def _is_comment_line(line: str) -> bool:
+    return line.strip().startswith("#")
+
+
+def _line_has_preserve_marker(line: str) -> bool:
+    hash_at = line.find("#")
+    return hash_at >= 0 and any(m in line[hash_at:] for m in PRESERVE_MARKERS)
+
+
+def _comment_block_start(raw_lines: list[str], line_no: int, max_col: int) -> int:
+    """First line of the comment/blank block directly above `line_no` (comments no deeper than `max_col`)."""
+    k = line_no - 1
+    while 0 <= k < len(raw_lines):
+        line = raw_lines[k]
+        if not line.strip() or (_is_comment_line(line) and _line_indent(line) <= max_col):
+            k -= 1
+            continue
+        break
+    return k + 1
+
+
+# Step names Heurix gives the test steps of a generated job: `Run tests (python)`, `Run E2E tests (playwright)`.
+_GENERATED_TEST_STEP_RE = re.compile(r"^run (?:e2e )?tests \(.+\)$")
+
+
+def _is_generated_job_id(job_id: Any) -> bool:
+    """True for the job IDs Heurix gives test jobs: `test`, `test-<language|package>`, `test-e2e`."""
+    jid = str(job_id)
+    return jid == "test" or jid.startswith("test-")
+
+
+def _job_steps(job: Any) -> list[Any]:
+    steps = job.get("steps") if isinstance(job, dict) else None
+    return list(steps) if isinstance(steps, (list, CommentedSeq)) else []
+
+
+def _generated_test_keys(job: Any) -> frozenset[str]:
+    """Names of the steps that mark `job` as a Heurix test job and say what it tests."""
+    names = (_normalize_step_name(step) for step in _job_steps(job))
+    return frozenset(n for n in names if n is not None and _GENERATED_TEST_STEP_RE.match(n))
+
+
+def _has_generated_checkout(job: Any) -> bool:
+    return any(
+        _normalize_step_uses(step) == "actions/checkout" and _normalize_step_name(step) == "checkout repository"
+        for step in _job_steps(job)
+    )
+
+
+def _job_working_dir(job: Any) -> str:
+    defaults = job.get("defaults") if isinstance(job, dict) else None
+    run = defaults.get("run") if isinstance(defaults, dict) else None
+    wd = run.get("working-directory") if isinstance(run, dict) else None
+    if wd is None:
+        return "."
+    return str(wd).strip().strip("/") or "."
+
+
+def _exact_step_matches(existing_steps: list[Any], new_steps: list[Any]) -> int:
+    """Count existing steps whose (uses + name) or (name + run) identity also appears in `new_steps`."""
+
+    def _ids(step: Any) -> set[tuple[str, str, str]]:
+        uses, name, run = _normalize_step_uses(step), _normalize_step_name(step), _normalize_step_run(step)
+        ids: set[tuple[str, str, str]] = set()
+        if uses is not None and name is not None:
+            ids.add(("uses", uses, name))
+        if name is not None and run is not None:
+            ids.add(("run", name, run))
+        return ids
+
+    new_ids: set[tuple[str, str, str]] = set()
+    for step in new_steps:
+        new_ids |= _ids(step)
+    return sum(1 for step in existing_steps if _ids(step) & new_ids)
+
+
 def _normalize_step_uses(step: Any) -> str | None:
     """Return normalized action repository/path (without @ref) for a workflow step."""
     if not isinstance(step, (dict, CommentedMap)):
@@ -244,6 +324,8 @@ class SmartMerger:
         self.replaced: list[str] = []
         # Hardening keys the last merge added to an existing workflow (only with `harden`).
         self.hardened: list[str] = []
+        # Generated jobs the last merge renamed or removed, and `needs:` entries updated to match.
+        self.retired: list[str] = []
 
     def merge_yaml(self, existing_content: str, new_content: str) -> str:
         """
@@ -252,6 +334,7 @@ class SmartMerger:
         """
         self.replaced = []
         self.hardened = []
+        self.retired = []
         if not existing_content.strip():
             return new_content
 
@@ -394,22 +477,173 @@ class SmartMerger:
         new_jobs = new.get("jobs", CommentedMap())
 
         merged_jobs = CommentedMap()
+        renamed, removed = self._retire_generated_jobs(existing_jobs, new_jobs, raw_existing)
 
         # Add all new jobs
         for job_id, job_val in new_jobs.items():
-            if job_id in existing_jobs:
-                # Merge the managed job
-                merged_jobs[job_id] = self._merge_job(existing_jobs[job_id], job_val, raw_existing, job_id=str(job_id))
+            source_id = job_id if job_id in existing_jobs else renamed.get(job_id)
+            if source_id is not None:
+                # Merge the managed job (or the job it was generated as before a rename)
+                merged_jobs[job_id] = self._merge_job(
+                    existing_jobs[source_id], job_val, raw_existing, job_id=str(job_id)
+                )
             else:
                 merged_jobs[job_id] = job_val
 
         # Preserve custom user jobs (e.g. deploy, slack_notify)
+        retired_ids = set(renamed.values()) | removed
         for job_id, job_val in existing_jobs.items():
-            if job_id not in merged_jobs:
+            if job_id not in merged_jobs and job_id not in retired_ids:
                 merged_jobs[job_id] = job_val
 
+        self._redirect_needs(merged_jobs, {old: new for new, old in renamed.items()}, removed)
         result["jobs"] = merged_jobs
         return result
+
+    @staticmethod
+    def _job_preserve_markers(jobs: Any, raw_lines: list[str]) -> dict[str, tuple[bool, bool]] | None:
+        """
+        Per job ID: (marked on the job itself, marked anywhere in the job).
+
+        The job itself is marked by a preserve directive on its key line or in the comment block
+        directly above it. "Anywhere" adds directives on its keys and steps. Returns None when
+        line information is unavailable.
+        """
+        lc = getattr(jobs, "lc", None)
+        keys = list(jobs.keys()) if isinstance(jobs, dict) else []
+        if lc is None or not raw_lines or not keys:
+            return None
+        try:
+            positions = [lc.key(k) for k in keys]
+        except Exception:
+            return None
+
+        above_start = [_comment_block_start(raw_lines, line_no, col) for line_no, col in positions]
+        markers: dict[str, tuple[bool, bool]] = {}
+        for i, (key, (line_no, col)) in enumerate(zip(keys, positions, strict=True)):
+            if i + 1 < len(positions):
+                end = above_start[i + 1]
+            else:
+                # Last job: its lines run until a line left of or level with its key.
+                end = line_no + 1
+                while end < len(raw_lines):
+                    line = raw_lines[end]
+                    if line.strip() and _line_indent(line) <= col and not _is_comment_line(line):
+                        break
+                    if _is_comment_line(line) and _line_indent(line) < col:
+                        break
+                    end += 1
+            own = any(_line_has_preserve_marker(raw_lines[k]) for k in range(above_start[i], line_no + 1))
+            anywhere = own or any(
+                _line_has_preserve_marker(raw_lines[k]) for k in range(line_no + 1, min(end, len(raw_lines)))
+            )
+            markers[str(key)] = (own, anywhere)
+        return markers
+
+    def _retire_generated_jobs(
+        self, existing_jobs: Any, new_jobs: Any, raw_existing: str
+    ) -> tuple[dict[Any, Any], set[Any]]:
+        """
+        Find existing jobs Heurix generated under an ID it no longer produces.
+
+        Job IDs follow the repository's shape: one root language gives `test`, several give
+        `test-<language>`, monorepo packages give `test-<package>`. When that shape changes, the old
+        job would otherwise be kept as if the user wrote it and run the same tests twice.
+
+        An existing job counts as generated when its ID has that form and it has Heurix's
+        `Checkout repository` step and a `Run tests (<language>)` / `Run E2E tests (<runner>)` step.
+        Such a job is:
+        - renamed: merged into the new job that tests the same thing, so edits and preserved steps
+          or keys carry over (returned as {new_id: old_id});
+        - removed: when nothing it tests is generated any more, or its package directory no longer
+          has a job (returned in the set).
+        A job with a preserve directive on or above its key is left as it is, and a job with one
+        anywhere inside it is never removed. Jobs that don't look generated are custom and kept.
+        """
+        orphans = [jid for jid in existing_jobs if jid not in new_jobs and _is_generated_job_id(jid)]
+        if not orphans:
+            return {}, set()
+        markers = self._job_preserve_markers(existing_jobs, raw_existing.splitlines())
+        if markers is None:
+            return {}, set()
+
+        orphan_keys: dict[Any, frozenset[str]] = {}
+        for jid in orphans:
+            job = existing_jobs[jid]
+            own_marker, _ = markers.get(str(jid), (True, True))
+            if own_marker or not isinstance(job, dict) or not _has_generated_checkout(job):
+                continue
+            keys = _generated_test_keys(job)
+            if keys:
+                orphan_keys[jid] = keys
+        if not orphan_keys:
+            return {}, set()
+
+        new_keys = {jid: _generated_test_keys(job) for jid, job in new_jobs.items() if isinstance(job, dict)}
+        candidates = [jid for jid in new_keys if jid not in existing_jobs]
+
+        scored: list[tuple[tuple[int, int, int], int, int, Any, Any]] = []
+        for o_idx, old_id in enumerate(orphan_keys):
+            old_job = existing_jobs[old_id]
+            for c_idx, new_id in enumerate(candidates):
+                shared = orphan_keys[old_id] & new_keys[new_id]
+                if not shared:
+                    continue
+                new_job = new_jobs[new_id]
+                score = (
+                    len(shared),
+                    _exact_step_matches(_job_steps(old_job), _job_steps(new_job)),
+                    int(_job_working_dir(old_job) == _job_working_dir(new_job)),
+                )
+                scored.append((score, o_idx, c_idx, old_id, new_id))
+        scored.sort(key=lambda item: (tuple(-s for s in item[0]), item[1], item[2]))
+
+        renamed: dict[Any, Any] = {}
+        for _, _, _, old_id, new_id in scored:
+            if old_id in renamed.values() or new_id in renamed:
+                continue
+            renamed[new_id] = old_id
+            self.retired.append(f"jobs.{old_id}: renamed to jobs.{new_id} (your changes to it are carried over)")
+
+        produced_keys: set[str] = set().union(*new_keys.values()) if new_keys else set()
+        produced_dirs = {_job_working_dir(job) for job in new_jobs.values() if isinstance(job, dict)}
+        removed: set[Any] = set()
+        for old_id, keys in orphan_keys.items():
+            if old_id in renamed.values() or markers.get(str(old_id), (True, True))[1]:
+                continue
+            old_dir = _job_working_dir(existing_jobs[old_id])
+            if not (keys & produced_keys) or (old_dir != "." and old_dir not in produced_dirs):
+                removed.add(old_id)
+                self.retired.append(f"jobs.{old_id}: removed (Heurix no longer generates this job)")
+        return renamed, removed
+
+    def _redirect_needs(self, jobs: Any, renamed: dict[Any, Any], removed: set[Any]) -> None:
+        """Point `needs:` at renamed jobs and drop removed ones, so the workflow stays valid."""
+        if not renamed and not removed:
+            return
+        for job_id, job in jobs.items():
+            if not isinstance(job, dict) or "needs" not in job or self._key_has_inline_preserve(job, "needs"):
+                continue
+            needs = job["needs"]
+            if isinstance(needs, (list, CommentedSeq)):
+                updated: list[Any] = []
+                for dep in needs:
+                    target = renamed.get(dep, None if dep in removed else dep)
+                    if target is not None and target not in updated:
+                        updated.append(target)
+                if updated == list(needs):
+                    continue
+                self.retired.append(f"jobs.{job_id}.needs: {list(needs)} -> {updated}")
+                if updated:
+                    needs[:] = updated
+                else:
+                    del job["needs"]
+            elif needs in renamed:
+                self.retired.append(f"jobs.{job_id}.needs: '{needs}' -> '{renamed[needs]}'")
+                job["needs"] = renamed[needs]
+            elif needs in removed:
+                self.retired.append(f"jobs.{job_id}.needs: '{needs}' removed")
+                del job["needs"]
 
     @staticmethod
     def _classify_preserved_steps(seq: Any, raw_lines: list[str]) -> list[tuple[bool, bool]] | None:
@@ -432,35 +666,16 @@ class SmartMerger:
         except Exception:
             return None
 
-        def _indent(line: str) -> int:
-            return len(line) - len(line.lstrip())
-
-        def _is_comment(line: str) -> bool:
-            return line.strip().startswith("#")
-
-        def _has_marker(line: str) -> bool:
-            hash_at = line.find("#")
-            return hash_at >= 0 and any(m in line[hash_at:] for m in PRESERVE_MARKERS)
+        _indent, _is_comment, _has_marker = _line_indent, _is_comment_line, _line_has_preserve_marker
 
         # Comment block directly above each step: comment/blank lines no deeper than the
         # step's content column (deeper lines are the previous step's block scalar body).
         above_start: list[int] = []
         above_marker: list[bool] = []
         for line_no, content_col in positions:
-            k = line_no - 1
-            found = False
-            while k >= 0 and k < len(raw_lines):
-                line = raw_lines[k]
-                if not line.strip():
-                    k -= 1
-                    continue
-                if _is_comment(line) and _indent(line) <= content_col:
-                    found = found or _has_marker(line)
-                    k -= 1
-                    continue
-                break
-            above_start.append(k + 1)
-            above_marker.append(found)
+            start = _comment_block_start(raw_lines, line_no, content_col)
+            above_start.append(start)
+            above_marker.append(any(_has_marker(raw_lines[k]) for k in range(start, min(line_no, len(raw_lines)))))
 
         result: list[tuple[bool, bool]] = []
         for i, (line_no, content_col) in enumerate(positions):

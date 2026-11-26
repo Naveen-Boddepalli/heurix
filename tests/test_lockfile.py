@@ -218,3 +218,36 @@ def test_generate_warns_when_a_locked_workflow_gains_unlocked_actions(tmp_path: 
     assert "which has no entry for: actions/setup-node@v7" in out
     assert "gh actions-lock" in out
     assert "actions/checkout" not in out.split("no entry for:")[1].split("After writing")[0]
+
+
+def test_renamed_job_in_a_locked_workflow_keeps_locked_refs(tmp_path: Path):
+    """A language change renames `test` to `test-python`; the locked refs must survive the rename."""
+    (tmp_path / "requirements.txt").write_text("pytest\n", encoding="utf-8")
+    args = ["generate", "--path", str(tmp_path), "--yes", "--no-explain", "--no-k8s"]
+    runner = CliRunner()
+    assert runner.invoke(app, args).exit_code == 0
+    ci = tmp_path / ".github/workflows/ci.yml"
+    # What `gh actions-lock` does: narrow each ref to a full version and lock it.
+    narrowed = ci.read_text().replace("actions/checkout@v7\n", "actions/checkout@v7.0.1\n")
+    ci.write_text(narrowed, encoding="utf-8")
+    refs = workflow_action_refs(YAML(typ="safe").load(narrowed))
+    assert "actions/checkout@v7.0.1" in refs
+    lock_body = "".join(f"    - '{r}'\n" for r in refs)
+    _write(
+        tmp_path,
+        ".github/workflows/actions.lock",
+        f"version: 'v0.0.3'\nworkflows:\n  '.github/workflows/ci.yml':\n{lock_body}",
+    )
+
+    (tmp_path / "package.json").write_text('{"name": "w", "scripts": {"test": "vitest"}}', encoding="utf-8")
+    (tmp_path / "package-lock.json").write_text("{}", encoding="utf-8")
+    result = runner.invoke(app, args)
+
+    assert result.exit_code == 0
+    jobs = _uses(ci.read_text())
+    assert set(jobs) == {"test-python", "test-node"}
+    assert jobs["test-python"] == refs
+    assert jobs["test-node"][0] == "actions/checkout@v7.0.1"
+    out = " ".join(result.stdout.split())
+    assert "jobs.test: renamed to jobs.test-python" in out
+    assert "which has no entry for: actions/setup-node@v7" in out

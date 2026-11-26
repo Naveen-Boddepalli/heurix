@@ -14,12 +14,14 @@ from rich.panel import Panel
 
 from heurix import __version__
 from heurix.core.context import ProjectContext
-from heurix.core.drift import DriftDetector
+from heurix.core.drift import DriftDetector, DriftFinding
 from heurix.core.hooks import install_pre_commit_hook
 from heurix.core.lockfile import LOCK_COMMAND, LOCKFILE_PATH, LockfileError, load_lockfile, workflow_action_refs
 from heurix.core.merger import SmartMerger, YamlSyntaxError
 from heurix.core.pinning import WORKFLOWS_DIR, pin_workflows, workflow_files
 from heurix.core.policy import HeurixPolicy
+from heurix.core.security import RULES as SECURITY_RULES
+from heurix.core.security import audit_workflows
 from heurix.core.validator import PreflightValidator
 from heurix.detectors import analyze_repository
 from heurix.synthesizers import synthesize_all
@@ -39,6 +41,7 @@ from heurix.ui.prompts import (
     prompt_k8s_generation,
     resolve_context_ambiguities,
 )
+from heurix.ui.report import REPORT_FORMATS, render_json, render_sarif
 
 app = typer.Typer(
     name="hx",
@@ -47,6 +50,8 @@ app = typer.Typer(
     add_completion=False,
 )
 console = Console()
+# Diagnostics go here when stdout carries a machine-readable report.
+err_console = Console(stderr=True)
 
 
 def resolve_safe_path(base_dir: Path, rel_path: str | Path) -> Path:
@@ -95,6 +100,7 @@ def _synthesize_or_exit(
     *,
     include_k8s: bool,
     include_dependabot: bool,
+    out: Console | None = None,
 ) -> dict[str, str]:
     """Run synthesize_all() and exit cleanly with code 1 on SEC-01 template/path ValueError."""
     try:
@@ -104,7 +110,7 @@ def _synthesize_or_exit(
             include_dependabot=include_dependabot,
         )
     except ValueError as e:
-        console.print(
+        (out or console).print(
             Panel.fit(
                 f"[bold red]Security Error:[/bold red] {e}",
                 title="Template / Path Security Error",
@@ -114,10 +120,10 @@ def _synthesize_or_exit(
         raise typer.Exit(code=1) from e
 
 
-def _print_context_warnings(context: ProjectContext) -> None:
+def _print_context_warnings(context: ProjectContext, out: Console | None = None) -> None:
     """Show problems found while scanning (bad manifests, invalid policy)."""
     for warning in context.warnings:
-        console.print(f"[yellow]⚠ Warning:[/yellow] {escape(warning)}")
+        (out or console).print(f"[yellow]⚠ Warning:[/yellow] {escape(warning)}")
 
 
 def version_callback(value: bool):
@@ -446,16 +452,33 @@ def diff(
 @app.command()
 def check(
     path: str = typer.Option(".", "--path", "-p", help="Root directory of repository."),
+    security: bool = typer.Option(
+        False,
+        "--security",
+        help="Also audit every workflow for security issues (permissions, unpinned actions, injection).",
+    ),
+    output_format: str = typer.Option(
+        "text", "--format", "-f", help="Report format: text, json, or sarif (for GitHub code scanning)."
+    ),
 ):
     """
     Continuous drift detection: verifies whether existing YAML configs match codebase requirements.
-    Exits with code 1 if drift is detected (ideal for CI and git pre-commit hooks).
+    Exits with code 1 if drift (or, with --security, a security issue) is found.
     """
+    output_format = output_format.lower()
+    if output_format not in REPORT_FORMATS:
+        err_console.print(
+            f"[red]Unknown --format '{escape(output_format)}'. Use one of: {', '.join(REPORT_FORMATS)}.[/red]"
+        )
+        raise typer.Exit(code=2)
+    # Keep stdout for the report itself in json/sarif mode.
+    out = console if output_format == "text" else err_console
+
     repo_path = _resolve_repo_dir_or_exit(path)
     context = analyze_repository(repo_path)
     if context.policy_error:
         # A drift gate that silently drops the policy reports misleading results.
-        console.print(
+        out.print(
             Panel.fit(
                 f"[bold red]Error:[/bold red] {escape(context.policy_error)}\n"
                 "[dim]Fix .heurix.toml so 'hx check' can apply your policy.[/dim]",
@@ -464,32 +487,55 @@ def check(
             )
         )
         raise typer.Exit(code=1)
-    _print_context_warnings(context)
+    _print_context_warnings(context, out)
     policy = HeurixPolicy.from_raw(context.policy_config)
-    include_dependabot = policy.ci.include_dependabot
-    include_k8s = bool(policy.ci.include_k8s)
     synthesized = _synthesize_or_exit(
         context,
-        include_k8s=include_k8s,
-        include_dependabot=include_dependabot,
+        include_k8s=bool(policy.ci.include_k8s),
+        include_dependabot=policy.ci.include_dependabot,
+        out=out,
     )
 
-    detector = DriftDetector(repo_path)
-    findings = detector.check_drift(context, synthesized)
+    findings = DriftDetector(repo_path).check_drift(context, synthesized)
+    if security:
+        findings.extend(audit_workflows(repo_path))
 
+    if output_format == "json":
+        typer.echo(render_json(findings))
+    elif output_format == "sarif":
+        typer.echo(render_sarif(findings))
+    else:
+        _print_findings_text(findings, security=security)
+    raise typer.Exit(code=1 if findings else 0)
+
+
+def _print_findings_text(findings: list[DriftFinding], *, security: bool) -> None:
     if not findings:
+        extra = ", and no security issues were found" if security else ""
         console.print(
-            "[bold green]✔ Zero Drift Detected:[/bold green] CI/CD workflows are completely synchronized with the codebase!"
+            f"[bold green]✔ Zero Drift Detected:[/bold green] CI/CD workflows are completely synchronized "
+            f"with the codebase{extra}!"
         )
-        raise typer.Exit(code=0)
+        return
+    drift = [f for f in findings if f.rule_id not in SECURITY_RULES]
+    audit = [f for f in findings if f.rule_id in SECURITY_RULES]
+    if drift:
+        console.print(f"[bold yellow]⚠️ Drift Detected ({len(drift)} issue(s)):[/bold yellow]\n")
+        for f in drift:
+            _print_finding(f)
+    if audit:
+        console.print(f"[bold yellow]🔒 Security Findings ({len(audit)} issue(s)):[/bold yellow]\n")
+        for f in audit:
+            _print_finding(f)
+        console.print("[dim]Silence a finding you accept with '# hx: ignore[<rule-id>]' on the flagged line.[/dim]")
 
-    console.print(f"[bold yellow]⚠️ Drift Detected ({len(findings)} issue(s)):[/bold yellow]\n")
-    for f in findings:
-        color = "red" if f.severity == "ERROR" else "yellow"
-        console.print(f"[{color}][bold]{f.file_path}:[/bold] {f.issue}[/{color}]")
-        console.print(f"  [dim]↳ Recommendation: {f.recommendation}[/dim]\n")
 
-    raise typer.Exit(code=1)
+def _print_finding(f: DriftFinding) -> None:
+    color = "red" if f.severity == "ERROR" else "yellow"
+    where = f"{f.file_path}:{f.line}" if f.line else f.file_path
+    tag = "" if f.rule_id == "drift" else f" [dim]{escape('[' + f.rule_id + ']')}[/dim]"
+    console.print(f"[{color}][bold]{escape(where)}:[/bold] {escape(f.issue)}[/{color}]{tag}")
+    console.print(f"  [dim]↳ Recommendation: {escape(f.recommendation)}[/dim]\n")
 
 
 @app.command()

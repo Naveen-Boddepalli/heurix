@@ -51,7 +51,7 @@ qa: lint typecheck cov perf
 	$(RUFF) format --check .
 
 check:
-	$(HX) check
+	$(HX) check --security
 
 build:
 	$(PYTHON) -c "from setuptools.build_meta import build_sdist; build_sdist('dist')"

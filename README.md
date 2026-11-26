@@ -115,10 +115,16 @@ Compare existing repository configs against synthesized & smart-merged outputs w
 hx diff
 ```
 
-### 3. `hx check` (Continuous Drift Detection)
+### 3. `hx check` (Continuous Drift Detection & Security Audit)
 Verifies structurally whether `.github/workflows/ci.yml` and `.github/dependabot.yml` match current codebase dependencies, pinned versions, backing services, and package managers. Exits with code `0` if synchronized, or `1` if drift is detected (ideal for CI and Git pre-commit hooks):
 ```bash
 hx check
+```
+
+Add `--security` to audit every workflow for excessive token permissions, unpinned third-party actions, `pull_request_target`, template injection and persisted checkout credentials (rule IDs match zizmor). `--format json` or `--format sarif` prints a machine-readable report; SARIF uploads to GitHub code scanning:
+```bash
+hx check --security
+hx check --security --format sarif > heurix.sarif
 ```
 
 ### 4. `hx pin`

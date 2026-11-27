@@ -37,6 +37,32 @@ repos:
   run: hx check --security
 ```
 
+### GitHub Action
+
+The repository is also a composite GitHub Action that installs Heurix and runs `hx check`. It needs `python3` 3.10 or newer on the runner (GitHub's Ubuntu and macOS runners have it; elsewhere add `actions/setup-python` first) and doesn't support Windows runners. Pin it to a release's commit SHA, as `hx check --security` recommends for any third-party action:
+
+```yaml
+- uses: actions/checkout@v7
+  with:
+    persist-credentials: false
+- uses: Naveen-Boddepalli/heurix@<commit-sha>  # vX.Y.Z
+  with:
+    security: true
+```
+
+The action installs the Heurix version at the ref you pin, unless you set `version`.
+
+| Input | Default | Description |
+|-------|---------|-------------|
+| `path` | `.` | Root directory of the repository to check. |
+| `security` | `true` | Also run the security audit (`--security`). |
+| `format` | `text` | `text`, `json` or `sarif`. |
+| `output-file` | (log) | Write the report to this file instead of the job log. |
+| `fail-on-findings` | `true` | Set to `false` to let later steps run (for example a SARIF upload) and read the `exit-code` output instead. Invalid input still fails the step. |
+| `version` | (action ref) | Install this Heurix version from PyPI instead, e.g. `0.4.0`. |
+
+The `exit-code` output is `0` with no findings, `1` with findings, and `2` for invalid input.
+
 ## Security audit (`hx check --security`)
 
 `--security` also audits every workflow in `.github/workflows/`, including ones Heurix didn't generate. Rule IDs match the equivalent [zizmor](https://docs.zizmor.sh/) audits, so you can look a finding up, and silence it, the same way in both tools.
@@ -102,4 +128,14 @@ jobs:
       - uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: heurix.sarif
+```
+
+With the GitHub Action, replace the `pipx install` and `hx check` steps with:
+
+```yaml
+      - uses: Naveen-Boddepalli/heurix@<commit-sha>  # vX.Y.Z
+        with:
+          format: sarif
+          output-file: heurix.sarif
+          fail-on-findings: false
 ```

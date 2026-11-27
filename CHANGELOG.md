@@ -8,6 +8,9 @@ All notable changes to Heurix (`hx`) are documented here.
 - **`hx check --security` audits every workflow.** It reports `permissions: write-all` and jobs running with the default token, third-party actions and reusable workflows not pinned to a commit SHA, `pull_request_target` and `workflow_run` triggers, checking out pull request code in them, template injection of attacker-controlled values (`${{ github.event.issue.title }}`, commit messages, `github.head_ref`) into scripts, `actions/checkout` keeping the job token, and `secrets: inherit`. Rule IDs match zizmor's, and `# hx: ignore[rule-id]` or `# zizmor: ignore[rule-id]` on a line silences that finding. Heurix's generated workflows have no findings except third-party tags, which `hx pin` clears.
 - **`hx check --format json|sarif`.** JSON gives scripts a stable report. SARIF 2.1.0 uploads to GitHub code scanning with `github/codeql-action/upload-sarif`, with security severity scores for security rules. Scan warnings go to stderr so stdout holds only the report.
 
+### Added — GitHub Action
+- **`uses: Naveen-Boddepalli/heurix@<sha>`.** The repository is now a composite GitHub Action that installs Heurix and runs `hx check`. Inputs: `path`, `security` (default `true`), `format`, `output-file`, `fail-on-findings` (set to `false` to upload a SARIF report before failing) and `version`. It installs the Heurix version at the pinned ref unless `version` is set, and sets an `exit-code` output.
+
 ### Changed
 - Heurix's own workflows are pinned to commit SHAs and no longer keep checkout credentials.
 

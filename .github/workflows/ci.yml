@@ -78,3 +78,21 @@ jobs:
         run: mypy
       - name: Drift and workflow security check (hx check --security)
         run: hx check --security
+  action:
+    name: GitHub Action (action.yml)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          persist-credentials: false
+      - name: Run the Heurix action on this repository
+        id: heurix
+        uses: ./
+        with:
+          security: 'true'
+      - name: Check the action's output
+        env:
+          EXIT_CODE: ${{ steps.heurix.outputs.exit-code }}
+        run: test "$EXIT_CODE" = 0

@@ -143,7 +143,7 @@ Successfully synthesized 8 file(s)!`,
 +      - name: Checkout repository
 +        uses: actions/checkout@v7
 +      - name: Install uv
-+        uses: astral-sh/setup-uv@v5
++        uses: astral-sh/setup-uv@v10.4.0
 +      - name: Set up Python 3.12
 +        uses: actions/setup-python@v7.1.0
        # @heurix:preserve
@@ -154,13 +154,42 @@ Successfully synthesized 8 file(s)!`,
     title: 'Check for drift',
     desc: 'Exits 1 if the workflow no longer matches the repo: a missing service, an old runtime version, two services on one port, or a broken .heurix.toml. Useful in CI and as a pre-commit hook.',
     snippet: `$ hx check
-Drift Detected (2 issue(s)):
+⚠️ Drift Detected (2 issue(s)):
 
-[ERROR] .github/workflows/ci.yml: Job 'test': services 'postgres', 'db' all bind host port 5432; only one can start, so the job will fail.
-  Recommendation: Run 'hx generate' to merge duplicate services, or remove the extra service.
+.github/workflows/ci.yml: Job 'test': services 'postgres', 'db' all bind host port 5432; only one can start, so the job will fail.
+  ↳ Recommendation: Run 'hx generate' to merge duplicate services, or remove the extra service.
 
-[WARNING] .github/workflows/ci.yml: Service 'redis' is required by codebase dependencies (python dependencies) but missing from workflow.
-  Recommendation: Run 'hx generate' to inject service 'redis'.`,
+.github/workflows/ci.yml: Service 'redis' is required by codebase dependencies (python dependencies) but missing from workflow.
+  ↳ Recommendation: Run 'hx generate' to inject service 'redis'.`,
+  },
+  {
+    cmd: 'hx check --security',
+    title: 'Audit workflow security',
+    desc: 'Also checks every workflow for write-all permissions, template injection, unpinned third-party actions, risky pull_request_target / workflow_run checkouts, and checkout tokens left in .git/config. Rule IDs match zizmor; add --format sarif to upload to GitHub code scanning.',
+    snippet: `$ hx check --security
+🔒 Security Findings (3 issue(s)):
+
+.github/workflows/ci.yml:38: jobs.test.steps[1] (Install uv) uses astral-sh/setup-uv@v10.4.0, a tag or branch its owner can move to different code. [unpinned-uses]
+  ↳ Recommendation: Pin it to a commit SHA with 'hx pin', or lock the workflow with 'gh actions-lock'.
+
+.github/workflows/triage.yml:5: The workflow grants 'permissions: write-all' to every job. [excessive-permissions]
+  ↳ Recommendation: Set 'permissions: contents: read' and give each job that writes only the scopes it needs.
+
+.github/workflows/triage.yml:11: jobs.label.steps[1] expands github.event.issue.title into a script; a crafted value can run arbitrary commands with the job's token and secrets. [template-injection]
+  ↳ Recommendation: Pass the value through 'env:' (for example 'TITLE: \${{ github.event.issue.title }}') and use "$TITLE" in the script.
+
+Silence a finding you accept with '# hx: ignore[<rule-id>]' on the flagged line.`,
+  },
+  {
+    cmd: 'hx pin',
+    title: 'Pin actions to SHAs',
+    desc: 'Rewrites uses: x@v7 to uses: x@<sha>  # v7 in every workflow, line by line so comments stay. Refs are resolved with git ls-remote; this is the only command that uses the network. --dry-run previews the changes.',
+    snippet: `$ hx pin --dry-run
+.github/workflows/ci.yml:34 actions/checkout@v7 → 3d3c42e5aac5ba805825da76410c181273ba90b1
+.github/workflows/ci.yml:38 astral-sh/setup-uv@v10.4.0 → 1db35dd8eee11c5894872e0b383ae6c406cf738d
+.github/workflows/ci.yml:42 actions/setup-python@v7.1.0 → 6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
+
+Dry run: would pin 3 action ref(s) in 1 file(s).`,
   },
 ];
 

@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { HX_VERSION, INSTALL_METHODS } from '../data/siteData';
+import { INSTALL_METHODS } from '../data/siteData';
 import { links } from '../lib/links';
 import { useMagnetic, useTabIndicator } from '../lib/usePointerVars';
 import { CodeBlock } from './CodeBlock';
@@ -62,7 +62,8 @@ export function Hero() {
           </div>
 
           <p className="hero-release">
-            v{HX_VERSION} adds CI path filters (<code>[ci].paths</code> and <code>[ci].paths_ignore</code>).{' '}
+            New: <code>hx check --security</code> audits every workflow for unsafe permissions, injection, and
+            unpinned actions, and <code>hx pin</code> pins actions to commit SHAs.{' '}
             <a href={links.docs('changelog')}>Changelog</a>
           </p>
         </div>

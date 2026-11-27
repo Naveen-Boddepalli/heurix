@@ -1,7 +1,15 @@
 # Heurix (`hx`)
 
+[![CI](https://github.com/Naveen-Boddepalli/heurix/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Naveen-Boddepalli/heurix/actions/workflows/ci.yml)
+[![PyPI version](https://img.shields.io/pypi/v/heurix)](https://pypi.org/project/heurix/)
+[![Python versions](https://img.shields.io/pypi/pyversions/heurix)](https://pypi.org/project/heurix/)
+[![License: MIT](https://img.shields.io/pypi/l/heurix)](LICENSE)
+
 > **Deterministic Codebase Scanner & Automated YAML Synthesizer**  
 > *100% Deterministic • Offline-Capable • Deep Heuristic Analysis • Non-Destructive AST Smart Merge*
+
+<!-- TODO(demo-gif): add a short screen recording of `hx generate` and `hx check --security` here, e.g.
+     ![hx generate and hx check --security in a sample repo](docs/assets/demo.gif) -->
 
 ---
 
@@ -27,6 +35,16 @@
   - `docs/kubernetes-and-ci.md` — synthesized GitHub Actions, Dependabot, and `k8s/` outputs
   - `docs/drift-detection.md` — running `hx check` in CI and pre-commit hooks
   - `docs/architecture.md` — unidirectional 5-layer IR architecture
+
+### How Heurix Compares
+| Tool | What it does | How Heurix relates |
+|------|--------------|--------------------|
+| GitHub starter workflows | Language templates offered in the Actions tab, which you edit by hand | `hx generate` fills in runtime versions, the package manager, backing services and env vars from the repo, and re-running it merges into your edited file instead of replacing it |
+| [zizmor](https://github.com/zizmorcore/zizmor) | Security audit of GitHub Actions workflows | `hx check --security` runs 7 checks named after the equivalent zizmor audits and honours `# zizmor: ignore[...]`; use zizmor for a broader audit |
+| [actionlint](https://github.com/rhysd/actionlint) | Syntax, expression and shell checks for workflow files | Heurix validates generated YAML against a schema but doesn't lint workflow syntax; run both |
+| [pinact](https://github.com/suzuki-shunsuke/pinact), [ratchet](https://github.com/sethvargo/ratchet) | Pin action refs to commit SHAs | `hx pin` does the same for `.github/workflows/*.yml`, resolving tags with `git ls-remote` |
+
+Heurix also checks a workflow against the repo it lives in (`hx check` reports missing services, outdated runtime versions and package-manager mismatches), and generates Dependabot config and Kubernetes manifests from the same scan.
 
 ---
 
@@ -189,6 +207,7 @@ heurix/
 │       │   ├── merger.py           # ruamel.yaml recursive AST merge & comment preservation
 │       │   ├── validator.py        # Multi-doc pre-flight JSON schema validator
 │       │   ├── drift.py            # Structural AST drift detection engine
+│       │   ├── security.py         # hx check --security: workflow security audit rules
 │       │   ├── lockfile.py         # GitHub Actions workflow lockfile (actions.lock) reader
 │       │   └── pinning.py          # hx pin: resolve action tags to commit SHAs
 │       ├── detectors/              # Modular language, infra & cloud providers
@@ -209,7 +228,8 @@ heurix/
 │       └── ui/
 │           ├── console.py          # Rich explain-tree and summary tables
 │           ├── differ.py           # Colorized terminal diff viewer
-│           └── prompts.py          # Interactive conflict resolution prompts
+│           ├── prompts.py          # Interactive conflict resolution prompts
+│           └── report.py           # hx check --format json / sarif report renderers
 └── tests/                          # pytest suite (coverage gated in CI)
 ```
 
@@ -224,8 +244,8 @@ heurix/
 # Run every CI gate: ruff lint, ruff format check, mypy, and tests with coverage (85% floor)
 make qa
 
-# Check repository CI drift
-.venv/bin/hx check
+# Check this repo's own workflows for drift and security issues (same as `make check` and CI)
+.venv/bin/hx check --security
 
 # Build docs & interactive playground locally
 make site-build

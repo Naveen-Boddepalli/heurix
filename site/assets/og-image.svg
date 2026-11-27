@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" fill="none">
+  <!-- Social preview card (og:image, twitter:image). Regenerate site/public/og-image.png on macOS: sips -s format png site/assets/og-image.svg (with the out option) -->
+  <rect width="1200" height="630" fill="#0f172a" />
+  <g transform="translate(96 96) scale(6)">
+    <rect width="32" height="32" rx="7" fill="#1e293b" />
+    <path d="M16 4.5L26 10.25V21.75L16 27.5L6 21.75V10.25L16 4.5Z" stroke="#22d3ee" stroke-width="2" stroke-linejoin="round" />
+    <path d="M11 11.5V20.5M11 16H16M16 11.5V20.5" stroke="#f8fafc" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+    <path d="M19.5 13.5L23 19.5M23 13.5L19.5 19.5" stroke="#22d3ee" stroke-width="2" stroke-linecap="round" />
+  </g>
+  <text x="336" y="180" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="88" font-weight="700" fill="#f8fafc">Heurix</text>
+  <text x="336" y="252" font-family="Menlo, Monaco, monospace" font-size="40" fill="#22d3ee">$ hx generate</text>
+  <text x="96" y="410" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="52" font-weight="700" fill="#f8fafc">CI config generated from what's</text>
+  <text x="96" y="474" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="52" font-weight="700" fill="#f8fafc">actually in your repo.</text>
+  <text x="96" y="550" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="30" fill="#94a3b8">GitHub Actions · Dependabot · Kubernetes · workflow security audit</text>
+</svg>

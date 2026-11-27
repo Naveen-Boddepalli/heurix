@@ -1,0 +1,88 @@
+name: Heurix check
+description: Fail CI when workflows drift from the repository, or (optionally) have security issues, using hx check.
+author: Heurix Contributors
+branding:
+  icon: check-circle
+  color: blue
+
+inputs:
+  path:
+    description: Root directory of the repository to check.
+    required: false
+    default: "."
+  security:
+    description: Also audit every workflow for security issues (hx check --security).
+    required: false
+    default: "true"
+  format:
+    description: Report format, one of text, json or sarif.
+    required: false
+    default: text
+  output-file:
+    description: Write the report to this file instead of the log (useful with format sarif or json).
+    required: false
+    default: ""
+  fail-on-findings:
+    description: Fail the step when hx check reports drift or a security finding. Set to false to upload a report first and fail later.
+    required: false
+    default: "true"
+  version:
+    description: Heurix version to install from PyPI, e.g. 0.4.0. Empty installs the version at the action ref you use.
+    required: false
+    default: ""
+
+outputs:
+  exit-code:
+    description: Exit code of hx check (0 no findings, 1 findings, 2 bad input).
+    value: ${{ steps.check.outputs.exit-code }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install Heurix
+      shell: bash
+      env:
+        HX_VERSION: ${{ inputs.version }}
+        HX_SOURCE: ${{ github.action_path }}
+      run: |
+        set -euo pipefail
+        python3 -c 'import sys; sys.exit(sys.version_info < (3, 10))' || {
+          echo "::error::Heurix needs Python 3.10 or newer on PATH as python3. Add actions/setup-python before this step."
+          exit 1
+        }
+        venv="$RUNNER_TEMP/heurix-venv"
+        python3 -m venv "$venv"
+        if [ -n "$HX_VERSION" ]; then
+          "$venv/bin/python" -m pip install --quiet --disable-pip-version-check "heurix==$HX_VERSION"
+        else
+          "$venv/bin/python" -m pip install --quiet --disable-pip-version-check "$HX_SOURCE"
+        fi
+        echo "$venv/bin" >> "$GITHUB_PATH"
+        "$venv/bin/hx" --version
+
+    - name: Run hx check
+      id: check
+      shell: bash
+      env:
+        HX_PATH: ${{ inputs.path }}
+        HX_SECURITY: ${{ inputs.security }}
+        HX_FORMAT: ${{ inputs.format }}
+        HX_OUTPUT_FILE: ${{ inputs.output-file }}
+        HX_FAIL: ${{ inputs.fail-on-findings }}
+      run: |
+        set -uo pipefail
+        args=(check --path "$HX_PATH" --format "$HX_FORMAT")
+        if [ "$HX_SECURITY" = "true" ]; then
+          args+=(--security)
+        fi
+        if [ -n "$HX_OUTPUT_FILE" ]; then
+          hx "${args[@]}" > "$HX_OUTPUT_FILE"
+        else
+          hx "${args[@]}"
+        fi
+        code=$?
+        echo "exit-code=$code" >> "$GITHUB_OUTPUT"
+        if [ "$code" -ne 0 ] && { [ "$HX_FAIL" = "true" ] || [ "$code" -ne 1 ]; }; then
+          exit "$code"
+        fi
+        exit 0

@@ -145,6 +145,13 @@ hx check --security
 hx check --security --format sarif > heurix.sarif
 ```
 
+In GitHub Actions you can also use Heurix as an action; see [docs/drift-detection.md](docs/drift-detection.md#github-action) for its inputs:
+```yaml
+- uses: Naveen-Boddepalli/heurix@<commit-sha>  # vX.Y.Z
+  with:
+    security: true
+```
+
 ### 4. `hx pin`
 Pin every workflow action to a full commit SHA, keeping the tag as a comment that Dependabot uses to update it (`uses: actions/checkout@<sha>  # v7`). Refs are resolved with `git ls-remote`, so no token is needed. In repositories that use a GitHub Actions lockfile (`.github/workflows/actions.lock`), use `gh actions-lock` instead; `hx generate` keeps locked refs and `hx check` reports actions missing from the lockfile.
 ```bash
